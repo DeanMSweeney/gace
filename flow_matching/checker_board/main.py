@@ -48,12 +48,12 @@ class Flow(nn.Module):
 
 def sample_from():
     '''
-    Defines sampling procedures from x1 and x0
+    Defines sampling procedures from x1 and x0 - in this case, we will generate a checkerbaord distribution
     '''
 
     # Generate data for a dummy distribution (testing purposes only)
-    rv1 = torch.rand(1000) * 4 - 2 
-    rv2 = torch.rand(1000) * 4 - 2 
+    rv1 = torch.rand(10000) * 4 - 2 
+    rv2 = torch.rand(10000) * 4 - 2 
     mask = (torch.floor(rv1) + torch.floor(rv2)) % 2 == 0  
 
     x1 = torch.stack((rv1[mask], rv2[mask]), dim=1)
@@ -66,7 +66,7 @@ def train():
     '''
     Defines the training procedure for the neural network
     '''
-    for _ in range(1000000):
+    for _ in range(10000000): #10000000
         x0, x1 = sample_from()
         t = torch.rand(len(x1), 1)
         xt = (1 - t) * x0 + t * x1
@@ -90,26 +90,44 @@ optimizer = torch.optim.Adam(flow.parameters(), 1e-3)
 loss_fn = nn.MSELoss()
 train()
 
-
 ######################################################
 # Model sampling
 ######################################################
-'''
 x = torch.randn(300, 2)
 n_steps = 8
 fig, axes = plt.subplots(1, n_steps + 1, figsize=(30, 4), sharex=True, sharey=True)
 time_steps = torch.linspace(0, 1.0, n_steps + 1)
 
-axes[0].scatter(x.detach()[:, 0], x.detach()[:, 1], s=10)
+axes[0].scatter(x.detach()[:, 0], x.detach()[:, 1], s=100, alpha=0.50)
 axes[0].set_title(f't = {time_steps[0]:.2f}')
 axes[0].set_xlim(-2.0, 2.0)
 axes[0].set_ylim(-2.0, 2.0)
 
 for i in range(n_steps):
     x = flow.step(xt=x, t_start=time_steps[i], t_end=time_steps[i + 1])
-    axes[i + 1].scatter(x.detach()[:, 0], x.detach()[:, 1], s=10)
+    axes[i + 1].scatter(x.detach()[:, 0], x.detach()[:, 1], s=100, alpha=0.50)
     axes[i + 1].set_title(f't = {time_steps[i + 1]:.2f}')
 
-plt.tight_layout()
+
+
+######################################################
+# Generate p0 (checker board)
+######################################################
+# Generate data for a dummy distribution (testing purposes only)
+rv1 = torch.rand(10000) * 4 - 2 
+rv2 = torch.rand(10000) * 4 - 2 
+mask = (torch.floor(rv1) + torch.floor(rv2)) % 2 == 0  
+
+x1 = torch.stack((rv1[mask], rv2[mask]), dim=1)
+x1_np = x1.numpy()
+
+# Plot the checkerboard distribution
+plt.figure(figsize=(6, 6))
+plt.scatter(x1_np[:, 0], x1_np[:, 1], s=100, alpha=0.50)
+plt.title("Checkerboard Distribution (PyTorch)")
+plt.xlabel("X")
+plt.ylabel("Y")
+plt.xlim(-2, 2)
+plt.ylim(-2, 2)
+
 plt.show()
-'''
