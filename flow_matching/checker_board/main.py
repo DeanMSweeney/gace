@@ -52,11 +52,14 @@ def sample_from():
     '''
 
     # Generate data for a dummy distribution (testing purposes only)
+    '''
     rv1 = torch.rand(10000) * 4 - 2 
     rv2 = torch.rand(10000) * 4 - 2 
     mask = (torch.floor(rv1) + torch.floor(rv2)) % 2 == 0  
 
     x1 = torch.stack((rv1[mask], rv2[mask]), dim=1)
+    '''
+    x1 = Tensor(make_moons(256, noise=0.05)[0])
     x0 = torch.randn_like(x1)
 
     return x0, x1
@@ -66,7 +69,7 @@ def train():
     '''
     Defines the training procedure for the neural network
     '''
-    for _ in range(10000000): #10000000
+    for _ in range(10000): #10000000
         x0, x1 = sample_from()
         t = torch.rand(len(x1), 1)
         xt = (1 - t) * x0 + t * x1
@@ -104,7 +107,7 @@ axes[0].set_xlim(-2.0, 2.0)
 axes[0].set_ylim(-2.0, 2.0)
 
 for i in range(n_steps):
-    x = flow.step(xt=x, t_start=time_steps[i], t_end=time_steps[i + 1])
+    x = flow.step(xt=x, t_start=time_steps[i], t_end=time_steps[i + 1]) # sample xt from neural network 
     axes[i + 1].scatter(x.detach()[:, 0], x.detach()[:, 1], s=100, alpha=0.50)
     axes[i + 1].set_title(f't = {time_steps[i + 1]:.2f}')
 
