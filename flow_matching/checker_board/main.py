@@ -101,14 +101,14 @@ n_steps = 8
 fig, axes = plt.subplots(1, n_steps + 1, figsize=(30, 4), sharex=True, sharey=True)
 time_steps = torch.linspace(0, 1.0, n_steps + 1)
 
-axes[0].scatter(x.detach()[:, 0], x.detach()[:, 1], s=100, alpha=0.50)
+axes[0].scatter(x.detach()[:, 0], x.detach()[:, 1], s=10, alpha=0.50)
 axes[0].set_title(f't = {time_steps[0]:.2f}')
 axes[0].set_xlim(-2.0, 2.0)
 axes[0].set_ylim(-2.0, 2.0)
 
 for i in range(n_steps):
     x = flow.step(xt=x, t_start=time_steps[i], t_end=time_steps[i + 1]) # sample xt from neural network 
-    axes[i + 1].scatter(x.detach()[:, 0], x.detach()[:, 1], s=100, alpha=0.50)
+    axes[i + 1].scatter(x.detach()[:, 0], x.detach()[:, 1], s=10, alpha=0.50)
     axes[i + 1].set_title(f't = {time_steps[i + 1]:.2f}')
 
 
@@ -126,7 +126,7 @@ x1_np = x1.numpy()
 
 # Plot the checkerboard distribution
 plt.figure(figsize=(6, 6))
-plt.scatter(x1_np[:, 0], x1_np[:, 1], s=100, alpha=0.50)
+plt.scatter(x1_np[:, 0], x1_np[:, 1], s=10, alpha=0.50)
 plt.title("Checkerboard Distribution (PyTorch)")
 plt.xlabel("X")
 plt.ylabel("Y")
@@ -134,3 +134,31 @@ plt.xlim(-2, 2)
 plt.ylim(-2, 2)
 
 plt.show()
+
+
+
+
+
+
+class Car:
+    wheels = 4  # Class attribute (shared by all instances)
+
+    def __init__(self, make: str, model: str):
+        self.make = make    # Instance attribute (defined in __init__)
+        self.model = model  # Instance attribute (defined in __init__)
+
+    def set_year(self, year: int):
+        self.year = year  # Instance attribute (defined in another method)
+
+# Create an instance
+my_car = Car(make="Volkswagen", model="Taos")
+
+# Access class attribute
+print(f"All cars have {my_car.wheels} wheels.")  # Output: All cars have 4 wheels.
+
+# Access instance attributes
+print(f"My car is a {my_car.make} {my_car.model}.")  # Output: My car is a Volkswagen Taos.
+
+# Set year using a method
+my_car.set_year(2023)
+print(f"My car is from {my_car.year}.")  # Output: My car is from 2023.
