@@ -5,7 +5,6 @@ This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 """
 
-
 from typing import Optional
 
 import ase.db.sqlite
@@ -50,26 +49,20 @@ class AtomsToGraphs:
         radius (int or float): Cutoff radius in Angstroms to search for neighbors.
         r_energy (bool): Return the energy with other properties. Default is False, so the energy will not be returned.
         r_forces (bool): Return the forces with other properties. Default is False, so the forces will not be returned.
-        r_distances (bool): Return the distances with other properties.
-        Default is False, so the distances will not be returned.
+        r_distances (bool): Return the distances with other properties. Default is False, so the distances will not be returned.
         r_edges (bool): Return interatomic edges with other properties. Default is True, so edges will be returned.
-        r_fixed (bool): Return a binary vector with flags for fixed (1) vs free (0) atoms.
-        Default is True, so the fixed indices will be returned.
-        r_pbc (bool): Return the periodic boundary conditions with other properties.
-        Default is False, so the periodic boundary conditions will not be returned.
+        r_fixed (bool): Return a binary vector with flags for fixed (1) vs free (0) atoms. Default is True, so the fixed indices will be returned.
+        r_pbc (bool): Return the periodic boundary conditions with other properties. Default is False, so the periodic boundary conditions will not be returned.
 
     Attributes:
         max_neigh (int): Maximum number of neighbors to consider.
         radius (int or float): Cutoff radius in Angstoms to search for neighbors.
         r_energy (bool): Return the energy with other properties. Default is False, so the energy will not be returned.
         r_forces (bool): Return the forces with other properties. Default is False, so the forces will not be returned.
-        r_distances (bool): Return the distances with other properties.
-        Default is False, so the distances will not be returned.
+        r_distances (bool): Return the distances with other properties. Default is False, so the distances will not be returned.
         r_edges (bool): Return interatomic edges with other properties. Default is True, so edges will be returned.
-        r_fixed (bool): Return a binary vector with flags for fixed (1) vs free (0) atoms.
-        Default is True, so the fixed indices will be returned.
-        r_pbc (bool): Return the periodic boundary conditions with other properties.
-        Default is False, so the periodic boundary conditions will not be returned.
+        r_fixed (bool): Return a binary vector with flags for fixed (1) vs free (0) atoms. Default is True, so the fixed indices will be returned.
+        r_pbc (bool): Return the periodic boundary conditions with other properties. Default is False, so the periodic boundary conditions will not be returned.
 
     """
 
@@ -115,6 +108,9 @@ class AtomsToGraphs:
         _offsets = _offsets[_nonmax_idx]
 
         return _c_index, _n_index, n_distance, _offsets
+    
+    def _check(self):
+        print("New method activated")
 
     def _reshape_features(self, c_index, n_index, n_distance, offsets):
         """Stack center and neighbor index and reshapes distances,
@@ -147,6 +143,8 @@ class AtomsToGraphs:
             and optionally, energy, forces, distances, edges, and periodic boundary conditions.
             Optional properties can included by setting r_property=True when constructing the class.
         """
+        
+        print("DEBUG: Entered convert method2!", flush=True)
 
         # set the atomic numbers, positions, and cell
         atomic_numbers = torch.Tensor(atoms.get_atomic_numbers())
