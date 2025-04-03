@@ -52,14 +52,14 @@ def sample_from():
     '''
 
     # Generate data for a dummy distribution (testing purposes only)
-    '''
-    rv1 = torch.rand(10000) * 4 - 2 
-    rv2 = torch.rand(10000) * 4 - 2 
+    
+    rv1 = torch.rand(100000) * 4 - 2 
+    rv2 = torch.rand(100000) * 4 - 2 
     mask = (torch.floor(rv1) + torch.floor(rv2)) % 2 == 0  
 
     x1 = torch.stack((rv1[mask], rv2[mask]), dim=1)
-    '''
-    x1 = Tensor(make_moons(256, noise=0.05)[0])
+    
+   # x1 = Tensor(make_moons(256, noise=0.05)[0])
     x0 = torch.randn_like(x1)
 
     return x0, x1
@@ -69,7 +69,7 @@ def train():
     '''
     Defines the training procedure for the neural network
     '''
-    for _ in range(10000): #10000000
+    for _ in range(100000): #10000000
         x0, x1 = sample_from()
         t = torch.rand(len(x1), 1)
         xt = (1 - t) * x0 + t * x1
@@ -101,6 +101,7 @@ n_steps = 8
 fig, axes = plt.subplots(1, n_steps + 1, figsize=(30, 4), sharex=True, sharey=True)
 time_steps = torch.linspace(0, 1.0, n_steps + 1)
 
+
 axes[0].scatter(x.detach()[:, 0], x.detach()[:, 1], s=10, alpha=0.50)
 axes[0].set_title(f't = {time_steps[0]:.2f}')
 axes[0].set_xlim(-2.0, 2.0)
@@ -110,7 +111,6 @@ for i in range(n_steps):
     x = flow.step(xt=x, t_start=time_steps[i], t_end=time_steps[i + 1]) # sample xt from neural network 
     axes[i + 1].scatter(x.detach()[:, 0], x.detach()[:, 1], s=10, alpha=0.50)
     axes[i + 1].set_title(f't = {time_steps[i + 1]:.2f}')
-
 
 
 ######################################################
@@ -125,21 +125,18 @@ x1 = torch.stack((rv1[mask], rv2[mask]), dim=1)
 x1_np = x1.numpy()
 
 # Plot the checkerboard distribution
-plt.figure(figsize=(6, 6))
+plt.figure(figsize=(4, 4))
 plt.scatter(x1_np[:, 0], x1_np[:, 1], s=10, alpha=0.50)
-plt.title("Checkerboard Distribution (PyTorch)")
-plt.xlabel("X")
-plt.ylabel("Y")
+plt.title("Checkerboard Distribution")
+plt.xlabel("X1")
+plt.ylabel("X2")
 plt.xlim(-2, 2)
 plt.ylim(-2, 2)
 
 plt.show()
 
 
-
-
-
-
+'''
 class Car:
     wheels = 4  # Class attribute (shared by all instances)
 
@@ -162,3 +159,4 @@ print(f"My car is a {my_car.make} {my_car.model}.")  # Output: My car is a Volks
 # Set year using a method
 my_car.set_year(2023)
 print(f"My car is from {my_car.year}.")  # Output: My car is from 2023.
+'''
