@@ -46,6 +46,8 @@ if typing.TYPE_CHECKING:
 
 
 @registry.register_model("gemnet_oc")
+
+
 class GemNetOC(nn.Module, GraphModelMixin):
     """
     Arguments
@@ -1323,7 +1325,13 @@ class GemNetOC(nn.Module, GraphModelMixin):
     def num_params(self) -> int:
         return sum(p.numel() for p in self.parameters())
 
+class GemNetOCNew(GemNetOC):
+    def __init__(self, ...):
+        super() (...)
 
+    def forward(self, data):
+        ....
+        return ...
 @registry.register_model("gemnet_oc_backbone")
 class GemNetOCBackbone(GemNetOC, BackboneInterface):
     @conditional_grad(torch.enable_grad())
