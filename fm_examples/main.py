@@ -134,29 +134,3 @@ plt.xlim(-2, 2)
 plt.ylim(-2, 2)
 
 plt.show()
-
-
-'''
-class Car:
-    wheels = 4  # Class attribute (shared by all instances)
-
-    def __init__(self, make: str, model: str):
-        self.make = make    # Instance attribute (defined in __init__)
-        self.model = model  # Instance attribute (defined in __init__)
-
-    def set_year(self, year: int):
-        self.year = year  # Instance attribute (defined in another method)
-
-# Create an instance
-my_car = Car(make="Volkswagen", model="Taos")
-
-# Access class attribute
-print(f"All cars have {my_car.wheels} wheels.")  # Output: All cars have 4 wheels.
-
-# Access instance attributes
-print(f"My car is a {my_car.make} {my_car.model}.")  # Output: My car is a Volkswagen Taos.
-
-# Set year using a method
-my_car.set_year(2023)
-print(f"My car is from {my_car.year}.")  # Output: My car is from 2023.
-'''
