@@ -1,4 +1,4 @@
-# AdsFlow
+# 🧪 AdsFlow 💻
 
 This repository contains code for implementing Conditional Flow Matching (CFM) for adsorbate placement and optimization on catalyst surfaces.
 
