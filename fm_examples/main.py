@@ -53,8 +53,8 @@ def sample_from():
 
     # Generate data for a dummy distribution (testing purposes only)
     
-    rv1 = torch.rand(100000) * 4 - 2 
-    rv2 = torch.rand(100000) * 4 - 2 
+    rv1 = torch.rand(10000) * 4 - 2 
+    rv2 = torch.rand(10000) * 4 - 2 
     mask = (torch.floor(rv1) + torch.floor(rv2)) % 2 == 0  
 
     x1 = torch.stack((rv1[mask], rv2[mask]), dim=1)
@@ -69,7 +69,7 @@ def train():
     '''
     Defines the training procedure for the neural network
     '''
-    for _ in range(100000): #10000000
+    for _ in range(10): #10000000
         x0, x1 = sample_from()
         t = torch.rand(len(x1), 1)
         xt = (1 - t) * x0 + t * x1
@@ -96,7 +96,8 @@ train()
 ######################################################
 # Model sampling
 ######################################################
-x = torch.randn(300, 2)
+print("Begin Inference")
+x = torch.randn(3000, 2)
 n_steps = 8
 fig, axes = plt.subplots(1, n_steps + 1, figsize=(30, 4), sharex=True, sharey=True)
 time_steps = torch.linspace(0, 1.0, n_steps + 1)
@@ -112,6 +113,8 @@ for i in range(n_steps):
     axes[i + 1].scatter(x.detach()[:, 0], x.detach()[:, 1], s=10, alpha=0.50)
     axes[i + 1].set_title(f't = {time_steps[i + 1]:.2f}')
 
+# save as .svg
+plt.savefig('q_p.svg', format='svg', dpi=300, bbox_inches='tight')
 
 ######################################################
 # Generate p0 (checker board)
@@ -132,5 +135,7 @@ plt.xlabel("X1")
 plt.ylabel("X2")
 plt.xlim(-2, 2)
 plt.ylim(-2, 2)
+# save as .svg
+plt.savefig('p_grnd.svg', format='svg', dpi=300, bbox_inches='tight')
 
 plt.show()
