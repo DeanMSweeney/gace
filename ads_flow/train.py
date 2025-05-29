@@ -1,8 +1,12 @@
 import torch
 from torch import Tensor, nn, optim
 import numpy as np
-from models.gnn_fm import FlowGNN
+from models.gemnet.gemnet_flow import GemNetOC
 from utils.atoms_to_graphs import AtomsToGraphs
+
+
+"""
+
 
 
 # Initialize model and optimizer
@@ -55,3 +59,4 @@ def train(model, train_loader, val_loader, epochs=1000):
                 f"Val Loss: {val_loss / len(val_loader):.6f}"
             )
 
+"""

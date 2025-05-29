@@ -102,9 +102,9 @@ class GemNetOC(nn.Module, GraphModelMixin):
     num_global_out_layers: int
         Number of final residual blocks before the output.
 
-    regress_forces: bool
+    flow_matching: bool
         Whether to predict forces. Default: True
-    direct_forces: bool
+    velocity_field: bool
         If True predict forces based on aggregation of interatomic directions.
         If False predict forces based on negative gradient of energy potential.
     use_pbc: bool
@@ -155,7 +155,7 @@ class GemNetOC(nn.Module, GraphModelMixin):
     extensive: bool
         Whether the output should be extensive (proportional to the number of atoms)
     forces_coupled: bool
-        If True, enforce that |F_st| = |F_ts|. No effect if direct_forces is False.
+        If True, enforce that |F_st| = |F_ts|. No effect if velocity_field is False.
     output_init: str
         Initialization method for the final dense layer.
     activation: str
@@ -203,8 +203,8 @@ class GemNetOC(nn.Module, GraphModelMixin):
         num_output_afteratom: int,
         num_atom_emb_layers: int = 0,
         num_global_out_layers: int = 2,
-        regress_forces: bool = True,
-        direct_forces: bool = False,
+        flow_matching: bool = True,
+        velocity_field: bool = False,
         use_pbc: bool = True,
         use_pbc_single: bool = False,
         scale_backprop_forces: bool = False,
@@ -275,9 +275,9 @@ class GemNetOC(nn.Module, GraphModelMixin):
         self.use_pbc = use_pbc
         self.use_pbc_single = use_pbc_single
 
-        self.direct_forces = direct_forces
+        self.velocity_field = velocity_field
         self.forces_coupled = forces_coupled
-        self.regress_forces = regress_forces
+        self.flow_matching = flow_matching
         self.force_scaler = ForceScaler(enabled=scale_backprop_forces)
 
         self.init_basis_functions(
@@ -340,7 +340,7 @@ class GemNetOC(nn.Module, GraphModelMixin):
                     nHidden=num_atom,
                     nHidden_afteratom=num_output_afteratom,
                     activation=activation,
-                    direct_forces=direct_forces,
+                    velocity_field=velocity_field,
                 )
             )
         self.out_blocks = torch.nn.ModuleList(out_blocks)
@@ -360,8 +360,8 @@ class GemNetOC(nn.Module, GraphModelMixin):
         ]
         self.out_mlp_E = torch.nn.Sequential(*out_mlp_E)
         self.out_energy = Dense(emb_size_atom, 1, bias=False, activation=None)
-        if direct_forces:
-            out_mlp_F = [
+        if velocity_field:
+            out_mlp_vt = [
                 Dense(
                     emb_size_edge * (num_blocks + 1),
                     emb_size_edge,
@@ -374,13 +374,13 @@ class GemNetOC(nn.Module, GraphModelMixin):
                 )
                 for _ in range(num_global_out_layers)
             ]
-            self.out_mlp_F = torch.nn.Sequential(*out_mlp_F)
-            self.out_forces = Dense(emb_size_edge, 1, bias=False, activation=None)
+            self.out_mlp_vt = torch.nn.Sequential(*out_mlp_vt)
+            self.out_velocity = Dense(emb_size_edge, 1, bias=False, activation=None)
 
         out_initializer = get_initializer(output_init)
         self.out_energy.reset_parameters(out_initializer)
-        if direct_forces:
-            self.out_forces.reset_parameters(out_initializer)
+        if velocity_field:
+            self.out_velocity.reset_parameters(out_initializer)
 
         load_scales_compat(self, scale_file)
 
@@ -1190,7 +1190,7 @@ class GemNetOC(nn.Module, GraphModelMixin):
         atomic_numbers = data.atomic_numbers.long()
         num_atoms = atomic_numbers.shape[0]
 
-        if self.regress_forces and not self.direct_forces:
+        if self.flow_matching and not self.velocity_field:
             pos.requires_grad_(True)
 
         (
@@ -1233,9 +1233,13 @@ class GemNetOC(nn.Module, GraphModelMixin):
         m = self.edge_emb(h, basis_rad_raw, main_graph["edge_index"])
         # (nEdges, emb_size_edge)
 
-        x_E, x_F = self.out_blocks[0](h, m, basis_output, idx_t)
+        """
+        Modified source code for velocity field predicitions in flow matching 
+
+        """
+        x_E, x_vt = self.out_blocks[0](h, m, basis_output, idx_t)
         # (nAtoms, emb_size_atom), (nEdges, emb_size_edge)
-        xs_E, xs_F = [x_E], [x_F]
+        xs_E, xs_vt = [x_E], [x_vt]
 
         for i in range(self.num_blocks):
             # Interaction block
@@ -1258,21 +1262,29 @@ class GemNetOC(nn.Module, GraphModelMixin):
                 quad_idx=quad_idx,
             )  # (nAtoms, emb_size_atom), (nEdges, emb_size_edge)
 
-            x_E, x_F = self.out_blocks[i + 1](h, m, basis_output, idx_t)
+            x_E, x_vt = self.out_blocks[i + 1](h, m, basis_output, idx_t)
             # (nAtoms, emb_size_atom), (nEdges, emb_size_edge)
             xs_E.append(x_E)
-            xs_F.append(x_F)
+            xs_vt.append(x_vt)
 
         # Global output block for final predictions
+        """
+        Regress enerygy 
         x_E = self.out_mlp_E(torch.cat(xs_E, dim=-1))
-        if self.direct_forces:
-            x_F = self.out_mlp_F(torch.cat(xs_F, dim=-1))
+        """
+        if self.velocity_field:
+            x_vt = self.vt(torch.cat(xs_vt, dim=-1))
         with torch.autocast("cuda", enabled=False):
-            E_t = self.out_energy(x_E.float())
-            if self.direct_forces:
-                F_st = self.out_forces(x_F.float())
+            #E_t = self.out_energy(x_E.float())
+            if self.velocity_field:
+                vt_st = self.out_velocity(x_vt.float())
 
         nMolecules = torch.max(batch) + 1
+
+        """
+        Energy prediction: 
+        _________________
+
         if self.extensive:
             E_t = scatter_det(
                 E_t, batch, dim=0, dim_size=nMolecules, reduce="add"
@@ -1284,8 +1296,10 @@ class GemNetOC(nn.Module, GraphModelMixin):
 
         E_t = E_t.squeeze(1)  # (num_molecules)
         outputs = {"energy": E_t}
-        if self.regress_forces:
-            if self.direct_forces:
+        """
+
+        if self.flow_matching:
+            if self.velocity_field:
                 if self.forces_coupled:  # enforce F_st = F_ts
                     nEdges = idx_t.shape[0]
                     id_undir = repeat_blocks(
@@ -1293,278 +1307,34 @@ class GemNetOC(nn.Module, GraphModelMixin):
                         repeats=2,
                         continuous_indexing=True,
                     )
-                    F_st = scatter_det(
-                        F_st,
+                    vt_st = scatter_det(
+                        vt_st,
                         id_undir,
                         dim=0,
                         dim_size=int(nEdges / 2),
                         reduce="mean",
                     )  # (nEdges/2, 1)
-                    F_st = F_st[id_undir]  # (nEdges, 1)
+                    vt_st = vt_st[id_undir]  # (nEdges, 1)
 
                 # map forces in edge directions
-                F_st_vec = F_st[:, :, None] * main_graph["vector"][:, None, :]
+                vt_st_vec = vt_st[:, :, None] * main_graph["vector"][:, None, :]
                 # (nEdges, 1, 3)
-                F_t = scatter_det(
-                    F_st_vec,
+                vt_t = scatter_det(
+                    vt_st_vec,
                     idx_t,
                     dim=0,
                     dim_size=num_atoms,
                     reduce="add",
-                )  # (nAtoms, 1, 3)
+                ) # (nAtoms, 1, 3)
             else:
                 F_t = self.force_scaler.calc_forces_and_update(E_t, pos)
 
-            F_t = F_t.squeeze(1)  # (num_atoms, 3)
+            vt_t = vt_t.squeeze(1)  # (num_atoms, 3)
 
-            outputs["forces"] = F_t
+            outputs = {"velocity": vt_t}
 
         return outputs
 
     @property
     def num_params(self) -> int:
         return sum(p.numel() for p in self.parameters())
-
-class GemNetOCNew(GemNetOC):
-    def __init__(self, ...):
-        super() (...)
-
-    def forward(self, data):
-        ....
-        return ...
-@registry.register_model("gemnet_oc_backbone")
-class GemNetOCBackbone(GemNetOC, BackboneInterface):
-    @conditional_grad(torch.enable_grad())
-    def forward(self, data: Batch) -> dict[str, torch.Tensor]:
-        pos = data.pos
-        atomic_numbers = data.atomic_numbers.long()
-        num_atoms = atomic_numbers.shape[0]
-
-        if self.regress_forces and not self.direct_forces:
-            pos.requires_grad_(True)
-
-        (
-            main_graph,
-            a2a_graph,
-            a2ee2a_graph,
-            qint_graph,
-            id_swap,
-            trip_idx_e2e,
-            trip_idx_a2e,
-            trip_idx_e2a,
-            quad_idx,
-        ) = self.get_graphs_and_indices(data)
-        _, idx_t = main_graph["edge_index"]
-
-        (
-            basis_rad_raw,
-            basis_atom_update,
-            basis_output,
-            bases_qint,
-            bases_e2e,
-            bases_a2e,
-            bases_e2a,
-            basis_a2a_rad,
-        ) = self.get_bases(
-            main_graph=main_graph,
-            a2a_graph=a2a_graph,
-            a2ee2a_graph=a2ee2a_graph,
-            qint_graph=qint_graph,
-            trip_idx_e2e=trip_idx_e2e,
-            trip_idx_a2e=trip_idx_a2e,
-            trip_idx_e2a=trip_idx_e2a,
-            quad_idx=quad_idx,
-            num_atoms=num_atoms,
-        )
-
-        # Embedding block
-        h = self.atom_emb(atomic_numbers)
-        # (nAtoms, emb_size_atom)
-        m = self.edge_emb(h, basis_rad_raw, main_graph["edge_index"])
-        # (nEdges, emb_size_edge)
-
-        x_E, x_F = self.out_blocks[0](h, m, basis_output, idx_t)
-        # (nAtoms, emb_size_atom), (nEdges, emb_size_edge)
-        xs_E, xs_F = [x_E], [x_F]
-
-        for i in range(self.num_blocks):
-            # Interaction block
-            h, m = self.int_blocks[i](
-                h=h,
-                m=m,
-                bases_qint=bases_qint,
-                bases_e2e=bases_e2e,
-                bases_a2e=bases_a2e,
-                bases_e2a=bases_e2a,
-                basis_a2a_rad=basis_a2a_rad,
-                basis_atom_update=basis_atom_update,
-                edge_index_main=main_graph["edge_index"],
-                a2ee2a_graph=a2ee2a_graph,
-                a2a_graph=a2a_graph,
-                id_swap=id_swap,
-                trip_idx_e2e=trip_idx_e2e,
-                trip_idx_a2e=trip_idx_a2e,
-                trip_idx_e2a=trip_idx_e2a,
-                quad_idx=quad_idx,
-            )  # (nAtoms, emb_size_atom), (nEdges, emb_size_edge)
-
-            x_E, x_F = self.out_blocks[i + 1](h, m, basis_output, idx_t)
-            # (nAtoms, emb_size_atom), (nEdges, emb_size_edge)
-            xs_E.append(x_E)
-            xs_F.append(x_F)
-
-        return {
-            "xs_E": xs_E,
-            "xs_F": xs_F,
-            "edge_vec": main_graph["vector"],
-            "edge_idx": idx_t,
-            "num_neighbors": main_graph["num_neighbors"],
-        }
-
-
-@registry.register_model("gemnet_oc_energy_and_grad_force_head")
-class GemNetOCEnergyAndGradForceHead(nn.Module, HeadInterface):
-    def __init__(
-        self,
-        backbone: BackboneInterface,
-        num_global_out_layers: int,
-        output_init: str = "HeOrthogonal",
-    ):
-        super().__init__()
-        self.extensive = backbone.extensive
-
-        self.regress_forces = backbone.regress_forces
-        self.direct_forces = backbone.direct_forces
-        self.force_scaler = backbone.force_scaler
-
-        backbone.out_mlp_E = None
-        backbone.out_energy = None
-
-        out_mlp_E = [
-            Dense(
-                backbone.atom_emb.emb_size * (len(backbone.int_blocks) + 1),
-                backbone.atom_emb.emb_size,
-                activation=backbone.activation,
-            )
-        ] + [
-            ResidualLayer(
-                backbone.atom_emb.emb_size,
-                activation=backbone.activation,
-            )
-            for _ in range(num_global_out_layers)
-        ]
-        self.out_mlp_E = torch.nn.Sequential(*out_mlp_E)
-
-        self.out_energy = Dense(
-            backbone.atom_emb.emb_size,
-            1,
-            bias=False,
-            activation=None,
-        )
-
-        out_initializer = get_initializer(output_init)
-        self.out_energy.reset_parameters(out_initializer)
-
-    @conditional_grad(torch.enable_grad())
-    def forward(
-        self, data: Batch, emb: dict[str, torch.Tensor]
-    ) -> dict[str, torch.Tensor]:
-        # Global output block for final predictions
-        x_E = self.out_mlp_E(torch.cat(emb["xs_E"], dim=-1))
-        with torch.autocast("cuda", enabled=False):
-            E_t = self.out_energy(x_E.float())
-
-        nMolecules = torch.max(data.batch) + 1
-        if self.extensive:
-            E_t = scatter_det(
-                E_t, data.batch, dim=0, dim_size=nMolecules, reduce="add"
-            )  # (nMolecules, 1)
-        else:
-            E_t = scatter_det(
-                E_t, data.batch, dim=0, dim_size=nMolecules, reduce="mean"
-            )  # (nMolecules, 1)
-
-        outputs = {"energy": E_t.squeeze(1)}  # (num_molecules)
-
-        if self.regress_forces and not self.direct_forces:
-            F_t = self.force_scaler.calc_forces_and_update(outputs["energy"], data.pos)
-            outputs["forces"] = F_t.squeeze(1)
-        return outputs
-
-
-@registry.register_model("gemnet_oc_force_head")
-class GemNetOCForceHead(nn.Module, HeadInterface):
-    def __init__(
-        self,
-        backbone,
-        num_global_out_layers: int,
-        output_init: str = "HeOrthogonal",
-    ):
-        super().__init__()
-
-        self.direct_forces = backbone.direct_forces
-        self.forces_coupled = backbone.forces_coupled
-
-        emb_size_edge = backbone.edge_emb.dense.linear.out_features
-        if self.direct_forces:
-            backbone.out_mlp_F = None
-            backbone.out_forces = None
-            out_mlp_F = [
-                Dense(
-                    emb_size_edge * (len(backbone.int_blocks) + 1),
-                    emb_size_edge,
-                    activation=backbone.activation,
-                )
-            ] + [
-                ResidualLayer(
-                    emb_size_edge,
-                    activation=backbone.activation,
-                )
-                for _ in range(num_global_out_layers)
-            ]
-            self.out_mlp_F = torch.nn.Sequential(*out_mlp_F)
-            self.out_forces = Dense(
-                emb_size_edge,
-                1,
-                bias=False,
-                activation=None,
-            )
-            out_initializer = get_initializer(output_init)
-            self.out_forces.reset_parameters(out_initializer)
-
-    def forward(
-        self, data: Batch, emb: dict[str, torch.Tensor]
-    ) -> dict[str, torch.Tensor]:
-        if self.direct_forces:
-            with torch.autocast("cuda", enabled=False):
-                x_F = self.out_mlp_F(torch.cat(emb["xs_F"], dim=-1).float())
-                F_st = self.out_forces(x_F)
-
-            if self.forces_coupled:  # enforce F_st = F_ts
-                nEdges = emb["edge_idx"].shape[0]
-                id_undir = repeat_blocks(
-                    emb["num_neighbors"] // 2,
-                    repeats=2,
-                    continuous_indexing=True,
-                )
-                F_st = scatter_det(
-                    F_st,
-                    id_undir,
-                    dim=0,
-                    dim_size=int(nEdges / 2),
-                    reduce="mean",
-                )  # (nEdges/2, 1)
-                F_st = F_st[id_undir]  # (nEdges, 1)
-
-            # map forces in edge directions
-            F_st_vec = F_st[:, :, None] * emb["edge_vec"][:, None, :]
-            # (nEdges, 1, 3)
-            F_t = scatter_det(
-                F_st_vec,
-                emb["edge_idx"],
-                dim=0,
-                dim_size=data.atomic_numbers.long().shape[0],
-                reduce="add",
-            )  # (nAtoms, 1, 3)
-            return {"forces": F_t.squeeze(1)}  # (num_atoms, 3)
-        return {}
