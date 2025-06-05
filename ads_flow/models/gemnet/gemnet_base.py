@@ -202,8 +202,8 @@ class GemNetOC(nn.Module, GraphModelMixin):
         num_output_afteratom: int,
         num_atom_emb_layers: int = 0,
         num_global_out_layers: int = 2,
-        regress_forces: bool = False,
-        direct_forces: bool = False,
+        regress_forces: bool = True,
+        direct_forces: bool = True,
         use_pbc: bool = True,
         use_pbc_single: bool = False,
         scale_backprop_forces: bool = False,
@@ -1282,7 +1282,7 @@ class GemNetOC(nn.Module, GraphModelMixin):
             )  # (nMolecules, 1)
 
         E_t = E_t.squeeze(1)  # (num_molecules)
-        outputs = E_t
+        #outputs = E_t
         if self.regress_forces:
             if self.direct_forces:
                 print("Regressing forces via NN")
@@ -1317,7 +1317,7 @@ class GemNetOC(nn.Module, GraphModelMixin):
 
             F_t = F_t.squeeze(1)  # (num_atoms, 3)
 
-            outputs["forces"] = F_t
+            outputs = F_t
         return outputs
 
     @property
