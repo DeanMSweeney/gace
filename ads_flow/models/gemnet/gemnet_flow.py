@@ -48,10 +48,12 @@ if typing.TYPE_CHECKING:
 @registry.register_model("gemnet_oc")
 
 
-class GemNetOC(nn.Module, GraphModelMixin):
+class GemNetFlow(nn.Module, GraphModelMixin):
     """
     Arguments
     ---------
+    num_targets: int
+        Number of prediction targets
     num_spherical: int
         Controls maximum frequency.
     num_radial: int
@@ -104,7 +106,7 @@ class GemNetOC(nn.Module, GraphModelMixin):
 
     flow_matching: bool
         Whether to predict forces. Default: True
-    velocity_field: bool
+    dummy: bool
         If True predict forces based on aggregation of interatomic directions.
         If False predict forces based on negative gradient of energy potential.
     use_pbc: bool
@@ -155,7 +157,7 @@ class GemNetOC(nn.Module, GraphModelMixin):
     extensive: bool
         Whether the output should be extensive (proportional to the number of atoms)
     forces_coupled: bool
-        If True, enforce that |F_st| = |F_ts|. No effect if velocity_field is False.
+        If True, enforce that |F_st| = |F_ts|. No effect if dummy is False.
     output_init: str
         Initialization method for the final dense layer.
     activation: str
@@ -182,6 +184,7 @@ class GemNetOC(nn.Module, GraphModelMixin):
 
     def __init__(
         self,
+        num_targets: int,
         num_spherical: int,
         num_radial: int,
         num_blocks: int,
@@ -204,7 +207,7 @@ class GemNetOC(nn.Module, GraphModelMixin):
         num_atom_emb_layers: int = 0,
         num_global_out_layers: int = 2,
         flow_matching: bool = True,
-        velocity_field: bool = False,
+        dummy: bool = True,
         use_pbc: bool = True,
         use_pbc_single: bool = False,
         scale_backprop_forces: bool = False,
@@ -217,6 +220,7 @@ class GemNetOC(nn.Module, GraphModelMixin):
         max_neighbors_aeaint: int | None = None,
         max_neighbors_aint: int | None = None,
         enforce_max_neighbors_strictly: bool = True,
+        regress_forces: bool=True,
         rbf: dict[str, str] | None = None,
         rbf_spherical: dict | None = None,
         envelope: dict[str, str | int] | None = None,
@@ -235,6 +239,7 @@ class GemNetOC(nn.Module, GraphModelMixin):
         num_elements: int = 83,
         otf_graph: bool = False,
         scale_file: str | None = None,
+        time_n_freqs: int = 4,
         **kwargs,  # backwards compatibility with deprecated arguments
     ) -> None:
         if qint_tags is None:
@@ -250,6 +255,7 @@ class GemNetOC(nn.Module, GraphModelMixin):
         super().__init__()
         if len(kwargs) > 0:
             logging.warning(f"Unrecognized arguments: {list(kwargs.keys())}")
+        self.num_targets = num_targets
         assert num_blocks > 0
         self.num_blocks = num_blocks
         self.extensive = extensive
@@ -275,10 +281,11 @@ class GemNetOC(nn.Module, GraphModelMixin):
         self.use_pbc = use_pbc
         self.use_pbc_single = use_pbc_single
 
-        self.velocity_field = velocity_field
+        self.dummy = dummy
         self.forces_coupled = forces_coupled
         self.flow_matching = flow_matching
         self.force_scaler = ForceScaler(enabled=scale_backprop_forces)
+        self.regress_forces = regress_forces
 
         self.init_basis_functions(
             num_radial,
@@ -293,9 +300,16 @@ class GemNetOC(nn.Module, GraphModelMixin):
         self.init_shared_basis_layers(
             num_radial, num_spherical, emb_size_rbf, emb_size_cbf, emb_size_sbf
         )
+        
+        self.register_buffer(
+            'time_freqs', 
+            torch.arange(1, time_n_freqs + 1) * torch.pi,
+            persistent=False 
+        ) 
 
         # Embedding blocks
         self.atom_emb = AtomEmbedding(emb_size_atom, num_elements)
+        self.time_emb = nn.Linear(2*time_n_freqs, emb_size_atom)
         self.edge_emb = EdgeEmbedding(
             emb_size_atom, num_radial, emb_size_edge, activation=activation
         )
@@ -340,7 +354,7 @@ class GemNetOC(nn.Module, GraphModelMixin):
                     nHidden=num_atom,
                     nHidden_afteratom=num_output_afteratom,
                     activation=activation,
-                    velocity_field=velocity_field,
+                    direct_forces=True,
                 )
             )
         self.out_blocks = torch.nn.ModuleList(out_blocks)
@@ -359,8 +373,8 @@ class GemNetOC(nn.Module, GraphModelMixin):
             for _ in range(num_global_out_layers)
         ]
         self.out_mlp_E = torch.nn.Sequential(*out_mlp_E)
-        self.out_energy = Dense(emb_size_atom, 1, bias=False, activation=None)
-        if velocity_field:
+        self.out_energy = Dense(emb_size_atom, num_targets, bias=False, activation=None)
+        if dummy:
             out_mlp_vt = [
                 Dense(
                     emb_size_edge * (num_blocks + 1),
@@ -375,15 +389,23 @@ class GemNetOC(nn.Module, GraphModelMixin):
                 for _ in range(num_global_out_layers)
             ]
             self.out_mlp_vt = torch.nn.Sequential(*out_mlp_vt)
-            self.out_velocity = Dense(emb_size_edge, 1, bias=False, activation=None)
+            self.out_velocity = Dense(emb_size_edge, num_targets, bias=False, activation=None) # Output shape: (N_atoms, 3)
 
         out_initializer = get_initializer(output_init)
         self.out_energy.reset_parameters(out_initializer)
-        if velocity_field:
+        if dummy:
             self.out_velocity.reset_parameters(out_initializer)
 
         load_scales_compat(self, scale_file)
-
+    
+    def process_time_embeds(self, t:torch.Tensor):
+        """
+        t: (bz,1)
+        """
+        t = self.time_freqs * t                     # (bz, self.time_n_freqs)
+        t = torch.cat((t.cos(), t.sin()), dim=-1)   # (bz, 2*self.time_n_freqs)
+        return t
+    
     def set_cutoffs(self, cutoff, cutoff_qint, cutoff_aeaint, cutoff_aint):
         self.cutoff = cutoff
 
@@ -1185,12 +1207,17 @@ class GemNetOC(nn.Module, GraphModelMixin):
 
     @conditional_grad(torch.enable_grad())
     def forward(self, data):
+        #print('Starting forward pass')
+        """
+        t: (bz, 1)
+        """
         pos = data.pos
         batch = data.batch
+        t = data.t
         atomic_numbers = data.atomic_numbers.long()
         num_atoms = atomic_numbers.shape[0]
 
-        if self.flow_matching and not self.velocity_field:
+        if self.flow_matching and not self.dummy:
             pos.requires_grad_(True)
 
         (
@@ -1226,17 +1253,17 @@ class GemNetOC(nn.Module, GraphModelMixin):
             quad_idx=quad_idx,
             num_atoms=num_atoms,
         )
-
+        
         # Embedding block
-        h = self.atom_emb(atomic_numbers)
-        # (nAtoms, emb_size_atom)
+        #print('Embedding block')
+        h = self.atom_emb(atomic_numbers)                                     # (bz, nAtoms, emb_size_atom)      
+        # Time embedding 
+        time_embeds = self.time_emb(self.process_time_embeds(t)).unsqueeze(0) # (bz, 1, emb_size_atom)
+        h += time_embeds                                                      # (nAtoms, emb_size_atom)
         m = self.edge_emb(h, basis_rad_raw, main_graph["edge_index"])
         # (nEdges, emb_size_edge)
 
-        """
-        Modified source code for velocity field predicitions in flow matching 
-
-        """
+        
         x_E, x_vt = self.out_blocks[0](h, m, basis_output, idx_t)
         # (nAtoms, emb_size_atom), (nEdges, emb_size_edge)
         xs_E, xs_vt = [x_E], [x_vt]
@@ -1266,17 +1293,19 @@ class GemNetOC(nn.Module, GraphModelMixin):
             # (nAtoms, emb_size_atom), (nEdges, emb_size_edge)
             xs_E.append(x_E)
             xs_vt.append(x_vt)
-
         # Global output block for final predictions
-        """
-        Regress enerygy 
+
+        # Regress energy
         x_E = self.out_mlp_E(torch.cat(xs_E, dim=-1))
-        """
-        if self.velocity_field:
-            x_vt = self.vt(torch.cat(xs_vt, dim=-1))
+        
+        #print('Global output')
+        if self.dummy:
+            x_vt = self.out_mlp_vt(torch.cat(xs_vt, dim=-1))
+            
         with torch.autocast("cuda", enabled=False):
             #E_t = self.out_energy(x_E.float())
-            if self.velocity_field:
+            if self.dummy:
+                
                 vt_st = self.out_velocity(x_vt.float())
 
         nMolecules = torch.max(batch) + 1
@@ -1284,7 +1313,7 @@ class GemNetOC(nn.Module, GraphModelMixin):
         """
         Energy prediction: 
         _________________
-
+        
         if self.extensive:
             E_t = scatter_det(
                 E_t, batch, dim=0, dim_size=nMolecules, reduce="add"
@@ -1295,11 +1324,12 @@ class GemNetOC(nn.Module, GraphModelMixin):
             )  # (nMolecules, 1)
 
         E_t = E_t.squeeze(1)  # (num_molecules)
-        outputs = {"energy": E_t}
+        print(E_t)
         """
-
+        
+        #print("Output velocity field")
         if self.flow_matching:
-            if self.velocity_field:
+            if self.dummy:
                 if self.forces_coupled:  # enforce F_st = F_ts
                     nEdges = idx_t.shape[0]
                     id_undir = repeat_blocks(
@@ -1329,11 +1359,9 @@ class GemNetOC(nn.Module, GraphModelMixin):
             else:
                 F_t = self.force_scaler.calc_forces_and_update(E_t, pos)
 
-            vt_t = vt_t.squeeze(1)  # (num_atoms, 3)
+            vt_t = vt_t.squeeze(1)  # (num_calc_forces_and_updateatoms, 3)
 
-            outputs = {"velocity": vt_t}
-
-        return outputs
+        return vt_t
 
     @property
     def num_params(self) -> int:
