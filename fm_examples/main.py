@@ -93,6 +93,8 @@ optimizer = torch.optim.Adam(flow.parameters(), 1e-3)
 loss_fn = nn.MSELoss()
 train()
 
+"""
+
 ######################################################
 # Model sampling
 ######################################################
@@ -139,3 +141,5 @@ plt.ylim(-2, 2)
 plt.savefig('p_grnd.svg', format='svg', dpi=300, bbox_inches='tight')
 
 plt.show()
+
+"""

@@ -101,7 +101,6 @@ class GemNetOC(nn.Module, GraphModelMixin):
         Number of residual blocks for transforming atom embeddings.
     num_global_out_layers: int
         Number of final residual blocks before the output.
-
     regress_forces: bool
         Whether to predict forces. Default: True
     direct_forces: bool
@@ -203,7 +202,7 @@ class GemNetOC(nn.Module, GraphModelMixin):
         num_output_afteratom: int,
         num_atom_emb_layers: int = 0,
         num_global_out_layers: int = 2,
-        regress_forces: bool = True,
+        regress_forces: bool = False,
         direct_forces: bool = False,
         use_pbc: bool = True,
         use_pbc_single: bool = False,
@@ -1283,9 +1282,10 @@ class GemNetOC(nn.Module, GraphModelMixin):
             )  # (nMolecules, 1)
 
         E_t = E_t.squeeze(1)  # (num_molecules)
-        outputs = {"energy": E_t}
+        outputs = E_t
         if self.regress_forces:
             if self.direct_forces:
+                print("Regressing forces via NN")
                 if self.forces_coupled:  # enforce F_st = F_ts
                     nEdges = idx_t.shape[0]
                     id_undir = repeat_blocks(
@@ -1318,7 +1318,6 @@ class GemNetOC(nn.Module, GraphModelMixin):
             F_t = F_t.squeeze(1)  # (num_atoms, 3)
 
             outputs["forces"] = F_t
-
         return outputs
 
     @property
