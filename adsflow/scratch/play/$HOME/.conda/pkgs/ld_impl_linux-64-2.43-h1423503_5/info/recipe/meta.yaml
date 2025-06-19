@@ -1,0 +1,59 @@
+# This file created by conda-build 25.5.0
+# ------------------------------------------------
+
+package:
+  name: ld_impl_linux-64
+  version: '2.43'
+source:
+  - url: https://ftp.gnu.org/gnu/binutils/binutils-2.43.tar.bz2
+    sha256: fed3c3077f0df7a4a1aa47b080b8c53277593ccbb4e5e78b73ffb4e3f265e750
+    patches:
+      - patches/0001-fallback-sysroot.diff
+build:
+  merge_build_host: false
+  detect_binary_files_with_prefix: true
+  ignore_run_exports_from:
+    - gcc_bootstrap_linux-64 13.*
+  number: 5
+  string: h1423503_5
+requirements:
+  build:
+    - gcc_bootstrap_linux-64 13.3.0 h9347e35_11
+    - kernel-headers_linux-64 3.10.0 he073ed8_18
+    - sysroot_linux-64 2.17 h0157908_18
+    - tzdata 2025b h78e105d_0
+  run_constrained:
+    - binutils_impl_linux-64 2.43
+  host:
+    - __glibc >=2.17,<3.0.a0
+  run:
+    - __glibc >=2.17,<3.0.a0
+test:
+  commands:
+    - x86_64-conda-linux-gnu-ld --help
+    - echo "conda"
+about:
+  home: https://www.gnu.org/software/binutils/
+  license: GPL-3.0-only
+  license_file:
+    - COPYING
+    - COPYING.LIB
+    - COPYING3
+    - COPYING3.LIB
+  summary: 'A set of programming tools for creating and managing binary programs,
+    object files,
+
+    libraries, profile data, and assembly source code.
+
+    '
+extra:
+  recipe-maintainers:
+    - beckermr
+    - frol
+    - isuruf
+    - jjhelmus
+  final: true
+  copy_test_source_files: true
+  flow_run_id: azure_20250613.16.1
+  remote_url: https://github.com/conda-forge/binutils-feedstock
+  sha: 30be4228edc311149efb49da1ec31aad7fc5f837

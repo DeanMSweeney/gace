@@ -1,0 +1,14 @@
+{
+  "arch": "x86_64",
+  "build": "h767d61c_2",
+  "build_number": 2,
+  "depends": [
+    "__glibc >=2.17,<3.0.a0"
+  ],
+  "license": "GPL-3.0-only WITH GCC-exception-3.1",
+  "name": "libgomp",
+  "platform": "linux",
+  "subdir": "linux-64",
+  "timestamp": 1746642113092,
+  "version": "15.1.0"
+}
