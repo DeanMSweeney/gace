@@ -52,7 +52,7 @@ class GemNetOC(nn.Module, GraphModelMixin):
     """
     Arguments
     ---------
-    num_spherical: int
+      num_spherical: int
         Controls maximum frequency.
     num_radial: int
         Controls maximum frequency.
