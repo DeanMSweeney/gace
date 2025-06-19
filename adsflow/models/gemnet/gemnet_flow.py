@@ -237,7 +237,7 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         scale_basis: bool = False,
         qint_tags: list | None = None,
         num_elements: int = 83,
-        otf_graph: bool = False,
+        otf_graph: bool = True,
         scale_file: str | None = None,
         time_n_freqs: int = 4,
         **kwargs,  # backwards compatibility with deprecated arguments

@@ -1,0 +1,12 @@
+{
+  "cross_target_platform": "linux-64",
+  "c_stdlib": "sysroot",
+  "c_stdlib_version": "2.17",
+  "target_platform": "linux-64",
+  "cxx_compiler_version": "13",
+  "triplet": "x86_64-conda-linux-gnu",
+  "ctng_vendor": "conda",
+  "channel_targets": "conda-forge main",
+  "cxx_compiler": "gcc_bootstrap",
+  "__glibc": "__glibc >=2.17,<3.0.a0"
+}
