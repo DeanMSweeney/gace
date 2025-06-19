@@ -1285,7 +1285,7 @@ class GemNetOC(nn.Module, GraphModelMixin):
         #outputs = E_t
         if self.regress_forces:
             if self.direct_forces:
-                print("Regressing forces via NN")
+                #print("Regressing forces via NN")
                 if self.forces_coupled:  # enforce F_st = F_ts
                     nEdges = idx_t.shape[0]
                     id_undir = repeat_blocks(
