@@ -2,3 +2,5 @@ Icon\r
 Icon 
 Icon?
 
+__pycache__/
+*.pyc
