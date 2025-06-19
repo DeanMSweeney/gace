@@ -2,7 +2,12 @@ Icon\r
 Icon 
 Icon?
 
+# Python 
 __pycache__/
 *.pyc
 
+# BATCH/bash
 *.out
+
+# Folders
+'$HOME'/
