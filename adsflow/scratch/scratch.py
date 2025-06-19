@@ -2,6 +2,7 @@ from ase.io import read
 from ase import Atoms
 from ase.visualize import view
 
+import numpy as np
 import torch 
 from torch import optim
 from torch import nn
@@ -10,6 +11,7 @@ from torch import Tensor
 
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
 from adsflow.models.gemnet.gemnet_base import GemNetOC
+from adsflow.models import baseline
 from ase.io import read
 
 '''
@@ -27,11 +29,11 @@ Compile GemNet-OC for flow matching
 # GemNet-OC params
 model_cfg = {
     "num_targets": 1,
-    "num_spherical": 7,
-    "num_radial": 128,
-    "num_blocks": 4,
-    "emb_size_atom": 256,
-    "emb_size_edge": 512,
+    "num_spherical": 4,
+    "num_radial": 8,
+    "num_blocks": 1,
+    "emb_size_atom": 32,
+    "emb_size_edge": 64,
     "emb_size_trip_in": 64,
     "emb_size_trip_out": 64,
     "emb_size_quad_in": 32,
@@ -91,12 +93,13 @@ def train():
     '''
     Defines the training procedure for the neural network
     '''
+    l = []
     for epoch in range(1): 
-        
+    
         x1 = positions 
         x0 = torch.randn_like(x1) 
         t = torch.rand(1)
-    
+
         xt = (1 - t) * x0 + t * x1
         
         batch = torch.zeros(len(xt), dtype=torch.long)
@@ -114,6 +117,10 @@ def train():
     
         # Compute loss 
         loss = loss_fn(u_theta, x1 - x0)
+        l.append(loss.item())
+        l_avg = np.mean(np.array(l[-50:]))
+        print(f"Loss at epoch {epoch}: {loss.item()} & avg. loss: {l_avg}")
+        
 
         if loss.item() < 0.01:
             break 
@@ -123,6 +130,6 @@ def train():
         loss.backward()
         optimizer.step()
 
-    print(f"Loss at epoch {epoch}: {loss.item()}")
+       
 
 train()
