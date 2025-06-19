@@ -1255,7 +1255,6 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         )
         
         # Embedding block
-        #print('Embedding block')
         h = self.atom_emb(atomic_numbers)                                     # (bz, nAtoms, emb_size_atom)      
         # Time embedding 
         time_embeds = self.time_emb(self.process_time_embeds(t)).unsqueeze(0) # (bz, 1, emb_size_atom)
