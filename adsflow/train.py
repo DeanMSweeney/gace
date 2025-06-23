@@ -1,3 +1,7 @@
+from ase.io import read
+from ase import Atoms
+from ase.visualize import view
+
 import numpy as np
 
 import torch 
@@ -5,72 +9,147 @@ from torch import optim
 from torch import nn
 from torch_geometric.data import Data
 from torch import Tensor
-
-from ase.io import read
-from ase import Atoms
-from ase.visualize import view
+import pytorch_lightning as pl
 
 from collections import deque
 
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
 from adsflow.models.gemnet.gemnet_base import GemNetOC
+from ase.io import read
 
-
-def train(
-    model,
-    positions,
-    atomic_numbers,
-    cell,
-    optimizer,
-    loss_fn,
-    num_epochs: int = 100,
-    print_every: int = 10,
-    tol: float = 1e-2,
-    device: torch.device = torch.device("cpu"),
-):
+class Lit_GemNetFLow(pl.LightningModule):
+    """
+    Functionality 
+    -------------
+    This class defines the training algorithm for the conditional flow matching model using optimal transport 
     
-    model.train()
-    # Move static tensors once
-    x1 = positions.to(device)
-    atomic_numbers = atomic_numbers.to(device)
-    cell = cell.to(device)
-    batch = torch.zeros(len(x1), dtype=torch.long, device=device)
+    Arguments
+    ---------
+    model_cfg: dict 
+        Model configuration dictionary
+    lr: int
+        Learning rate 
+    tol: int
+        Tolerance for loss  
+    from_noise: bool 
+        Whether to learn mapping from pure Gaussian noise or an initial structure
+    """
+    def __init__(
+            self, 
+            model_cfg, 
+            lr: int = 1e-3, 
+            tol: int = 1e-3, 
+            from_noise: bool = True
+        ):
+        
+        super().__init__()
+        self.save_hyperparameters()
+        self.model = GemNetFlow(**model_cfg) # define GNN
+        self.loss_fn = nn.MSELoss()
+        self.from_noise = from_noise
 
-    # Keep a fixed‐size buffer for running avg
-    recent_losses = deque(maxlen=print_every)
+    
+    def forward(self, data):
+        return self.model(data)
+    
+    def training_step(self, data):
+        x1 = data.pos_relaxed # extract unoptimized positions 
 
-    for epoch in range(num_epochs):
-        # build data object 
-        data = Data(
-            atomic_numbers=atomic_numbers,    
-            batch=batch,
-            cell = cell, 
-            pbc = torch.tensor([[True, True, True]]), 
-            natoms = torch.tensor([len(positions)], dtype=torch.long), 
-            tags = torch.zeros(len(positions), dtype=torch.long)
-        )
-        # interpolate between noise and sample: optimal transport
-        x0 = torch.randn_like(x1, device=device)
-        t  = torch.rand(1, device=device)
-        xt = (1 - t) * x0 + t * x1
-        data.t = t
-        data.pos = xt
+        if self.from_noise:
+            x0 = torch.rand_like(x1) # sample Gaussian distribution
+        else: 
+            x0 = data.pos # sample pre-relaxed positions 
+        
+        # optimal transport
+        t = torch.rand(len(data)) # define time
+        xt = t * x1 + (1 - t) * x0 # interpolate between x0 and x1
+        data.pos_ot = xt 
+        data.t = t 
 
-        optimizer.zero_grad()
-        u_theta = model(data)
-        target  = x1 - x0
-        loss    = loss_fn(u_theta, target)
-        loss.backward()
-        optimizer.step()
+        # regress velocity field and compute loss 
+        u_hat = self(data)
+        u = x1 - x0 
+        loss = self.loss_fn(u_hat, u) # compute training loss 
 
-        recent_losses.append(loss.item())
-        if epoch % print_every == 0:
-            avg = sum(recent_losses) / len(recent_losses)
-            print(f"[{epoch:6d}] loss = {loss.item()}, avg({print_every}) = {avg}")
+        self.log("train/loss", loss, prog_bar=True)
+        return loss
+        
+    def validation_step(self, data):
+        x1 = data.pos_relaxed # extract unoptimized positions 
 
-        if loss.item() < tol:
-            print(f"Converged at epoch {epoch} (loss {loss.item()})")
-            break
+        if self.from_noise:
+            x0 = torch.rand_like(x1) # sample Gaussian distribution
+        else: 
+            x0 = data.pos # sample pre-relaxed positions 
+        
+        # optimal transport
+        t = torch.rand(len(data)) # define time
+        xt = t * x1 + (1 - t) * x0 # interpolate between x0 and x1
+        data.pos_ot = xt 
+        data.t = t 
 
-    return 
+        # regress velocity field and compute loss 
+        u_hat = self(data)
+        u = x1 - x0
+        loss = self.loss_fn(u_hat, u) # compute  validation loss 
+        self.log("val/loss", loss, prog_bar=True)
 
+    def configure_optimizers(self):
+        return optim.Adam(self.parameters(), lr=self.hparams.lr)
+
+
+
+if __name__ == "__main__":
+
+    # compile GemNet-OC model parameters 
+    model_cfg = {
+        "num_targets": 1,
+        "num_spherical": 2,
+        "num_radial": 16,
+        "num_blocks": 2,
+        "emb_size_atom": 64,
+        "emb_size_edge": 64,
+        "emb_size_trip_in": 32,
+        "emb_size_trip_out": 32,
+        "emb_size_quad_in": 32,
+        "emb_size_quad_out": 32,
+        "emb_size_aint_in": 32,
+        "emb_size_aint_out": 32,
+        "emb_size_rbf": 16,
+        "emb_size_cbf": 16,
+        "emb_size_sbf": 32,
+        "num_before_skip": 2,
+        "num_after_skip": 2,
+        "num_concat": 1,
+        "num_atom": 3,
+        "num_output_afteratom": 3,
+        "num_atom_emb_layers": 0,
+        "num_global_out_layers": 2,
+        "flow_matching": True,
+        "use_pbc": True,
+        "scale_backprop_forces": False,
+        "cutoff": 12.0,
+        "cutoff_qint": 12.0,
+        "cutoff_aeaint": 12.0,
+        "cutoff_aint": 12.0,
+        "max_neighbors": 30,
+        "max_neighbors_qint": 8,
+        "max_neighbors_aeaint": 20,
+        "max_neighbors_aint": 1000,
+        "enforce_max_neighbors_strictly": True,
+        "rbf": {"name": "gaussian"},
+        "rbf_spherical": None,
+        "envelope": {"name": "polynomial", "exponent": 5},
+        "cbf": {"name": "spherical_harmonics"},
+        "sbf": {"name": "legendre_outer"},
+        "extensive": True,
+        "forces_coupled": True,
+        "output_init": "HeOrthogonal",
+        "activation": "silu",
+        "scale_file": None,
+        "quad_interaction": False,
+        "atom_edge_interaction": True,
+        "edge_atom_interaction": True,
+        "atom_interaction": True,
+        "scale_basis": True,
+    }
