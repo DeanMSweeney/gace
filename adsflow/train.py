@@ -1,23 +1,13 @@
-from ase.io import read
-from ase import Atoms
-from ase.visualize import view
-
-import numpy as np
-
 import torch 
 from torch import optim
-from torch import nn
-from torch_geometric.data import Data
+import torch.nn as nn
 from torch import Tensor
 import pytorch_lightning as pl
 
-from collections import deque
-
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
 from adsflow.models.gemnet.gemnet_base import GemNetOC
-from ase.io import read
 
-class Lit_GemNetFLow(pl.LightningModule):
+class LitGemNetFLow(pl.LightningModule):
     """
     Functionality 
     -------------
@@ -39,7 +29,7 @@ class Lit_GemNetFLow(pl.LightningModule):
             model_cfg, 
             lr: int = 1e-3, 
             tol: int = 1e-3, 
-            from_noise: bool = True
+            from_noise: bool = False
         ):
         
         super().__init__()
@@ -61,7 +51,7 @@ class Lit_GemNetFLow(pl.LightningModule):
             x0 = data.pos # sample pre-relaxed positions 
         
         # optimal transport
-        t = torch.rand(len(data)) # define time
+        t = torch.rand(data.natoms[0]) # define time
         xt = t * x1 + (1 - t) * x0 # interpolate between x0 and x1
         data.pos_ot = xt 
         data.t = t 
@@ -83,7 +73,7 @@ class Lit_GemNetFLow(pl.LightningModule):
             x0 = data.pos # sample pre-relaxed positions 
         
         # optimal transport
-        t = torch.rand(len(data)) # define time
+        t = torch.rand(data.natoms[0]) # define time
         xt = t * x1 + (1 - t) * x0 # interpolate between x0 and x1
         data.pos_ot = xt 
         data.t = t 
@@ -100,6 +90,12 @@ class Lit_GemNetFLow(pl.LightningModule):
 
 
 if __name__ == "__main__":
+
+    from torch_geometric.data import Data
+    from fairchem.core.datasets import LmdbDataset
+    from torch_geometric.loader import DataLoader
+
+    from adsflow.utils.data import OCP_DataLoader
 
     # compile GemNet-OC model parameters 
     model_cfg = {
@@ -153,3 +149,19 @@ if __name__ == "__main__":
         "atom_interaction": True,
         "scale_basis": True,
     }
+
+    # read and build data objects with torch_geometric DataLoader
+    dataset = OCP_DataLoader("/Users/deanmsweeney/Documents/CFM/AdsFlow/adsflow/dataset/mini/data.lmdb")
+    data = DataLoader(dataset, batch_size=20)
+
+    # compile lightning model and trainer
+    lightning = LitGemNetFLow(model_cfg, lr=1e-4)
+    trainer = pl.Trainer(max_epochs=1)
+
+    # train
+    #trainer.fit(lightning, data)
+
+
+
+    
+
