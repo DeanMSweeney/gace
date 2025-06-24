@@ -1209,7 +1209,6 @@ class GemNetFlow(nn.Module, GraphModelMixin):
 
     @conditional_grad(torch.enable_grad())
     def forward(self, data):
-        #print('Starting forward pass')
         """
         t: (bz, 1)
         """
