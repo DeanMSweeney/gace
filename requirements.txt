@@ -1,0 +1,17 @@
+torch
+torch-geometric
+torch-scatter
+torch-sparse
+torch_cluster
+torch_spline_conv
+ase
+numpy
+pandas
+matplotlib
+tqdm
+omegaconf
+hydra-core
+fairchem-core
+e3nn
+lightning
+wandb
