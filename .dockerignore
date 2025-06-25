@@ -1,0 +1,9 @@
+# .dockerignore
+__pycache__/
+*.pyc
+*.pt
+*.ckpt
+*.log
+wandb/
+outputs/
+.git/
