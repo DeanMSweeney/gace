@@ -1,13 +1,11 @@
 import torch 
 from torch import optim
 import torch.nn as nn
-from torch import Tensor
 import pytorch_lightning as pl
 
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
-from adsflow.models.gemnet.gemnet_base import GemNetOC
 
-class LitGemNetFLow(pl.LightningModule):
+class LitGemNetFlow(pl.LightningModule):
     """
     Functionality 
     -------------
@@ -28,32 +26,31 @@ class LitGemNetFLow(pl.LightningModule):
             self, 
             model_cfg, 
             lr: int = 1e-3, 
-            tol: int = 1e-3, 
             from_noise: bool = False
         ):
         
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters() # all variables in __init__ are set as hyperparameters 
         self.model = GemNetFlow(**model_cfg) # define GNN
         self.loss_fn = nn.MSELoss()
         self.from_noise = from_noise
 
-    
     def forward(self, data):
         return self.model(data)
     
-    def training_step(self, data):
-        x1 = data.pos_relaxed # extract unoptimized positions 
+    def training_step(self, data, batch_idx):
+        x1 = data.pos_relaxed # extract relaxed positions 
 
         if self.from_noise:
-            x0 = torch.rand_like(x1) # sample Gaussian distribution
+            x0 = torch.randn_like(x1) # sample Gaussian distribution
         else: 
-            x0 = data.pos # sample pre-relaxed positions 
+            x0 = data.pos_init # sample initial positions
         
         # optimal transport
-        t = torch.rand(data.natoms[0]) # define time
+        t_graph = torch.rand(len(data.natoms), 1)
+        t = t_graph[data.batch] # broadcast t (Natoms per graph * batch_size, 3)
         xt = t * x1 + (1 - t) * x0 # interpolate between x0 and x1
-        data.pos_ot = xt 
+        data.pos = xt # reqrite data.pos as the sample at time t
         data.t = t 
 
         # regress velocity field and compute loss 
@@ -64,18 +61,19 @@ class LitGemNetFLow(pl.LightningModule):
         self.log("train/loss", loss, prog_bar=True)
         return loss
         
-    def validation_step(self, data):
+    def validation_step(self, data, batch_idx):
         x1 = data.pos_relaxed # extract unoptimized positions 
 
         if self.from_noise:
-            x0 = torch.rand_like(x1) # sample Gaussian distribution
+            x0 = torch.randn_like(x1) # sample Gaussian distribution
         else: 
-            x0 = data.pos # sample pre-relaxed positions 
+            x0 = data.pos_init # sample pre-relaxed positions 
         
         # optimal transport
-        t = torch.rand(data.natoms[0]) # define time
+        t_graph = torch.rand(len(data.natoms), 1)
+        t = t_graph[data.batch] # broadcast t (Natoms per graph * batch_size, 3)
         xt = t * x1 + (1 - t) * x0 # interpolate between x0 and x1
-        data.pos_ot = xt 
+        data.pos = xt 
         data.t = t 
 
         # regress velocity field and compute loss 
@@ -84,18 +82,17 @@ class LitGemNetFLow(pl.LightningModule):
         loss = self.loss_fn(u_hat, u) # compute  validation loss 
         self.log("val/loss", loss, prog_bar=True)
 
+        return loss
+
     def configure_optimizers(self):
         return optim.Adam(self.parameters(), lr=self.hparams.lr)
 
 
-
+### Testing ###
 if __name__ == "__main__":
 
-    from torch_geometric.data import Data
-    from fairchem.core.datasets import LmdbDataset
     from torch_geometric.loader import DataLoader
-
-    from adsflow.utils.data import OCP_DataLoader
+    from adsflow.utils.data_handling import OCP_DataHandler
 
     # compile GemNet-OC model parameters 
     model_cfg = {
@@ -151,15 +148,15 @@ if __name__ == "__main__":
     }
 
     # read and build data objects with torch_geometric DataLoader
-    dataset = OCP_DataLoader("/Users/deanmsweeney/Documents/CFM/AdsFlow/adsflow/dataset/mini/data.lmdb")
-    data = DataLoader(dataset, batch_size=20)
+    dataset = OCP_DataHandler("/workspace/datasets/mini/data.lmdb", pbc=True)
+    loader = DataLoader(dataset, batch_size=10)
 
     # compile lightning model and trainer
-    lightning = LitGemNetFLow(model_cfg, lr=1e-4)
-    trainer = pl.Trainer(max_epochs=1)
+    lightning = LitGemNetFlow(model_cfg, lr=1e-4)
+    trainer = pl.Trainer(max_epochs=100)
 
     # train
-    #trainer.fit(lightning, data)
+    trainer.fit(lightning, loader)
 
 
 

@@ -1,8 +1,0 @@
-DataBatch(pos=[2463, 3], atomic_numbers=[2463], natoms=[25], cell=[25, 3, 3], pbc=[25, 3], tags=[25], fixed=[25], pos_relaxed=[2463, 3], batch=[2463], ptr=[26])
-
-DataBatch(pos=[1892, 3], atomic_numbers=[1892], natoms=[25], cell=[25, 3, 3], pbc=[25, 3], tags=[25], fixed=[25], pos_relaxed=[1892, 3], batch=[1892], ptr=[26])
-
-DataBatch(pos=[1831, 3], atomic_numbers=[1831], natoms=[25], cell=[25, 3, 3], pbc=[25, 3], tags=[25], fixed=[25], pos_relaxed=[1831, 3], batch=[1831], ptr=[26])
-
-DataBatch(pos=[2014, 3], atomic_numbers=[2014], natoms=[25], cell=[25, 3, 3], pbc=[25, 3], tags=[25], fixed=[25], pos_relaxed=[2014, 3], batch=[2014], ptr=[26])
-

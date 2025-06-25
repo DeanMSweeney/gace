@@ -1258,7 +1258,7 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         # Embedding block
         h = self.atom_emb(atomic_numbers)                                 # (bz, nAtoms, emb_size_atom)      
         # Time embedding 
-        time_embeds = self.time_emb(self.process_time_embeds(t)).unsqueeze(0)   # (bz, 1, emb_size_atom)
+        time_embeds = self.time_emb(self.process_time_embeds(t))  # (bz, 1, emb_size_atom)
         h += time_embeds                                                    # (nAtoms, emb_size_atom)
         m = self.edge_emb(h, basis_rad_raw, main_graph["edge_index"])
         # (nEdges, emb_size_edge)
