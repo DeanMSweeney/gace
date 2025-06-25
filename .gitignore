@@ -5,9 +5,11 @@ Icon?
 # Python 
 __pycache__/
 *.pyc
+adsflow.egg-info
 
 # BATCH/bash
 *.out
 
 # Folders
 '$HOME'/
+scratch/
