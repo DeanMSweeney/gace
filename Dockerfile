@@ -1,29 +1,30 @@
-# 1. Use PyTorch 2.4.1 with CUDA 12.1 (compatible with 12.4+ drivers on HPC)
-FROM pytorch/pytorch:2.4.1-cuda12.1-cudnn8-runtime
+# 1. Use the correct PyTorch + CUDA + dev tools base image
+FROM pytorch/pytorch:2.4.1-cuda12.4-cudnn9-devel
 
-# 2. Set working directory inside container
+# 2. Set working directory
 WORKDIR /workspace
 
-# 3. Install required system packages (needed for PyG and scientific libs)
+# 3. Install system dependencies
 RUN apt-get update && apt-get install -y \
     git \
     curl \
+    build-essential \
     libopenblas-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # 4. Upgrade pip
 RUN pip install --upgrade pip
 
-# 5. Install PyTorch Geometric extensions manually (important: must match CUDA+torch version)
+# 5. Install PyG extensions (manually, not in requirements.txt)
 RUN pip install torch-scatter torch-sparse torch-cluster torch-spline-conv \
-  -f https://data.pyg.org/whl/torch-2.4.0+cu121.html
+  -f https://data.pyg.org/whl/torch-2.4.0+cu124.html
 
-# 6. Copy and install Python dependencies
+# 6. Copy and install Python requirements (torch*, fairchem-core, etc. NOT included here)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 7. Copy your project code (everything in your GitHub repo)
+# 7. Copy your codebase
 COPY . .
 
-# 8. Default command: open a shell inside the container
+# 8. Default to bash
 CMD ["bash"]
