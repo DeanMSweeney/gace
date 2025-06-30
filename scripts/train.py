@@ -2,10 +2,12 @@ import torch
 from torch import optim
 import torch.nn as nn
 import pytorch_lightning as pl
+from pytorch_lightning.loggers import WandbLogger
+import wandb
 
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
 
-class LitGemNetFlow(pl.LightningModule):
+class LightFlowMatch(pl.LightningModule):
     """
     Functionality 
     -------------
@@ -17,8 +19,6 @@ class LitGemNetFlow(pl.LightningModule):
         Model configuration dictionary
     lr: int
         Learning rate 
-    tol: int
-        Tolerance for loss  
     from_noise: bool 
         Whether to learn mapping from pure Gaussian noise or an initial structure
     """
@@ -58,7 +58,12 @@ class LitGemNetFlow(pl.LightningModule):
         u = x1 - x0 
         loss = self.loss_fn(u_hat, u) # compute training loss 
 
-        self.log("train/loss", loss, prog_bar=True)
+        self.log(
+            "train/loss", loss,
+            on_step=True, 
+            on_epoch=True, 
+            prog_bar=True
+        )
         return loss
         
     def validation_step(self, data, batch_idx):
@@ -152,13 +157,25 @@ if __name__ == "__main__":
     loader = DataLoader(dataset, batch_size=10)
 
     # compile lightning model and trainer
-    lightning = LitGemNetFlow(model_cfg, lr=1e-4)
-    trainer = pl.Trainer(max_epochs=100)
+    lightning = LightFlowMatch(model_cfg, lr=1e-4)
+
+    wandb_logger= WandbLogger(
+        project="adsflow",
+        name="pilot",
+        config={
+            "lr": 1e-4, 
+            **model_cfg
+        }, 
+        log_model="all",
+    )
+
+    wandb_logger.watch(lightning.model, log="all", log_freq=50)
+    trainer = pl.Trainer(
+        max_epochs=10000, 
+        log_every_n_steps=10,
+        logger=wandb_logger,
+    )
 
     # train
     trainer.fit(lightning, loader)
-
-
-
-    
-
+    wandb.finish()

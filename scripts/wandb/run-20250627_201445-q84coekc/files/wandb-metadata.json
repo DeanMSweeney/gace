@@ -1,0 +1,31 @@
+{
+  "os": "Linux-6.10.14-linuxkit-x86_64-with-glibc2.35",
+  "python": "CPython 3.11.9",
+  "startedAt": "2025-06-27T20:14:46.560977Z",
+  "program": "/workspace/scripts/train.py",
+  "codePath": "scripts/train.py",
+  "git": {
+    "remote": "https://github.com/DeanMSweeney/AdsFlow.git",
+    "commit": "f1888405b06df79cdbc2469ad67ded4f743788d3"
+  },
+  "email": "dmsween@umich.edu",
+  "root": ".",
+  "host": "ed46144c7f44",
+  "executable": "/opt/conda/bin/python",
+  "codePathLocal": "train.py",
+  "cpu_count": 10,
+  "cpu_count_logical": 10,
+  "disk": {
+    "/": {
+      "total": "1081100128256",
+      "used": "28596965376"
+    }
+  },
+  "memory": {
+    "total": "8218034176"
+  },
+  "cpu": {
+    "count": 10,
+    "countLogical": 10
+  }
+}
