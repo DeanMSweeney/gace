@@ -47,7 +47,7 @@ class LightFlowMatch(pl.LightningModule):
             x0 = data.pos_init # sample initial positions
         
         # optimal transport
-        t_graph = torch.rand(len(data.natoms), 1)
+        t_graph = torch.rand(len(data.natoms), 1, device=data.pos.device)
         t = t_graph[data.batch] # broadcast t (Natoms per graph * batch_size, 3)
         xt = t * x1 + (1 - t) * x0 # interpolate between x0 and x1
         data.pos = xt # reqrite data.pos as the sample at time t
@@ -75,7 +75,7 @@ class LightFlowMatch(pl.LightningModule):
             x0 = data.pos_init # sample pre-relaxed positions 
         
         # optimal transport
-        t_graph = torch.rand(len(data.natoms), 1)
+        t_graph = torch.rand(len(data.natoms), 1,  device=data.pos.device)
         t = t_graph[data.batch] # broadcast t (Natoms per graph * batch_size, 3)
         xt = t * x1 + (1 - t) * x0 # interpolate between x0 and x1
         data.pos = xt 
@@ -102,17 +102,17 @@ if __name__ == "__main__":
     # compile GemNet-OC model parameters 
     model_cfg = {
         "num_targets": 1,
-        "num_spherical": 2,
-        "num_radial": 16,
-        "num_blocks": 2,
-        "emb_size_atom": 64,
-        "emb_size_edge": 64,
-        "emb_size_trip_in": 32,
-        "emb_size_trip_out": 32,
+        "num_spherical": 7,
+        "num_radial": 128,
+        "num_blocks": 4,
+        "emb_size_atom": 256,
+        "emb_size_edge": 512,
+        "emb_size_trip_in": 64,
+        "emb_size_trip_out": 64,
         "emb_size_quad_in": 32,
         "emb_size_quad_out": 32,
-        "emb_size_aint_in": 32,
-        "emb_size_aint_out": 32,
+        "emb_size_aint_in": 64,
+        "emb_size_aint_out": 64,
         "emb_size_rbf": 16,
         "emb_size_cbf": 16,
         "emb_size_sbf": 32,
@@ -121,7 +121,7 @@ if __name__ == "__main__":
         "num_concat": 1,
         "num_atom": 3,
         "num_output_afteratom": 3,
-        "num_atom_emb_layers": 0,
+        "num_atom_emb_layers": 2,
         "num_global_out_layers": 2,
         "flow_matching": True,
         "use_pbc": True,
@@ -153,14 +153,26 @@ if __name__ == "__main__":
     }
 
     # read and build data objects with torch_geometric DataLoader
-    dataset = OCP_DataHandler("/workspace/datasets/mini/data.lmdb", pbc=True)
-    loader = DataLoader(dataset, batch_size=10)
+    train_full = True
+    if train_full: 
+        oc20_path = "/ocean/projects/chm250007p/dsweeney/oc20/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmbd"
+        dataset = OCP_DataHandler(oc20_path, pbc=True)
+        loader = DataLoader(
+            dataset, 
+            batch_size=10,
+            num_workers=4, 
+            pin_memory=True,
+        )
+    else: 
+        dataset = OCP_DataHandler("/workspace/datasets/mini/data.lmdb", pbc=True)
+        loader = DataLoader(dataset, batch_size=10)
+
 
     # compile lightning model and trainer
     lightning = LightFlowMatch(model_cfg, lr=1e-4)
 
     wandb_logger= WandbLogger(
-        project="adsflow",
+        project="train_adsflow",
         name="pilot",
         config={
             "lr": 1e-4, 
@@ -171,7 +183,9 @@ if __name__ == "__main__":
 
     wandb_logger.watch(lightning.model, log="all", log_freq=50)
     trainer = pl.Trainer(
-        max_epochs=10000, 
+        accelerator="gpu",
+        devices=1,
+        max_epochs=200, 
         log_every_n_steps=10,
         logger=wandb_logger,
     )
