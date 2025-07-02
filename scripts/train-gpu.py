@@ -47,7 +47,7 @@ class LightFlowMatch(pl.LightningModule):
             x0 = data.pos_init # sample initial positions
         
         # optimal transport
-        t_graph = torch.rand(len(data.natoms), 1)
+        t_graph = torch.rand(len(data.natoms), 1, device=data.pos.device)
         t = t_graph[data.batch] # broadcast t (Natoms per graph * batch_size, 3)
         xt = t * x1 + (1 - t) * x0 # interpolate between x0 and x1
         data.pos = xt # reqrite data.pos as the sample at time t
@@ -59,8 +59,8 @@ class LightFlowMatch(pl.LightningModule):
         loss = self.loss_fn(u_hat, u) # compute training loss 
 
         self.log(
-            "train/loss", loss,
-            on_step=True, 
+            "train/loss_epoch", loss,
+            on_step=False, 
             on_epoch=True, 
             prog_bar=True
         )
@@ -75,7 +75,7 @@ class LightFlowMatch(pl.LightningModule):
             x0 = data.pos_init # sample pre-relaxed positions 
         
         # optimal transport
-        t_graph = torch.rand(len(data.natoms), 1)
+        t_graph = torch.rand(len(data.natoms), 1,  device=data.pos.device)
         t = t_graph[data.batch] # broadcast t (Natoms per graph * batch_size, 3)
         xt = t * x1 + (1 - t) * x0 # interpolate between x0 and x1
         data.pos = xt 
@@ -153,13 +153,26 @@ if __name__ == "__main__":
     }
 
     # read and build data objects with torch_geometric DataLoader
-    train_full = False
-    
+    train_full = True
     if train_full: 
-        oc20_path = "/ocean/projects/chm250007p/dsweeney/oc20/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmbd"
-        dataset = OCP_DataHandler(oc20_path, pbc=True)
-        loader = DataLoader(dataset, batch_size=10)
+        oc20_train = "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb"
+        oc20_val = "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data.lmdb"
+        train_set = OCP_DataHandler(oc20_train, pbc=True)
+        val_set = OCP_DataHandler(oc20_val, pbc=True)
 
+        train_loader = DataLoader(
+            train_set, 
+            batch_size=10,
+            shuffle=True,
+            num_workers=4, 
+            pin_memory=True,
+        )
+        val_loader = DataLoader(
+            val_set, 
+            batch_size=10,
+            num_workers=4,
+            pin_memory=True,
+        )
     else: 
         dataset = OCP_DataHandler("/workspace/datasets/mini/data.lmdb", pbc=True)
         loader = DataLoader(dataset, batch_size=10)
@@ -169,8 +182,8 @@ if __name__ == "__main__":
     lightning = LightFlowMatch(model_cfg, lr=1e-4)
 
     wandb_logger= WandbLogger(
-        project="adsflow",
-        name="pilot",
+        project="train_adsflow",
+        name="trial_0.0",
         config={
             "lr": 1e-4, 
             **model_cfg
@@ -180,11 +193,16 @@ if __name__ == "__main__":
 
     wandb_logger.watch(lightning.model, log="all", log_freq=50)
     trainer = pl.Trainer(
-        max_epochs=10000, 
+        accelerator="gpu",
+        devices=2,
+        strategy="ddp",
+        max_epochs=300, 
         log_every_n_steps=10,
         logger=wandb_logger,
+
     )
 
     # train
-    trainer.fit(lightning, loader)
+    trainer.fit(lightning, train_loader, val_loader)
     wandb.finish()
+    
