@@ -9,8 +9,8 @@
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=dmsween@umich.edu
 #SBATCH --export=ALL
-#SBATCH --output=%x-%j.out
-#SBATCH --error=%x-%j.err
+#SBATCH --output=logs/%x-%j.out
+#SBATCH --error=logs/%x-%j.err
 
 module purge
 module load cuda/12.4
