@@ -8,7 +8,11 @@ __pycache__/
 
 # BATCH/bash
 *.out
+*.err
+*.sif
 
 # Folders
 '$HOME'/
 scratch/
+full/
+wandb/
