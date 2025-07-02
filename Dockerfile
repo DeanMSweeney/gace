@@ -23,8 +23,11 @@ RUN pip install torch-scatter torch-sparse torch-cluster torch-spline-conv \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 7. Copy your codebase
+# 7. Copy the codebase
 COPY . .
 
-# 8. Default to bash
+# 8. Install your custom package in editable mode (recommended for development)
+#RUN pip install -e .
+
+# 9. Default to bash
 CMD ["bash"]
