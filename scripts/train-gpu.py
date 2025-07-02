@@ -65,7 +65,17 @@ class LightFlowMatch(pl.LightningModule):
             prog_bar=True
         )
         return loss
-        
+    
+    def on_after_backward(self) -> None:
+        missing = [
+            name for name, p in self.named_parameters()
+            if p.requires_grad and p.grad is None
+        ]
+        if missing:
+            # print to both stdout and the W&B log
+            print("⚠️ Missing grads for:", missing)
+            self.logger.experiment.log({"missing_grad_params": missing})
+    
     def validation_step(self, data, batch_idx):
         x1 = data.pos_relaxed # extract unoptimized positions 
 
@@ -93,7 +103,7 @@ class LightFlowMatch(pl.LightningModule):
         return optim.Adam(self.parameters(), lr=self.hparams.lr)
 
 
-### Testing ###
+### Run model ###
 if __name__ == "__main__":
 
     from torch_geometric.loader import DataLoader
@@ -195,7 +205,7 @@ if __name__ == "__main__":
     trainer = pl.Trainer(
         accelerator="gpu",
         devices=2,
-        strategy="ddp",
+        strategy="ddp_find_unused_parameters_true",
         max_epochs=300, 
         log_every_n_steps=10,
         logger=wandb_logger,
