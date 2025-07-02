@@ -99,7 +99,7 @@ if __name__ == "__main__":
     from torch_geometric.loader import DataLoader
     from adsflow.utils.data_handling import OCP_DataHandler
 
-    # compile GemNet-OC model parameters 
+    # compile GemNet-OC model parameters - taken from AdsorbDiff paper  
     model_cfg = {
         "num_targets": 1,
         "num_spherical": 7,
