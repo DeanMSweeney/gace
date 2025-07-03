@@ -204,8 +204,7 @@ if __name__ == "__main__":
     wandb_logger.watch(lightning.model, log="all", log_freq=50)
     trainer = pl.Trainer(
         accelerator="gpu",
-        devices=2,
-        strategy="ddp_find_unused_parameters_true",
+        devices=1,
         max_epochs=300, 
         log_every_n_steps=10,
         logger=wandb_logger,
