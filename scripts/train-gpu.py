@@ -205,7 +205,9 @@ if __name__ == "__main__":
     trainer = pl.Trainer(
         accelerator="gpu",
         devices=1,
-        max_epochs=300, 
+        max_epochs=300,
+        precision=16,
+        accumulate_grad_batches=4,
         log_every_n_steps=10,
         logger=wandb_logger,
 
