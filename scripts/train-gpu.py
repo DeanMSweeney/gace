@@ -31,7 +31,7 @@ class LightFlowMatch(pl.LightningModule):
         
         super().__init__()
         self.save_hyperparameters() # all variables in __init__ are set as hyperparameters 
-        self.model = GemNetFlow(**model_cfg) # define GNN
+        self.model = torch.compile(GemNetFlow(**model_cfg), mode="default") # define & compile GNN
         self.loss_fn = nn.MSELoss()
         self.from_noise = from_noise
 
@@ -204,13 +204,13 @@ if __name__ == "__main__":
     wandb_logger.watch(lightning.model, log="all", log_freq=50)
     trainer = pl.Trainer(
         accelerator="gpu",
-        devices=1,
+        devices=4,
         max_epochs=300,
+        strategy="ddp_find_unused_parameters_false",
         precision=16,
         accumulate_grad_batches=4,
         log_every_n_steps=10,
         logger=wandb_logger,
-
     )
 
     # train
