@@ -13,6 +13,9 @@ import torch.nn as nn
 from torch_geometric.nn import radius_graph
 from torch_geometric.data import Data
 
+
+from adsflow.utils.graph import get_pbc_distances, radius_graph_pbc
+
 """
 from ads_flow.utils.utils import (
     get_pbc_distances,

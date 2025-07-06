@@ -68,7 +68,6 @@ from .transformer_block import (
 )
 from .input_block import EdgeDegreeEmbedding
 
-
 # Statistics of IS2RE 100K 
 _AVG_NUM_NODES  = 77.81317
 _AVG_DEGREE     = 23.395238876342773    # IS2RE: 100k, max_radius = 5, max_neighbors = 100
@@ -177,6 +176,7 @@ class EquiformerV2_Flow(BaseModel):
 
         self.use_pbc = use_pbc
         self.flow_matching = flow_matching
+        self.regress_forces = self.flow_matching
         self.otf_graph = otf_graph
         self.max_neighbors = max_neighbors
         self.max_radius = max_radius
