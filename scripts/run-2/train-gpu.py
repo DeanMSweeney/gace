@@ -31,7 +31,7 @@ class LightFlowMatch(pl.LightningModule):
         
         super().__init__()
         self.save_hyperparameters() # all variables in __init__ are set as hyperparameters 
-        self.model = torch.compile(GemNetFlow(**model_cfg), mode="default") # define & compile GNN
+        self.model = torch.compile(GemNetFlow(**model_cfg), mode="reduce_overhead") # define & compile GNN
         self.loss_fn = nn.MSELoss()
         self.from_noise = from_noise
 
@@ -108,6 +108,9 @@ if __name__ == "__main__":
 
     from torch_geometric.loader import DataLoader
     from adsflow.utils.data_handling import OCP_DataHandler
+    import torch._dynamo
+
+    torch._dynamo.config.suppress_errors = True
 
     # compile GemNet-OC model parameters 
     model_cfg = {
