@@ -5,8 +5,6 @@ import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 import wandb
 
-from adsflow.models.gemnet.gemnet_flow import GemNetFlow
-
 class LightFlowMatch(pl.LightningModule):
     """
     Functionality 
@@ -15,8 +13,8 @@ class LightFlowMatch(pl.LightningModule):
     
     Arguments
     ---------
-    model_cfg: dict 
-        Model configuration dictionary
+    model: class 
+        Neural network based model for learning velocity field
     lr: int
         Learning rate 
     from_noise: bool 
@@ -24,14 +22,14 @@ class LightFlowMatch(pl.LightningModule):
     """
     def __init__(
             self, 
-            model_cfg, 
+            model,
             lr: int = 1e-3, 
             from_noise: bool = False
         ):
         
         super().__init__()
         self.save_hyperparameters() # all variables in __init__ are set as hyperparameters 
-        self.model = GemNetFlow(**model_cfg) # define GNN
+        self.model = model# define neutrla network
         self.loss_fn = nn.MSELoss()
         self.from_noise = from_noise
 
@@ -94,83 +92,36 @@ class LightFlowMatch(pl.LightningModule):
 
 
 ### Testing ###
+
 if __name__ == "__main__":
 
     from torch_geometric.loader import DataLoader
     from adsflow.utils.data_handling import OCP_DataHandler
+    from adsflow.models.gemnet.gemnet_flow import GemNetFlow
+    from adsflow.models.equiformer_v2.equiformer_v2_oc20 import EquiformerV2_Flow
+    import json
 
-    # compile GemNet-OC model parameters 
-    model_cfg = {
-        "num_targets": 1,
-        "num_spherical": 7,
-        "num_radial": 128,
-        "num_blocks": 4,
-        "emb_size_atom": 256,
-        "emb_size_edge": 512,
-        "emb_size_trip_in": 64,
-        "emb_size_trip_out": 64,
-        "emb_size_quad_in": 32,
-        "emb_size_quad_out": 32,
-        "emb_size_aint_in": 64,
-        "emb_size_aint_out": 64,
-        "emb_size_rbf": 16,
-        "emb_size_cbf": 16,
-        "emb_size_sbf": 32,
-        "num_before_skip": 2,
-        "num_after_skip": 2,
-        "num_concat": 1,
-        "num_atom": 3,
-        "num_output_afteratom": 3,
-        "num_atom_emb_layers": 2,
-        "num_global_out_layers": 2,
-        "flow_matching": True,
-        "use_pbc": True,
-        "scale_backprop_forces": False,
-        "cutoff": 12.0,
-        "cutoff_qint": 12.0,
-        "cutoff_aeaint": 12.0,
-        "cutoff_aint": 12.0,
-        "max_neighbors": 30,
-        "max_neighbors_qint": 8,
-        "max_neighbors_aeaint": 20,
-        "max_neighbors_aint": 1000,
-        "enforce_max_neighbors_strictly": True,
-        "rbf": {"name": "gaussian"},
-        "rbf_spherical": None,
-        "envelope": {"name": "polynomial", "exponent": 5},
-        "cbf": {"name": "spherical_harmonics"},
-        "sbf": {"name": "legendre_outer"},
-        "extensive": True,
-        "forces_coupled": True,
-        "output_init": "HeOrthogonal",
-        "activation": "silu",
-        "scale_file": None,
-        "quad_interaction": False,
-        "atom_edge_interaction": True,
-        "edge_atom_interaction": True,
-        "atom_interaction": True,
-        "scale_basis": True,
-    }
+    attention = True # configure for attention mechanism via EquiformerV2
+    if not attention:
+        with open("gemnet_cfg.json") as f:
+            model_cfg = json.load(f) # load in gemnet configuration file 
+        model = GemNetFlow(**model_cfg)
+
+    else:
+         with open("equiformerv2_cfg.json") as f:
+            model_cfg = json.load(f) # load in the equiformer configuration file 
+         model = EquiformerV2_Flow(**model_cfg)
 
     # read and build data objects with torch_geometric DataLoader
-    train_full = False
-    
-    if train_full: 
-        oc20_path = "/ocean/projects/chm250007p/dsweeney/oc20/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmbd"
-        dataset = OCP_DataHandler(oc20_path, pbc=True)
-        loader = DataLoader(dataset, batch_size=10)
-
-    else: 
-        dataset = OCP_DataHandler("/workspace/datasets/mini/data.lmdb", pbc=True)
-        loader = DataLoader(dataset, batch_size=10)
-
+    dataset = OCP_DataHandler("/workspace/datasets/mini/data.lmdb", pbc=True)
+    loader = DataLoader(dataset, batch_size=10)
 
     # compile lightning model and trainer
-    lightning = LightFlowMatch(model_cfg, lr=1e-4)
+    lightning = LightFlowMatch(model, lr=1e-4)
 
     wandb_logger= WandbLogger(
         project="adsflow",
-        name="pilot",
+        name="mini-batch",
         config={
             "lr": 1e-4, 
             **model_cfg
@@ -180,7 +131,7 @@ if __name__ == "__main__":
 
     wandb_logger.watch(lightning.model, log="all", log_freq=50)
     trainer = pl.Trainer(
-        max_epochs=10000, 
+        max_epochs=100, 
         log_every_n_steps=10,
         logger=wandb_logger,
     )
@@ -188,3 +139,6 @@ if __name__ == "__main__":
     # train
     trainer.fit(lightning, loader)
     wandb.finish()
+
+
+
