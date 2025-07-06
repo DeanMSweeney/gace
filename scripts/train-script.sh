@@ -15,15 +15,13 @@
 module purge
 module load cuda/12.4
 
-# explicitly define SCRATCH 
-export SCRATCH=/ocean/projects/chm250007p/dsweeney
-
 PROJECT_DIR=$(dirname "$SLURM_SUBMIT_DIR")
 
 srun singularity exec --nv --cleanenv \
     --bind "${PROJECT_DIR}":/workspace \
     "/ocean/projects/chm250007p/dsweeney/adsflow.sif" \
     bash -c "\
+      export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True && \
       cd /workspace/scripts && \
       echo \"NOW IN: \$(pwd)\" && \
       echo \"CONTENTS:\" && ls -l . && \
