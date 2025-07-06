@@ -10,9 +10,11 @@ __pycache__/
 *.out
 *.err
 *.sif
+*.ckpt*
 
 # Folders
 '$HOME'/
 scratch/
 full/
 wandb/
+logs/
