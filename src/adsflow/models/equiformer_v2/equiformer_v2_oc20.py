@@ -446,7 +446,7 @@ class EquiformerV2_Flow(BaseModel):
 
         # Time embedding 
         time_embeds = self.time_emb(self.process_time_embeds(t))
-        x += time_embeds 
+        x.embedding[:, 0, :] += time_embeds 
 
         offset_res = 0
         offset = 0
@@ -475,7 +475,7 @@ class EquiformerV2_Flow(BaseModel):
             atomic_numbers,
             edge_distance,
             edge_index)
-        x.embedding = x.embedding + edge_degree.embedding
+        x.embedding = x.embedding + edge_degree.embedding 
 
         ###############################################################
         # Update spherical node embeddings
