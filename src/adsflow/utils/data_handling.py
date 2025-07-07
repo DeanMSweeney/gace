@@ -21,12 +21,14 @@ class OCP_DataHandler():
             path: str = None, 
             eta: int = 1.00, 
             pbc: bool = True,
+            flow_matching: bool = True,
         ):
         super().__init__()
 
         self.ds = LmdbDataset({"src": path})
         self.M = int(len(self.ds) * eta)
         self.pbc = pbc
+        self.flow_matching = flow_matching
     
     def __len__(self):
         return self.M
@@ -45,6 +47,9 @@ class OCP_DataHandler():
             pos_init       = samp['pos'].clone().detach().float(),
             pos_relaxed    = samp['pos_relaxed'].clone().detach().float(),
         )
+
+        if not self.flow_matching:
+            data.force = samp['force'].clone().detach().float()
         
         return data
 
@@ -53,7 +58,7 @@ class OCP_DataHandler():
 if __name__ == "__main__":
     from torch_geometric.loader import DataLoader
 
-    dataset = OCP_DataHandler("/workspace/adsflow/dataset/mini/data.lmdb", pbc=True)
+    dataset = OCP_DataHandler("/workspace/datasets/mini/data.lmdb", pbc=True, flow_matching=False)
     loader = DataLoader(dataset, batch_size=25)
 
     with open("testing.txt", "w") as f:
