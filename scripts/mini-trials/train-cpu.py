@@ -125,11 +125,9 @@ if __name__ == "__main__":
     # compile lightning model and trainer
     lightning = LightFlowMatch(model, lr=1e-4)
 
-    os.makedirs("wandb", exist_ok=True)
     wandb_logger= WandbLogger(
         project="adsflow",
-        dir="wandb",
-        name="mini-batch_01-sonic",
+        name="mini-batch_01",
         config={
             "lr": 1e-4, 
             **model_cfg
