@@ -12,19 +12,18 @@
 #SBATCH --output=logs/%x-%j.out
 #SBATCH --error=logs/%x-%j.err
 
+
 module purge
 module load cuda/12.4
 
+# point to the project root (for your singularity bind)
 PROJECT_DIR=$(dirname "$(dirname "$SLURM_SUBMIT_DIR")")
 
 srun singularity exec --nv --cleanenv \
     --bind "${PROJECT_DIR}":/workspace \
-    "/ocean/projects/chm250007p/dsweeney/adsflow.sif" \
+    "$SCRATCH/.imgs/adsflow.sif" \
     bash -c "\
       export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True && \
-      cd /workspace/scripts/run-2 && \
-      echo \"NOW IN: \$(pwd)\" && \
-      echo \"CONTENTS:\" && ls -l . && \
+      cd /workspace${SLURM_SUBMIT_DIR#$PROJECT_DIR} && \
       python train-gpu.py
     "
-
