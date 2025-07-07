@@ -146,15 +146,15 @@ if __name__ == "__main__":
 
         train_loader = DataLoader(
             train_set, 
-            batch_size=64,
+            batch_size=32,
             shuffle=True,
-            num_workers=31, 
+            num_workers=4, 
             pin_memory=True,
         )
         val_loader = DataLoader(
             val_set, 
-            batch_size=64,
-            num_workers=31,
+            batch_size=32,
+            num_workers=4,
             pin_memory=True,
         )
     else: 
@@ -166,8 +166,8 @@ if __name__ == "__main__":
     lightning = LightForce(model_cfg, lr=1e-4)
 
     wandb_logger= WandbLogger(
-        project="train_adsflow",
-        name="gemnet-oc_energy",
+        project="adsflow",
+        name="GemNetOC-force",
         config={
             "lr": 1e-4, 
             **model_cfg
@@ -180,7 +180,7 @@ if __name__ == "__main__":
         accelerator="gpu",
         devices=1,
         max_epochs=300,
-        precision=16,
+        precision="16-mixed",
         accumulate_grad_batches=4,
         log_every_n_steps=10,
         logger=wandb_logger,
