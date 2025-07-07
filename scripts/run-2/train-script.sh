@@ -2,7 +2,7 @@
 #SBATCH -A chm250007p                    # project number
 #SBATCH -p GPU-shared
 #SBATCH -t 15:00:00
-#SBATCH --gpus=v100-32:4
+#SBATCH --gpus=v100-32:1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=5
 #SBATCH -J adsflow_train-0               # job name
@@ -22,7 +22,7 @@ srun singularity exec --nv --cleanenv \
     "/ocean/projects/chm250007p/dsweeney/adsflow.sif" \
     bash -c "\
       export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True && \
-      cd /workspace/scripts && \
+      cd /workspace/scripts/run-2 && \
       echo \"NOW IN: \$(pwd)\" && \
       echo \"CONTENTS:\" && ls -l . && \
       python train-gpu.py
