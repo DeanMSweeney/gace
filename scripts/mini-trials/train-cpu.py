@@ -1,4 +1,4 @@
-import torch 
+import torch
 from torch import optim
 import torch.nn as nn
 import pytorch_lightning as pl
@@ -100,6 +100,7 @@ if __name__ == "__main__":
     from adsflow.models.gemnet.gemnet_flow import GemNetFlow
     from adsflow.models.equiformer_v2.equiformer_v2_oc20 import EquiformerV2_Flow
     import json
+    import os
 
     attention = False # configure for attention mechanism via EquiformerV2
     if not attention:
@@ -114,14 +115,21 @@ if __name__ == "__main__":
 
     # read and build data objects with torch_geometric DataLoader
     dataset = OCP_DataHandler("/workspace/datasets/mini/data.lmdb", pbc=True)
-    loader = DataLoader(dataset, batch_size=10)
+    loader = DataLoader(
+            dataset,
+            batch_size=10, 
+            num_workers=15,
+            pin_memory=True,
+            )
 
     # compile lightning model and trainer
     lightning = LightFlowMatch(model, lr=1e-4)
 
+    os.makedirs("wandb", exist_ok=True)
     wandb_logger= WandbLogger(
         project="adsflow",
-        name="mini-batch",
+        dir="wandb",
+        name="mini-batch_01-sonic",
         config={
             "lr": 1e-4, 
             **model_cfg
