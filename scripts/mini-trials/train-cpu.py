@@ -101,7 +101,7 @@ if __name__ == "__main__":
     from adsflow.models.equiformer_v2.equiformer_v2_oc20 import EquiformerV2_Flow
     import json
 
-    attention = True # configure for attention mechanism via EquiformerV2
+    attention = False # configure for attention mechanism via EquiformerV2
     if not attention:
         with open("gemnet_cfg.json") as f:
             model_cfg = json.load(f) # load in gemnet configuration file 
@@ -131,7 +131,7 @@ if __name__ == "__main__":
 
     wandb_logger.watch(lightning.model, log="all", log_freq=50)
     trainer = pl.Trainer(
-        max_epochs=100, 
+        max_epochs=300, 
         log_every_n_steps=10,
         logger=wandb_logger,
     )
