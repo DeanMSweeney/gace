@@ -494,7 +494,7 @@ class EquiformerV2_Flow(BaseModel):
         x.embedding = self.norm(x.embedding)
 
         ###############################################################
-        # Energy estimation
+        # Energy head (unused)
         ###############################################################
         node_energy = self.energy_block(x) 
         node_energy = node_energy.embedding.narrow(1, 0, 1)
@@ -503,7 +503,7 @@ class EquiformerV2_Flow(BaseModel):
         energy = energy / _AVG_NUM_NODES
 
         ###############################################################
-        # Force estimation
+        # Velocity head
         ###############################################################
         if self.flow_matching:
             velocity = self.velocity_block(x,
