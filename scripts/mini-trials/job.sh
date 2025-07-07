@@ -13,11 +13,12 @@
 
 module purge
 
+# point to the project root (for your singularity bind)
 PROJECT_DIR=$(dirname "$(dirname "$SLURM_SUBMIT_DIR")")
 
 srun singularity exec --cleanenv \
     --bind "${PROJECT_DIR}":/workspace \
-    "$HOME/.imgs/adsflow-sonic.sif" \
+    "$SCRATCH/.imgs/adsflow.sif" \
     bash -c "\
       cd /workspace${SLURM_SUBMIT_DIR#$PROJECT_DIR} && \
       python train-cpu.py
