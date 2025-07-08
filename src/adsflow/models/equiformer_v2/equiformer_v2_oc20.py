@@ -242,7 +242,7 @@ class EquiformerV2_Flow(BaseModel):
         self.sphere_embedding = nn.Embedding(self.max_num_elements, self.sphere_channels_all)
         
         # Add time embedding block
-        self.time_emb = Linear(2 * time_n_freqs, self.sphere_channels)
+        self.time_emb = nn.Linear(2 * time_n_freqs, self.sphere_channels)
 
         # Initialize the function used to measure the distances between atoms
         assert self.distance_function in [
