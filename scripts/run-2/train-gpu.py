@@ -202,6 +202,7 @@ if __name__ == "__main__":
     )
 
     wandb_logger.watch(lightning.model, log="all", log_freq=50)
+
     trainer = pl.Trainer(
         accelerator="gpu",
         devices=1,
