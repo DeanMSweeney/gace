@@ -29,7 +29,7 @@ class LightFlowMatch(pl.LightningModule):
         
         super().__init__()
         self.save_hyperparameters() # all variables in __init__ are set as hyperparameters 
-        self.model = model# define neutrla network
+        self.model = model # define neutrla network
         self.loss_fn = nn.MSELoss()
         self.from_noise = from_noise
 
