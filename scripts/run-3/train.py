@@ -18,10 +18,10 @@ from adsflow.utils.data_handling import OCP_DataHandler
 
 @dataclass
 class TrainConfig:
-    # seed 
-    seed: int = 42
     # model 
     model_cfg: DictConfig
+    # seed  
+    seed: int = 42 
     # paths
     oc20_train: str = "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb"
     oc20_val: str = "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data.lmdb"
@@ -110,7 +110,7 @@ class LightFlowMatch(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        return optim.Adam(self.parameters(), lr=self.hparams.lr)
+        return optim.AdamW(self.parameters(), lr=self.hparams.lr)
 
 @main(config_path="conf", config_name="train_config")
 def main(cfg: TrainConfig) -> None:
@@ -154,7 +154,7 @@ def main(cfg: TrainConfig) -> None:
         callbacks=[checkpoint_cb],
         accelerator=cfg.accelerator,
         devices=cfg.devices,
-        strategy="ddp_find_unused_parameters_false",
+        strategy="ddp_find_unused_parameters_true",
         precision=cfg.precision,
         max_epochs=cfg.max_epochs,
         accumulate_grad_batches=cfg.accumulate_grad_batches,
