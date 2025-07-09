@@ -1,4 +1,6 @@
 # conf/train_config.yaml
+version_base: 1.1
+
 defaults:
   - model_cfg: gemnet_cfg
   - _self_
@@ -8,17 +10,18 @@ seed: 42
 oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb"
 oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data.lmdb"
 
-lr: 1e-4
+lr: 1e-3
 batch_size: 16
 num_workers: 4
 precision: "16-mixed"
 max_epochs: 300
 accumulate_grad_batches: 4
+accelerator: "gpu"
 devices: 1
 from_noise: false
 
 project: "adsflow"
-run_name: "gauntlet"
+run_name: "gauntlet-02"
 ckpt_dir: "checkpoints"
 ckpt_monitor: "val/loss"
 ckpt_mode: "min"
