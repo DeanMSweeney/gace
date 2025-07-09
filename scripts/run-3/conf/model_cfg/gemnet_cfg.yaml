@@ -1,3 +1,5 @@
+version_base: 1.1
+
 _target_: adsflow.models.gemnet.gemnet_flow.GemNetFlow
 num_targets: 1
 num_spherical: 7

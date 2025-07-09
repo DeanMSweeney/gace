@@ -25,5 +25,5 @@ srun singularity exec --nv --cleanenv \
     bash -c "\
       export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True && \
       cd /workspace${SLURM_SUBMIT_DIR#$PROJECT_DIR} && \
-      python train-gpu.py
+      python train.py
     "
