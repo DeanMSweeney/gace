@@ -110,7 +110,10 @@ class LightFlowMatch(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        return optim.AdamW(self.parameters(), lr=self.hparams.lr)
+        optimizer = optim.AdamW(self.parameters(), lr=self.hparams.lr)
+        scheduler1 = optim.lr_scheduler.ExponentialLR(optimizer)
+        scheduler2 = optim.lr_scheduler.ReduceLROnPlateau(optimizer)
+        return [optimizer], [scheduler1, scheduler2]
 
 @main(config_path="conf", config_name="train_config")
 def main(cfg: TrainConfig) -> None:
@@ -121,12 +124,11 @@ def main(cfg: TrainConfig) -> None:
     model: GemNetFlow = instantiate(cfg.model_cfg, _convert_="partial")
 
     # load datasets
-    train_set = OCP_DataHandler(cfg.oc20_train, pbc=True)
-    val_set = OCP_DataHandler(cfg.oc20_val, pbc=True)
-
     pin_memory = True if cfg.accelerator == "gpu" else False
+    train_set = OCP_DataHandler(cfg.oc20_train, pbc=True)
     train_loader = DataLoader(train_set, batch_size=cfg.batch_size, shuffle=True,
                                num_workers=cfg.num_workers, pin_memory=pin_memory)
+    val_set = OCP_DataHandler(cfg.oc20_val, pbc=True)
     val_loader = DataLoader(val_set, batch_size=cfg.batch_size,
                              num_workers=cfg.num_workers, pin_memory=pin_memory)
 
@@ -167,6 +169,7 @@ def main(cfg: TrainConfig) -> None:
         val_dataloaders=val_loader,
         ckpt_path=cfg.ckpt_path, # load model from checkpoint
     )
+
 
 if __name__ == "__main__":
     main()
