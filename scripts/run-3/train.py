@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 import torch
 from torch import optim
+from torch.optim.lr_scheduler import LinearLR, ExponentialLR, ReduceLROnPlateau, SequentialLR
 import torch.nn as nn
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
@@ -26,7 +27,7 @@ class TrainConfig:
     oc20_train: str = "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb"
     oc20_val: str = "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data.lmdb"
     # training hyperparameters
-    lr: float = 1e-4
+    lr: float = 5e-4
     batch_size: int = 16
     num_workers: int = 4
     precision: str = "16-mixed"
@@ -64,7 +65,7 @@ class LightFlowMatch(pl.LightningModule):
             self, 
             model: GemNetFlow,
             lr: int = 1e-3, 
-            from_noise: bool = False
+            from_noise: bool = False,
         ):
         
         super().__init__()
@@ -87,9 +88,9 @@ class LightFlowMatch(pl.LightningModule):
             del data.pos_init
 
         t_graph = torch.rand(len(data.natoms), 1, device=x1.device) # sample t from U
-        t = t_graph[data.batch]
+        t = t_graph[data.batch] 
 
-        xt = t * x1 + (1 - t) * x0 # interpolation scheme 
+        xt = x1 * t + (1 - t) * x0 # interpolation scheme 
         data.pos = xt # reassign xt to pos 
         data.t = t
 
@@ -111,9 +112,51 @@ class LightFlowMatch(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = optim.AdamW(self.parameters(), lr=self.hparams.lr)
-        scheduler1 = optim.lr_scheduler.ExponentialLR(optimizer)
-        scheduler2 = optim.lr_scheduler.ReduceLROnPlateau(optimizer)
-        return [optimizer], [scheduler1, scheduler2]
+
+        # warmup phase
+        warmup_epochs = 5
+        warmup_scheduler = LinearLR(
+            optimizer=optimizer,
+            start_factor=0.05, 
+            end_factor=1.0,
+            total_iters=warmup_epochs,
+        )
+
+        # expotential decay phase 
+        decay_scheduler = ExponentialLR(optimizer=optimizer,  gamma=0.9,)
+
+        # combined earmup + expotential decay
+        combined_scheduler = SequentialLR(
+            optimizer=optimizer,
+            schedulers=[warmup_scheduler, decay_scheduler], 
+            milestones=[warmup_epochs],
+        )
+
+        plateau_scheduler = ReduceLROnPlateau(
+            optimizer=optimizer,
+            mode='min',
+            factor=0.5,
+            patience=2,
+            min_lr=1e-6, 
+            verbose=True
+        )
+
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": [
+                {
+                    "scheduler": combined_scheduler,
+                    "interval": "epoch",   # warmup & switch counted in epochs
+                    "frequency": 1,
+                },
+                {
+                    "scheduler": plateau_scheduler,
+                    "interval": "epoch",   # also per-epoch
+                    "monitor": "val/loss",
+                    "frequency": 1,
+                },
+            ],
+        }
 
 @main(config_path="conf", config_name="train_config")
 def main(cfg: TrainConfig) -> None:
@@ -124,7 +167,7 @@ def main(cfg: TrainConfig) -> None:
     model: GemNetFlow = instantiate(cfg.model_cfg, _convert_="partial")
 
     # load datasets
-    pin_memory = True if cfg.accelerator == "gpu" else False
+    pin_memory = True 
     train_set = OCP_DataHandler(cfg.oc20_train, pbc=True)
     train_loader = DataLoader(train_set, batch_size=cfg.batch_size, shuffle=True,
                                num_workers=cfg.num_workers, pin_memory=pin_memory)
