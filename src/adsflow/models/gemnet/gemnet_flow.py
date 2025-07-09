@@ -106,9 +106,6 @@ class GemNetFlow(nn.Module, GraphModelMixin):
 
     flow_matching: bool
         Whether to predict forces. Default: True
-    regress_velcoity: bool
-        If True predict forces based on aggregation of interatomic directions.
-        If False predict forces based on negative gradient of energy potential.
     use_pbc: bool
         Whether to use periodic boundary conditions.
     use_pbc_single:
@@ -156,8 +153,6 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         Name and hyperparameters of the spherical basis function.
     extensive: bool
         Whether the output should be extensive (proportional to the number of atoms)
-    forces_coupled: bool
-        If True, enforce that |F_st| = |F_ts|. No effect if regress_velocity is False.
     output_init: str
         Initialization method for the final dense layer.
     activation: str
@@ -184,7 +179,6 @@ class GemNetFlow(nn.Module, GraphModelMixin):
 
     def __init__(
         self,
-        num_targets: int,
         num_spherical: int,
         num_radial: int,
         num_blocks: int,
@@ -204,11 +198,10 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         num_concat: int,
         num_atom: int,
         num_output_afteratom: int,
+        num_targets: int = 1,
         num_atom_emb_layers: int = 0,
         num_global_out_layers: int = 2,
         flow_matching: bool = True,
-        regress_velocity: bool = True,
-        regress_forces: bool = True,
         use_pbc: bool = True,
         use_pbc_single: bool = False,
         scale_backprop_forces: bool = False,
@@ -280,9 +273,8 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         self.enforce_max_neighbors_strictly = enforce_max_neighbors_strictly
         self.use_pbc = use_pbc
         self.use_pbc_single = use_pbc_single
-
-        self.regress_velocity = regress_velocity
-        self.regress_forces = regress_forces
+        
+    
         self.forces_coupled = forces_coupled
         self.flow_matching = flow_matching
         self.force_scaler = ForceScaler(enabled=scale_backprop_forces)
@@ -356,7 +348,6 @@ class GemNetFlow(nn.Module, GraphModelMixin):
                     nHidden=num_atom,
                     nHidden_afteratom=num_output_afteratom,
                     activation=activation,
-                    direct_forces=True,
                 )
             )
         self.out_blocks = torch.nn.ModuleList(out_blocks)
@@ -376,8 +367,9 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         ]
         self.out_mlp_E = torch.nn.Sequential(*out_mlp_E)
         self.out_energy = Dense(emb_size_atom, num_targets, bias=False, activation=None)
-        if regress_velocity:
-            out_mlp_vt = [
+        
+        # Output velciity 
+        out_mlp_vt = [
                 Dense(
                     emb_size_edge * (num_blocks + 1),
                     emb_size_edge,
@@ -390,13 +382,12 @@ class GemNetFlow(nn.Module, GraphModelMixin):
                 )
                 for _ in range(num_global_out_layers)
             ]
-            self.out_mlp_vt = torch.nn.Sequential(*out_mlp_vt)
-            self.out_velocity = Dense(emb_size_edge, num_targets, bias=False, activation=None) # Output shape: (N_atoms, 3)
+        self.out_mlp_vt = torch.nn.Sequential(*out_mlp_vt)
+        self.out_velocity = Dense(emb_size_edge, num_targets, bias=False, activation=None) # Output shape: (N_atoms, 3)
 
         out_initializer = get_initializer(output_init)
         self.out_energy.reset_parameters(out_initializer)
-        if regress_velocity:
-            self.out_velocity.reset_parameters(out_initializer)
+        self.out_velocity.reset_parameters(out_initializer)
 
         load_scales_compat(self, scale_file)
     
@@ -1218,9 +1209,6 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         atomic_numbers = data.atomic_numbers.long()
         num_atoms = atomic_numbers.shape[0]
 
-        if self.flow_matching and not self.regress_velocity:
-            pos.requires_grad_(True)
-
         (
             main_graph,
             a2a_graph,
@@ -1295,25 +1283,19 @@ class GemNetFlow(nn.Module, GraphModelMixin):
             xs_vt.append(x_vt)
         # Global output block for final predictions
 
-        # Regress energy
-        x_E = self.out_mlp_E(torch.cat(xs_E, dim=-1))
-        
-        #print('Global output')
-        if self.regress_velocity:
-            x_vt = self.out_mlp_vt(torch.cat(xs_vt, dim=-1))
+        # Output energy and velocity 
+        #x_E = self.out_mlp_E(torch.cat(xs_E, dim=-1))
+        x_vt = self.out_mlp_vt(torch.cat(xs_vt, dim=-1))
             
         with torch.autocast("cuda", enabled=False):
-            #E_t = self.out_energy(x_E.float())
-            if self.regress_velocity:
-                
-                vt_st = self.out_velocity(x_vt.float())
+           vt_st = self.out_velocity(x_vt.float())
 
         nMolecules = torch.max(batch) + 1
 
         """
-        Energy prediction: 
-        _________________
-        
+        ##############################################################
+                                # Energy Head 
+        ############################################################## 
         if self.extensive:
             E_t = scatter_det(
                 E_t, batch, dim=0, dim_size=nMolecules, reduce="add"
@@ -1326,38 +1308,20 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         E_t = E_t.squeeze(1)  # (num_molecules)
         print(E_t)
         """
-        
-        #print("Output velocity field")
+        ##############################################################
+                                # Velcoity Head 
+        ##############################################################                           
         if self.flow_matching:
-            if self.regress_velocity:
-                if self.forces_coupled:  # enforce F_st = F_ts
-                    nEdges = idx_t.shape[0]
-                    id_undir = repeat_blocks(
-                        main_graph["num_neighbors"] // 2,
-                        repeats=2,
-                        continuous_indexing=True,
-                    )
-                    vt_st = scatter_det(
-                        vt_st,
-                        id_undir,
-                        dim=0,
-                        dim_size=int(nEdges / 2),
-                        reduce="mean",
-                    )  # (nEdges/2, 1)
-                    vt_st = vt_st[id_undir]  # (nEdges, 1)
-
-                # map forces in edge directions
-                vt_st_vec = vt_st[:, :, None] * main_graph["vector"][:, None, :]
-                # (nEdges, 1, 3)
-                vt_t = scatter_det(
-                    vt_st_vec,
-                    idx_t,
-                    dim=0,
-                    dim_size=num_atoms,
-                    reduce="add",
-                ) # (nAtoms, 1, 3)
-            else:
-                F_t = self.force_scaler.calc_forces_and_update(E_t, pos)
+            # map forces in edge directions
+            vt_st_vec = vt_st[:, :, None] * main_graph["vector"][:, None, :]
+            # (nEdges, 1, 3)
+            vt_t = scatter_det(
+                vt_st_vec,
+                idx_t,
+                dim=0,
+                dim_size=num_atoms,
+                reduce="add",
+            ) # (nAtoms, 1, 3)
 
             vt_t = vt_t.squeeze(1)  # (num_calc_forces_and_updateatoms, 3)
 
