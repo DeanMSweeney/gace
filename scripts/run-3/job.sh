@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH -A chm250007p                    # project number
 #SBATCH -p GPU-shared
-#SBATCH -t 15:00:00
-#SBATCH --gpus=v100-32:1
+#SBATCH -t 20:00:00
+#SBATCH --gpus=v100-32:16
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=5
 #SBATCH -J adsflow_train-0               # job name
