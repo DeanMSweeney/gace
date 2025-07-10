@@ -69,7 +69,7 @@ class LightFlowMatch(pl.LightningModule):
         ):
         
         super().__init__()
-        self.save_hyperparameters()  # all __init__ args saved
+        self.save_hyperparameters(ignore="model")  # all __init__ args saved
         self.model = model
         self.loss_fn = nn.MSELoss()
         self.from_noise = from_noise
@@ -158,7 +158,11 @@ class LightFlowMatch(pl.LightningModule):
             ],
         }
 
-@main(config_path="conf", config_name="train_config")
+@main(
+    version_base="1.1",          # <— tell Hydra exactly which syntax you’re on
+    config_path="conf",
+    config_name="train_config",
+)
 def main(cfg: TrainConfig) -> None:
     # seed for reproducibility 
     pl.seed_everything(cfg.seed, workers=True)
