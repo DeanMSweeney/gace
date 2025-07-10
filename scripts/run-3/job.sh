@@ -1,17 +1,16 @@
 #!/bin/bash
-#SBATCH -A chm250007p                    # project number
-#SBATCH -p GPU-shared
-#SBATCH -t 20:00:00
-#SBATCH --gpus=v100-32:16
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=5
-#SBATCH -J adsflow_train-0               # job name
+#SBATCH -A chm250007p                      # your project/account
+#SBATCH -p GPU                             # GPU partition
+#SBATCH --nodes=2                          # <-- request 2 nodes
+#SBATCH --ntasks-per-node=1                # one “task” (process) per node
+#SBATCH --cpus-per-task=5                  # CPUs per task
+#SBATCH --gpus-per-node=v100-32:8          # 8 × V100-32 GB GPUs on each node
+#SBATCH -t 20:00:00                        # walltime
+#SBATCH -J adsflow_train-0                 # job name
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=dmsween@umich.edu
-#SBATCH --export=ALL
 #SBATCH --output=logs/%x-%j.out
 #SBATCH --error=logs/%x-%j.err
-
 
 module purge
 module load cuda/12.4
