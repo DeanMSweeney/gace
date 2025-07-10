@@ -220,7 +220,6 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         cbf: dict[str, str] | None = None,
         sbf: dict[str, str] | None = None,
         extensive: bool = True,
-        forces_coupled: bool = False,
         output_init: str = "HeOrthogonal",
         activation: str = "silu",
         quad_interaction: bool = False,
@@ -274,11 +273,12 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         self.use_pbc = use_pbc
         self.use_pbc_single = use_pbc_single
         
-    
-        self.forces_coupled = forces_coupled
         self.flow_matching = flow_matching
         self.force_scaler = ForceScaler(enabled=scale_backprop_forces)
         
+        # dummy variables for flow matching 
+        self.regress_forces = True
+        self.direct_forces = True
 
         self.init_basis_functions(
             num_radial,
