@@ -255,6 +255,18 @@ def main(cfg: TrainConfig) -> None:
         ckpt_path=cfg.ckpt_path, # load model from checkpoint
     )
 
-
 if __name__ == "__main__":
+    import os, torch, sys
+
+    # debug‐print _before_ Hydra/Lightning kicks in
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    print( 
+        f"[startup] rank {local_rank}/{world_size} on GPU {torch.cuda.current_device()}",
+        flush=True,
+        file=sys.stderr,
+    )
+
+    # now invoke your Hydra entrypoint
     main()
+
