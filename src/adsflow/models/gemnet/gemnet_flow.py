@@ -348,6 +348,7 @@ class GemNetFlow(nn.Module, GraphModelMixin):
                     nHidden=num_atom,
                     nHidden_afteratom=num_output_afteratom,
                     activation=activation,
+                    direct_forces=self.flow_matching # added to ensure velcoity regression
                 )
             )
         self.out_blocks = torch.nn.ModuleList(out_blocks)
