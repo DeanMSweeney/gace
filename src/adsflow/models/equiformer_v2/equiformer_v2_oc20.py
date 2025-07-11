@@ -72,7 +72,6 @@ from .input_block import EdgeDegreeEmbedding
 _AVG_NUM_NODES  = 77.81317
 _AVG_DEGREE     = 23.395238876342773    # IS2RE: 100k, max_radius = 5, max_neighbors = 100
 
-
 @registry.register_model("equiformer_v2")
 class EquiformerV2_Flow(BaseModel):
     """
@@ -241,7 +240,7 @@ class EquiformerV2_Flow(BaseModel):
         # Weights for message initialization
         self.sphere_embedding = nn.Embedding(self.max_num_elements, self.sphere_channels_all)
         
-        # Add time embedding block
+        # Initialize time embedding 
         self.time_emb = nn.Linear(2 * time_n_freqs, self.sphere_channels)
 
         # Initialize the function used to measure the distances between atoms
@@ -510,7 +509,7 @@ class EquiformerV2_Flow(BaseModel):
                 atomic_numbers,
                 edge_distance,
                 edge_index, 
-                t,)
+                )
             velocity = velocity.embedding.narrow(1, 1, 3)
             velocity = velocity.view(-1, 3)            
             
@@ -524,7 +523,6 @@ class EquiformerV2_Flow(BaseModel):
     def _init_edge_rot_mat(self, data, edge_index, edge_distance_vec):
         return init_edge_rot_mat(edge_distance_vec)
         
-
     @property
     def num_params(self):
         return sum(p.numel() for p in self.parameters())
