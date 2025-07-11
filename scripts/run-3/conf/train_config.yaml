@@ -1,6 +1,4 @@
 # conf/train_config.yaml
-version_base: 1.1
-
 defaults:
   - model_cfg: gemnet_cfg
   - _self_
@@ -11,13 +9,14 @@ oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all
 oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data.lmdb"
 
 lr: 1e-3
-batch_size: 16
+batch_size: 4
 num_workers: 4
 precision: "16-mixed"
 max_epochs: 300
-accumulate_grad_batches: 4
+accumulate_grad_batches: 2
 accelerator: "gpu"
-devices: 16
+devices: 8
+num_nodes: 2
 from_noise: false
 
 project: "adsflow"
