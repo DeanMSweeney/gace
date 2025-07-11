@@ -178,7 +178,7 @@ class LightFlowMatch(pl.LightningModule):
         }
 
 @main(
-    version_base="1.1",          # <— tell Hydra exactly which syntax you’re on
+    version_base="1.1",        
     config_path="conf",
     config_name="train_config",
 )
