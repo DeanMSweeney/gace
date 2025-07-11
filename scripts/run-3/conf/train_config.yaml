@@ -9,11 +9,11 @@ oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all
 oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data.lmdb"
 
 lr: 1e-3
-batch_size: 4
+batch_size: 2
 num_workers: 4
 precision: "16-mixed"
 max_epochs: 300
-accumulate_grad_batches: 2
+accumulate_grad_batches: 4
 accelerator: "gpu"
 devices: 8
 num_nodes: 2
