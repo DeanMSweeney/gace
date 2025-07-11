@@ -35,6 +35,7 @@ class TrainConfig:
     accumulate_grad_batches: int = 4
     accelerator: str = "gpu"
     devices: int = 1
+    strategy: str = "auto"
     num_nodes: int = 1
     from_noise: bool = False
     # checkpoint & logging
@@ -190,7 +191,7 @@ def main(cfg: TrainConfig) -> None:
     # build model with configuration file
     model: GemNetFlow = instantiate(cfg.model_cfg, _convert_="partial")
 
-    pin_memory = True # configured for GPU
+    pin_memory = True if cfg.accelerator == "gpu" else False # configured for GPU
 
     # build trianing set 
     train_set = OCP_DataHandler(cfg.oc20_train, pbc=True)
@@ -240,7 +241,7 @@ def main(cfg: TrainConfig) -> None:
         accelerator=cfg.accelerator,
         devices=cfg.devices,
         num_nodes=cfg.num_nodes,
-        strategy="ddp_find_unused_parameters_true",
+        strategy=cfg.strategy,
         precision=cfg.precision,
         max_epochs=cfg.max_epochs,
         accumulate_grad_batches=cfg.accumulate_grad_batches,
@@ -256,17 +257,5 @@ def main(cfg: TrainConfig) -> None:
     )
 
 if __name__ == "__main__":
-    import os, torch, sys
-
-    # debug‐print _before_ Hydra/Lightning kicks in
-    local_rank = int(os.environ.get("LOCAL_RANK", 0))
-    world_size = int(os.environ.get("WORLD_SIZE", 1))
-    print( 
-        f"[startup] rank {local_rank}/{world_size} on GPU {torch.cuda.current_device()}",
-        flush=True,
-        file=sys.stderr,
-    )
-
-    # now invoke your Hydra entrypoint
     main()
 
