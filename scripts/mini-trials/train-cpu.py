@@ -102,7 +102,7 @@ if __name__ == "__main__":
     import json
     import os
 
-    attention = False # configure for attention mechanism via EquiformerV2
+    attention = True # configure for attention mechanism via EquiformerV2
     if not attention:
         with open("gemnet_cfg.json") as f:
             model_cfg = json.load(f) # load in gemnet configuration file 
@@ -127,7 +127,7 @@ if __name__ == "__main__":
 
     wandb_logger= WandbLogger(
         project="adsflow",
-        name="mini-batch_01",
+        name="equiformer",
         config={
             "lr": 1e-4, 
             **model_cfg
