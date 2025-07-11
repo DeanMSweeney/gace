@@ -35,6 +35,7 @@ class TrainConfig:
     accumulate_grad_batches: int = 4
     accelerator: str = "gpu"
     devices: int = 1
+    num_nodes: int = 1
     from_noise: bool = False
     # checkpoint & logging
     project: str = "adsflow"
@@ -238,6 +239,7 @@ def main(cfg: TrainConfig) -> None:
         callbacks=[checkpoint_cb],
         accelerator=cfg.accelerator,
         devices=cfg.devices,
+        num_nodes=cfg.num_nodes,
         strategy="ddp_find_unused_parameters_true",
         precision=cfg.precision,
         max_epochs=cfg.max_epochs,
