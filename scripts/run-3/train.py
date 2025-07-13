@@ -164,19 +164,21 @@ class LightFlowMatch(pl.LightningModule):
 
         return {
             "optimizer": optimizer,
-            "lr_schedulers": [
+            "lr_scheduler": 
                 {
                     "scheduler": combined_scheduler,
                     "interval": "epoch",   # warmup & switch counted in epochs
                     "frequency": 1,
                 },
+                "optimizer": optimizer, 
+                
+                "lr_scheduler":
                 {
                     "scheduler": plateau_scheduler,
                     "interval": "epoch",   # also per-epoch
                     "monitor": "val/loss",
                     "frequency": 1,
                 },
-            ],
         }
 
 @main(
