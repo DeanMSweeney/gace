@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH -A chm250007p                      # your project/account
-#SBATCH -p GPU-shared                            # GPU partition
+#SBATCH -p GPU                             # GPU partition
 #SBATCH --nodes=1                          # 1 node
-#SBATCH --ntasks-per-node=1                # one process per node
+#SBATCH --ntasks-per-node=8                # one process per node
 #SBATCH --cpus-per-task=5                  # CPUs per task
-#SBATCH --gres=gpu:v100-32:1               # 1 × V100-32 GB GPU
+#SBATCH --gres=gpu:v100-32:8               # 1 × V100-32 GB GPU
 #SBATCH -t 22:00:00                        # walltime
 #SBATCH -J adsflow_train-0                 # job name
 #SBATCH --mail-type=ALL
@@ -29,8 +29,7 @@ srun singularity exec --nv --cleanenv \
     bash -c "\
       cd /workspace${SLURM_SUBMIT_DIR#$PROJECT_DIR} && \
       python train.py \
-        devices=1 \
+        devices=8 \
         num_nodes=1 \
         accelerator='gpu' \
-        strategy=null  # No distributed strategy for single GPU
     "
