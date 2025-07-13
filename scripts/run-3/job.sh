@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -A chm250007p                      # your project/account
-#SBATCH -p GPU                             # GPU partition
+#SBATCH -p GPU-shared                      # GPU partition
 #SBATCH --nodes=1                          # 1 node
 #SBATCH --ntasks-per-node=8                # one process per node
 #SBATCH --cpus-per-task=5                  # CPUs per task
@@ -29,7 +29,8 @@ srun singularity exec --nv --cleanenv \
     bash -c "\
       cd /workspace${SLURM_SUBMIT_DIR#$PROJECT_DIR} && \
       python train.py \
-        devices=8 \
+        devices=1 \
         num_nodes=1 \
         accelerator='gpu' \
+	strategy='ddp' \
     "
