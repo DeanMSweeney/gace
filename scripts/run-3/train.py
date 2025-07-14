@@ -7,7 +7,8 @@ import torch.nn as nn
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.strategies import DeepSpeedStrategy
+from pytorch_lightning.strategies import DDPStrategy, DeepSpeedStrategy
+from pytorch_lightning.utilities import rank_zero_only
 from torch_geometric.loader import DataLoader
 from torch_geometric.data import Data
 from hydra import main
@@ -36,8 +37,8 @@ class TrainConfig:
     accumulate_grad_batches: int = 4
     accelerator: str = "gpu"
     devices: int = 1
-    strategy: DeepSpeedStrategy
     num_nodes: int = 1
+    strategy: str ="ddp_sharded"
     from_noise: bool = False
     # checkpoint & logging
     project: str = "adsflow"
@@ -188,9 +189,10 @@ class LightFlowMatch(pl.LightningModule):
     config_name="train_config",
 )
 def main(cfg: TrainConfig) -> None:
+    
     # seed for reproducibility 
-    pl.seed_everything(cfg.seed, workers=True)
-
+    # pl.seed_everything(cfg.seed, workers=True)
+    
     # build model with configuration file
     pin_memory = True if cfg.accelerator == "gpu" else False # configured for GPU
 
@@ -246,7 +248,7 @@ def main(cfg: TrainConfig) -> None:
         accelerator=cfg.accelerator,
         devices=cfg.devices,
         num_nodes=cfg.num_nodes,
-        strategy=cfg.strategy(),
+        strategy=cfg.strategy,
         precision=cfg.precision,
         max_epochs=cfg.max_epochs,
         accumulate_grad_batches=cfg.accumulate_grad_batches,

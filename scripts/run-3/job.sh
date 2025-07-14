@@ -31,7 +31,8 @@ srun singularity exec --nv --cleanenv \
       python train.py \
         devices=4 \
         num_nodes=1 \
+	batch_size=8 \
 	num_workers=4 \
         accelerator='gpu' \
-	strategy='ddp_find_unused_parameters_true' \
+	strategy='deepspeed_stage_2'\
     "
