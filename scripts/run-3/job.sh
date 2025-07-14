@@ -2,8 +2,8 @@
 #SBATCH -A chm250007p                      # your project/account
 #SBATCH -p GPU-shared                      # GPU partition
 #SBATCH --nodes=1                          # 1 node
-#SBATCH --ntasks-per-node=1                # one process per node
-#SBATCH --cpus-per-task=20                  # CPUs per task
+#SBATCH --ntasks-per-node=4                # one process per node
+#SBATCH --cpus-per-task=5                  # CPUs per task
 #SBATCH --gres=gpu:v100-32:4               # 1 × V100-32 GB GPU
 #SBATCH -t 22:00:00                        # walltime
 #SBATCH -J adsflow_train-0                 # job name
@@ -33,5 +33,5 @@ srun singularity exec --nv --cleanenv \
         num_nodes=1 \
 	num_workers=4 \
         accelerator='gpu' \
-	strategy='ddp' \
+	strategy='ddp_find_unused_parameters_true' \
     "
