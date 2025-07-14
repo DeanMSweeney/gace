@@ -26,8 +26,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 7. Copy the codebase
 COPY . .
 
-# 8. Install your custom package in editable mode (recommended for development)
-#RUN pip install -e .
+# 8. Install custom package(s) in editable mode (recommended for development)
+RUN pip install -e .
 
 # 9. Default to bash
 CMD ["bash"]
