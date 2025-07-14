@@ -7,7 +7,7 @@ import torch.nn as nn
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.strategies import DDPStrategy
+from pytorch_lightning.strategies import DeepSpeedStrategy
 from torch_geometric.loader import DataLoader
 from torch_geometric.data import Data
 from hydra import main
@@ -29,14 +29,14 @@ class TrainConfig:
     oc20_val: str = "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data.lmdb"
     # training hyperparameters
     lr: float = 5e-4
-    batch_size: int = 16
+    batch_size: int = 1
     num_workers: int = 4
     precision: str = "16-mixed"
     max_epochs: int = 300
     accumulate_grad_batches: int = 4
     accelerator: str = "gpu"
     devices: int = 1
-    strategy: str = "auto"
+    strategy: DeepSpeedStrategy
     num_nodes: int = 1
     from_noise: bool = False
     # checkpoint & logging
@@ -190,14 +190,12 @@ class LightFlowMatch(pl.LightningModule):
 def main(cfg: TrainConfig) -> None:
     # seed for reproducibility 
     pl.seed_everything(cfg.seed, workers=True)
-    print(">>> Seed set - DMS", flush=True)
 
     # build model with configuration file
     pin_memory = True if cfg.accelerator == "gpu" else False # configured for GPU
 
     # convert OmegaConf → dict
     model: GemNetFlow = instantiate(cfg.model_cfg, _convert_="partial")
-    print(">>> Model instantiated", flush=True)
 
     # build trianing set 
     train_set = OCP_DataHandler(cfg.oc20_train, pbc=True)
@@ -207,6 +205,7 @@ def main(cfg: TrainConfig) -> None:
         shuffle=True,
         num_workers=cfg.num_workers,
         pin_memory=pin_memory,
+        sampler=None,
     )
     
     # build validation set 
@@ -216,12 +215,11 @@ def main(cfg: TrainConfig) -> None:
         batch_size=cfg.batch_size,
         num_workers=cfg.num_workers,
         pin_memory=pin_memory,
+        sampler=None,
     )
-    print(">>> Training/validation sets loaded - DMS", flush=True)
 
     # compile lightning model 
     lightning = LightFlowMatch(model, lr=cfg.lr, from_noise=cfg.from_noise)
-    print(">>> LightFlowMatch initiated - DMS", flush=True)
 
     # compile W&B logger
     wandb_logger = WandbLogger(
@@ -230,7 +228,6 @@ def main(cfg: TrainConfig) -> None:
         config=OmegaConf.to_container(cfg, resolve=True),
         log_model="all",
     )
-    print(">>> WandB logger initiated - DMS", flush=True)
 
     # configure model checkpoints 
     checkpoint_cb = ModelCheckpoint(
@@ -249,13 +246,12 @@ def main(cfg: TrainConfig) -> None:
         accelerator=cfg.accelerator,
         devices=cfg.devices,
         num_nodes=cfg.num_nodes,
-        strategy=cfg.strategy,
+        strategy=cfg.strategy(),
         precision=cfg.precision,
         max_epochs=cfg.max_epochs,
         accumulate_grad_batches=cfg.accumulate_grad_batches,
         log_every_n_steps=10,
     )
-    print(">>> Trainer instance built - DMS", flush=True)
 
     # fit the model 
     trainer.fit(
@@ -265,9 +261,6 @@ def main(cfg: TrainConfig) -> None:
         ckpt_path=cfg.ckpt_path, # load model from checkpoint
     )
 
-    print(">>> Begin model training - DMS", flush=True)
-
 if __name__ == "__main__":
-    print("Hello wolrd - DMS")
     main()
 
