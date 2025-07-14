@@ -189,12 +189,14 @@ class LightFlowMatch(pl.LightningModule):
 def main(cfg: TrainConfig) -> None:
     # seed for reproducibility 
     pl.seed_everything(cfg.seed, workers=True)
+    print("Seed set - DMS", flush=True)
 
     # build model with configuration file
     model: GemNetFlow = instantiate(cfg.model_cfg, _convert_="partial")
-
+    print("Model compiled - DMS", flush=True)
+    
     pin_memory = True if cfg.accelerator == "gpu" else False # configured for GPU
-
+ 
     # build trianing set 
     train_set = OCP_DataHandler(cfg.oc20_train, pbc=True)
     train_loader = DataLoader(
@@ -204,7 +206,7 @@ def main(cfg: TrainConfig) -> None:
         num_workers=cfg.num_workers,
         pin_memory=pin_memory,
     )
-
+    
     # build validation set 
     val_set = OCP_DataHandler(cfg.oc20_val, pbc=True)
     val_loader = DataLoader(
@@ -213,9 +215,11 @@ def main(cfg: TrainConfig) -> None:
         num_workers=cfg.num_workers,
         pin_memory=pin_memory,
     )
+    print("Training/validation sets loaded - DMS", flush=True)
 
     # compile lightning model 
     lightning = LightFlowMatch(model, lr=cfg.lr, from_noise=cfg.from_noise)
+    print("LightFlowMatch initiated - DMS", flush=True)
 
     # compile W&B logger
     wandb_logger = WandbLogger(
@@ -224,7 +228,7 @@ def main(cfg: TrainConfig) -> None:
         config=OmegaConf.to_container(cfg, resolve=True),
         log_model="all",
     )
-    wandb_logger.watch(lightning.model, log="all", log_freq=50)
+    print("WandB logger initiated - DMS", flush=True)
 
     # configure model checkpoints 
     checkpoint_cb = ModelCheckpoint(
@@ -249,6 +253,10 @@ def main(cfg: TrainConfig) -> None:
         accumulate_grad_batches=cfg.accumulate_grad_batches,
         log_every_n_steps=10,
     )
+    
+    # call model logger 
+    if trainer.is_global_zero:
+        wandb_logger.watch(lightning.model, log="all", log_freq=50)
 
     # fit the model 
     trainer.fit(
@@ -259,5 +267,6 @@ def main(cfg: TrainConfig) -> None:
     )
 
 if __name__ == "__main__":
+    print("Hello wolrd - DMS")
     main()
 
