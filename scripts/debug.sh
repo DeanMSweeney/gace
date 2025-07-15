@@ -1,10 +1,8 @@
 #!/bin/bash
 #SBATCH -A chm250007p                      # your project/account
-#SBATCH -p GPU-shared                      # GPU partition
+#SBATCH -p RM-shared                       # GPU partition
 #SBATCH --nodes=1                          # 1 node
-#SBATCH --ntasks-per-node=4                # one process per node
-#SBATCH --cpus-per-task=5                  # CPUs per task
-#SBATCH --gres=gpu:v100-32:4               # 1 × V100-32 GB GPU
+#SBATCH --ntasks-per-node=32               # one process per node
 #SBATCH -t 22:00:00                        # walltime
 #SBATCH -J adsflow_train-0                 # job name
 #SBATCH --mail-type=ALL
@@ -23,16 +21,10 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 PROJECT_DIR=$(dirname "$(dirname "$SLURM_SUBMIT_DIR")")
 
 # Run command
-srun singularity exec --nv --cleanenv \
+srun singularity exec --cleanenv \
     --bind "${PROJECT_DIR}":/workspace \
     "$SCRATCH/.imgs/adsflow.sif" \
     bash -c "\
       cd /workspace${SLURM_SUBMIT_DIR#$PROJECT_DIR} && \
       python train.py \
-        devices=4 \
-        num_nodes=1 \
-	batch_size=8 \
-	num_workers=4 \
-        accelerator='gpu' \
-	strategy='deepspeed_stage_2'\
     "

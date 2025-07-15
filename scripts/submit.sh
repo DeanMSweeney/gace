@@ -2,9 +2,10 @@
 #SBATCH -A chm250007p                      # your project/account
 #SBATCH -p GPU-shared                      # GPU partition
 #SBATCH --nodes=1                          # 1 node
-#SBATCH --ntasks-per-node=2                # one process per node
-#SBATCH --gres=gpu:v100-32:2               # 1 × V100-32 GB GPU
-#SBATCH -t 22:00:00                        # walltime
+#SBATCH --ntasks-per-node=4                # one process per node
+#SBATCH --cpus-per-task=5                  # cpus per process
+#SBATCH --gres=gpu:v100-32:4               # 1 × V100-32 GB GPU
+#SBATCH -t 10:00:00                        # walltime
 #SBATCH -J adsflow_train-0                 # job name
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=dmsween@umich.edu
@@ -17,7 +18,6 @@ module load cuda/12.4
 
 # Memory management (good to keep)
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-export NCCL_SOCKET_IFNAME=^docker0,lo
 
 # Point to project root (for singularity bind)
 PROJECT_DIR=$(dirname "$(dirname "$SLURM_SUBMIT_DIR")")
@@ -29,8 +29,4 @@ srun singularity exec --nv --cleanenv \
     bash -c "\
       cd /workspace${SLURM_SUBMIT_DIR#$PROJECT_DIR} && \
       python train.py \
-        devices=2 \
-        num_nodes=1 \
-	batch_size=8 \
-	num_workers=4 \
     "
