@@ -2,12 +2,12 @@ from dataclasses import dataclass
 
 import torch
 from torch import optim
+from torch.utils.data.distributed import DistributedSampler
 from torch.optim.lr_scheduler import LinearLR, ExponentialLR, ReduceLROnPlateau, SequentialLR
 import torch.nn as nn
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.strategies import DDPStrategy, DeepSpeedStrategy
 from pytorch_lightning.utilities import rank_zero_only
 from torch_geometric.loader import DataLoader
 from torch_geometric.data import Data
@@ -152,7 +152,7 @@ class LightFlowMatch(pl.LightningModule):
 # convert OmegaConf → dict
 @rank_zero_only
 def print_config(cfg: DictConfig) -> None:
-    print(OmegaConf.to_yaml(cfg))
+    print(f'>>> Training and model configurations: {OmegaConf.to_yaml(cfg)}')
     return 
 
 @hydra.main(
@@ -174,34 +174,50 @@ def main(cfg: DictConfig) -> None:
     config = print_config(cfg)
 
     # build trianing set 
-    train_set = OCP_DataHandler(cfg.oc20_train, pbc=True)
-    train_loader = DataLoader(
-        train_set, 
-        batch_size=cfg.batch_size,
-        shuffle=True,
-        num_workers=cfg.num_workers,
-        pin_memory=pin_memory,
-    )
+    if not cfg.debug_mode:
+        train_set = OCP_DataHandler(cfg.oc20_train, pbc=True)
+        train_sampler = DistributedSampler(train_set, shuffle=True)
+        train_loader = DataLoader(
+            train_set, 
+            batch_size=cfg.batch_size,
+            num_workers=cfg.num_workers,
+            pin_memory=pin_memory,
+            sampler=train_sampler
+        )
+        
+        # build validation set 
+        val_set = OCP_DataHandler(cfg.oc20_val, pbc=True)
+        val_sampler = DistributedSampler(val_set, shuffle=True)
+        val_loader = DataLoader(
+            val_set, 
+            batch_size=cfg.batch_size,
+            num_workers=cfg.num_workers,
+            pin_memory=pin_memory,
+            sampler=val_sampler,
+        )
     
-    # build validation set 
-    val_set = OCP_DataHandler(cfg.oc20_val, pbc=True)
-    val_loader = DataLoader(
-        val_set, 
-        batch_size=cfg.batch_size,
-        num_workers=cfg.num_workers,
-        pin_memory=pin_memory,
-    )
+    else: 
+        train_set = OCP_DataHandler(cfg.oc20_mini, pbc=True)
+        train_sampler = DistributedSampler(train_set, shuffle=True)
+        train_loader = DataLoader(
+            train_set, 
+            batch_size=cfg.batch_size,
+            num_workers=cfg.num_workers,
+            pin_memory=pin_memory,
+            sampler=train_sampler
+        )
 
     # compile lightning model 
     lightning = LightFlowMatch(model, lr=cfg.lr, from_noise=cfg.from_noise)
 
     # compile W&B logger
-    wandb_logger = WandbLogger(
-        project=cfg.project,
-        name=cfg.run_name,
-        config=OmegaConf.to_container(cfg, resolve=True),
-        log_model="all",
-    )
+    if cfg.logger:
+        logger = WandbLogger(
+            project=cfg.project,
+            name=cfg.run_name,
+            config=OmegaConf.to_container(cfg, resolve=True),
+            log_model="all",
+        )
 
     # configure model checkpoints 
     checkpoint_cb = ModelCheckpoint(
@@ -215,7 +231,7 @@ def main(cfg: DictConfig) -> None:
 
     # define trainer 
     trainer = pl.Trainer(
-        logger=wandb_logger,
+        logger=logger,
         callbacks=[checkpoint_cb],
         accelerator=cfg.accelerator,
         devices=cfg.devices,
