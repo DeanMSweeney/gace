@@ -1,0 +1,42 @@
+_target_: adsflow.models.gemnet.gemnet_flow.GemNetFlow
+num_spherical:      3
+num_radial:         16
+num_blocks:         2
+emb_size_atom:      64
+emb_size_edge:      128
+emb_size_trip_in:   16
+emb_size_trip_out:  16
+emb_size_quad_in:   16
+emb_size_quad_out:  16
+emb_size_aint_in:   16
+emb_size_aint_out:  16
+emb_size_rbf:       16
+emb_size_cbf:        8
+emb_size_sbf:       16
+num_before_skip:    1
+num_after_skip:     1
+num_concat:         1
+num_atom:           1
+num_output_afteratom: 1
+cutoff:              6.0
+cutoff_qint:         6.0
+cutoff_aeaint:       6.0
+cutoff_aint:         6.0
+max_neighbors:      16
+max_neighbors_qint:  4
+max_neighbors_aeaint: 8
+max_neighbors_aint:  50
+rbf:
+  name: "gaussian"
+rbf_spherical: null
+cbf:
+  name: "spherical_harmonics"
+sbf:
+  name: "legendre_outer"
+quad_interaction: true
+atom_edge_interaction: true
+edge_atom_interaction: true
+atom_interaction: true
+flow_matching: true
+
+
