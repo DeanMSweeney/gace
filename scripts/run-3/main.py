@@ -218,6 +218,8 @@ def main(cfg: DictConfig) -> None:
             config=OmegaConf.to_container(cfg, resolve=True),
             log_model="all",
         )
+    else: 
+        logger = cfg.logger
 
     # configure model checkpoints 
     checkpoint_cb = ModelCheckpoint(
