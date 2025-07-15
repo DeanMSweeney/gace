@@ -20,3 +20,4 @@ wandb/
 logs/
 sandbox/
 outputs/
+checkpoints/
