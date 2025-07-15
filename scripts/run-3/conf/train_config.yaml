@@ -6,6 +6,7 @@ defaults:
 # dataset info
 oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb"
 oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data.lmdb"
+oc20_mini: "/workspace/datasets/mini"
 batch_size: 4
 num_workers: 4
 
@@ -22,7 +23,8 @@ strategy: "auto"
 precision: "16-mixed"
 
 # checkpointing/logging
-logger: false
+debug_mode: true
+loggge: false
 project: "adsflow"
 run_name: "gauntlet-full"
 ckpt_dir: "checkpoints"
