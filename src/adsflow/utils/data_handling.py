@@ -46,6 +46,8 @@ class OCP_DataHandler():
             pos            = samp['pos'].clone().detach().float(),
             pos_init       = samp['pos'].clone().detach().float(),
             pos_relaxed    = samp['pos_relaxed'].clone().detach().float(),
+            edge_index     = samp['edge_index'].clone().detach().float(),
+            cell_offsets   = samp['cell_offsets'].clone().detach().float(),
         )
 
         if not self.flow_matching:
@@ -58,7 +60,7 @@ class OCP_DataHandler():
 if __name__ == "__main__":
     from torch_geometric.loader import DataLoader
 
-    dataset = OCP_DataHandler("/workspace/datasets/mini/data.lmdb", pbc=True, flow_matching=False)
+    dataset = OCP_DataHandler("/workspace/datasets/mini/data.lmdb", pbc=True)
     loader = DataLoader(dataset, batch_size=25)
 
     with open("testing.txt", "w") as f:
