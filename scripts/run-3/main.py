@@ -201,6 +201,8 @@ def main(cfg: DictConfig) -> None:
             pin_memory=pin_memory,
         )
 
+        val_loader=None
+
     # compile lightning model 
     lightning = LightFlowMatch(model, lr=cfg.lr, from_noise=cfg.from_noise)
 
