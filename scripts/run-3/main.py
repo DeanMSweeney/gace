@@ -193,6 +193,7 @@ def main(cfg: DictConfig) -> None:
         )
     
     else: 
+        print(">>> DEBUG MODE with OC20-mini")
         train_set = OCP_DataHandler(cfg.oc20_mini, pbc=True)
         train_loader = DataLoader(
             train_set, 
@@ -201,7 +202,7 @@ def main(cfg: DictConfig) -> None:
             pin_memory=pin_memory,
         )
 
-        val_loader=None
+        val_loader = None
 
     # compile lightning model 
     lightning = LightFlowMatch(model, lr=cfg.lr, from_noise=cfg.from_noise)
