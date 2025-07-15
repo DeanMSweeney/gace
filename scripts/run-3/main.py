@@ -176,35 +176,29 @@ def main(cfg: DictConfig) -> None:
     # build trianing set 
     if not cfg.debug_mode:
         train_set = OCP_DataHandler(cfg.oc20_train, pbc=True)
-        train_sampler = DistributedSampler(train_set, shuffle=True)
         train_loader = DataLoader(
             train_set, 
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
-            sampler=train_sampler
         )
         
         # build validation set 
         val_set = OCP_DataHandler(cfg.oc20_val, pbc=True)
-        val_sampler = DistributedSampler(val_set, shuffle=True)
         val_loader = DataLoader(
             val_set, 
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
-            sampler=val_sampler,
         )
     
     else: 
         train_set = OCP_DataHandler(cfg.oc20_mini, pbc=True)
-        train_sampler = DistributedSampler(train_set, shuffle=True)
         train_loader = DataLoader(
             train_set, 
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
-            sampler=train_sampler
         )
 
     # compile lightning model 
