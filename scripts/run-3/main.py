@@ -11,52 +11,18 @@ from pytorch_lightning.strategies import DDPStrategy, DeepSpeedStrategy
 from pytorch_lightning.utilities import rank_zero_only
 from torch_geometric.loader import DataLoader
 from torch_geometric.data import Data
-from hydra import main
-from hydra.utils import instantiate
-from omegaconf import OmegaConf, DictConfig
 
+import hydra
+from omegaconf import OmegaConf, DictConfig
 
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
 from adsflow.utils.data_handling import OCP_DataHandler
 
-@dataclass
-class TrainConfig:
-    # model 
-    model_cfg: DictConfig
-    # seed  
-    seed: int = 42 
-    # paths
-    oc20_train: str = "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb"
-    oc20_val: str = "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data.lmdb"
-    # training hyperparameters
-    lr: float = 5e-4
-    batch_size: int = 1
-    num_workers: int = 4
-    precision: str = "16-mixed"
-    max_epochs: int = 300
-    accumulate_grad_batches: int = 4
-    accelerator: str = "gpu"
-    devices: int = 1
-    num_nodes: int = 1
-    strategy: str ="ddp_sharded"
-    from_noise: bool = False
-    # checkpoint & logging
-    project: str = "adsflow"
-    run_name: str = "gauntlet"
-    ckpt_dir: str = "checkpoints"
-    ckpt_monitor: str = "val/loss"
-    ckpt_mode: str = "min"
-    ckpt_save_top_k: int = 3
-    ckpt_save_last: bool = True
-    ckpt_path: str = None
-
 class LightFlowMatch(pl.LightningModule):
     """
-    Functionality 
-    -------------
     This class defines the training algorithm for the conditional flow matching model using optimal transport 
     
-    Arguments
+    Args
     ---------
     model: dict 
         Model configuration 
@@ -183,21 +149,29 @@ class LightFlowMatch(pl.LightningModule):
                 },
         }
 
-@main(
-    version_base="1.1",        
-    config_path="conf",
+# convert OmegaConf → dict
+@rank_zero_only
+def print_config(cfg: DictConfig) -> None:
+    print(OmegaConf.to_yaml(cfg))
+    return 
+
+@hydra.main(
+    version_base=None,        
+    config_path="conf", # ./conf
     config_name="train_config",
 )
-def main(cfg: TrainConfig) -> None:
-    
-    # seed for reproducibility 
-    # pl.seed_everything(cfg.seed, workers=True)
+def main(cfg: DictConfig) -> None:
+
+    # seed for reproducibility & multi-gpu weight updates
+    pl.seed_everything(cfg.seed, workers=True)
     
     # build model with configuration file
     pin_memory = True if cfg.accelerator == "gpu" else False # configured for GPU
 
-    # convert OmegaConf → dict
-    model: GemNetFlow = instantiate(cfg.model_cfg, _convert_="partial")
+    model: GemNetFlow = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
+
+    # print configuration file at rank 0
+    config = print_config(cfg)
 
     # build trianing set 
     train_set = OCP_DataHandler(cfg.oc20_train, pbc=True)
@@ -207,7 +181,6 @@ def main(cfg: TrainConfig) -> None:
         shuffle=True,
         num_workers=cfg.num_workers,
         pin_memory=pin_memory,
-        sampler=None,
     )
     
     # build validation set 
@@ -217,7 +190,6 @@ def main(cfg: TrainConfig) -> None:
         batch_size=cfg.batch_size,
         num_workers=cfg.num_workers,
         pin_memory=pin_memory,
-        sampler=None,
     )
 
     # compile lightning model 
