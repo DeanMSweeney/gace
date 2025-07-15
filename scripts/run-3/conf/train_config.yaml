@@ -1,7 +1,8 @@
 # conf/train_config.yaml
 hydra:
-  run:
-    chdir: False
+  job:
+    chdir: false  # Explicitly disable directory changing
+
 defaults:
   - model_cfg: gemnet_cfg
   - _self_
