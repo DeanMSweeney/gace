@@ -14,10 +14,57 @@ from torch_geometric.loader import DataLoader
 from torch_geometric.data import Data
 
 import hydra
-from omegaconf import OmegaConf, DictConfig
+from omegaconf import OmegaConf, DictConfig, MISSING
+from dataclasses import dataclass
+from typing import Optional
 
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
 from adsflow.utils.data_handling import OCP_DataHandler
+
+
+
+@dataclass
+class Config:
+    # Hydra composition entry for model hyperparameters
+    model_cfg: DictConfig = MISSING
+
+    # Dataset paths
+    oc20_train: str = MISSING
+    oc20_val:   str = MISSING
+    oc20_mini:  str = MISSING
+
+    # DataLoader settings
+    batch_size:      int = MISSING
+    num_workers:     int = MISSING
+
+    # Training hyperparameters
+    lr:                       float = 1e-3
+    max_epochs:               int   = 3000
+    accumulate_grad_batches:  int   = 4
+
+    # Compute architecture
+    accelerator: str = MISSING
+    devices:     int = MISSING
+    num_nodes:   int = MISSING
+    strategy:    str = "auto"
+    precision:   str = "16-mixed"
+
+    # Checkpointing & logging
+    debug_mode:       bool         = MISSING
+    logger:           bool         = MISSING
+    project:          str          = MISSING
+    run_name:         str          = MISSING
+    ckpt_dir:         str          = "checkpoints"
+    ckpt_monitor:     str          = "val/loss"
+    ckpt_mode:        str          = "min"
+    ckpt_save_top_k:  int          = 3
+    ckpt_save_last:   bool         = True
+    ckpt_path:        Optional[str] = None
+
+    # Misc
+    seed:       int  = 42
+    from_noise: bool = False
+
 
 class LightFlowMatch(pl.LightningModule):
     """
