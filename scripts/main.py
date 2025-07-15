@@ -86,6 +86,7 @@ class LightFlowMatch(pl.LightningModule):
             on_step=True, 
             prog_bar=True,
             batch_size=len(data.natoms),
+            sync_dist=True,
         )
         return loss
     
