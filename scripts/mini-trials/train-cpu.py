@@ -117,9 +117,8 @@ if __name__ == "__main__":
     dataset = OCP_DataHandler("/workspace/datasets/mini/data.lmdb", pbc=True)
     loader = DataLoader(
             dataset,
-            batch_size=10, 
+            batch_size=8, 
             num_workers=15,
-            pin_memory=True,
             )
 
     # compile lightning model and trainer
