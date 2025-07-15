@@ -1,7 +1,7 @@
 Icon\r
 Icon 
 Icon?
-
+.DS_Store
 # Python 
 __pycache__/
 *.pyc
