@@ -206,7 +206,7 @@ def print_config(cfg: DictConfig) -> None:
 @hydra.main(
     version_base=None,        
     config_path="conf", # ./conf
-    config_name="debug_config",
+    config_name="train_config",
 )
 def main(cfg: DictConfig) -> None:
 
