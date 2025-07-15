@@ -18,10 +18,10 @@ num_after_skip:     1
 num_concat:         1
 num_atom:           1
 num_output_afteratom: 1
-cutoff:              6.0
-cutoff_qint:         6.0
-cutoff_aeaint:       6.0
-cutoff_aint:         6.0
+cutoff:              7.0
+cutoff_qint:         7.0
+cutoff_aeaint:       7.0
+cutoff_aint:         7.0
 max_neighbors:      16
 max_neighbors_qint:  4
 max_neighbors_aeaint: 8

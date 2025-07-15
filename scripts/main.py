@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 import torch
 from torch import optim
+from torch.utils.data import random_split
 from torch.utils.data.distributed import DistributedSampler
 from torch.optim.lr_scheduler import LinearLR, ExponentialLR, ReduceLROnPlateau, SequentialLR
 import torch.nn as nn
@@ -152,7 +153,7 @@ class LightFlowMatch(pl.LightningModule):
 # convert OmegaConf → dict
 @rank_zero_only
 def print_config(cfg: DictConfig) -> None:
-    print(f'>>> Training and model configurations: {OmegaConf.to_yaml(cfg)}')
+    print(f'>>> Training and model configurations:\n {OmegaConf.to_yaml(cfg)}')
     return 
 
 @hydra.main(
@@ -194,14 +195,22 @@ def main(cfg: DictConfig) -> None:
     
     else: 
         print(">>> DEBUG MODE with OC20-mini")
-        train_set = OCP_DataHandler(cfg.oc20_mini, pbc=True)
+        dataset = OCP_DataHandler(cfg.oc20_mini, pbc=True)
+        train_set, val_set = random_split(dataset, [0.90, 0.10])
+
         train_loader = DataLoader(
             train_set, 
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
         )
-
+        
+        val_loader = DataLoader(
+            val_set, 
+            batch_size=cfg.batch_size,
+            num_workers=cfg.num_workers,
+            pin_memory=pin_memory,
+        )
         val_loader = None
 
     # compile lightning model 
