@@ -7,8 +7,8 @@ defaults:
 oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb"
 oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data.lmdb"
 oc20_mini: "/workspace/datasets/mini/data.lmdb"
-batch_size: 4
-num_workers: 3
+batch_size: 2
+num_workers: 4
 
 # training hyperparameters 
 lr: 1e-3
@@ -17,16 +17,16 @@ accumulate_grad_batches: 4
 
 # computer arch
 accelerator: "cpu"
-devices: 1
+devices: 8
 num_nodes: 1
 strategy: "ddp_find_unused_parameters_true"
 precision: "16-mixed"
 
 # checkpointing/logging
 debug_mode: true
-logger: true
+logger: false
 project: "adsflow"
-run_name: "gauntlet-mini"
+run_name: "debug_run"
 ckpt_dir: "checkpoints"
 ckpt_path: null
 
