@@ -28,7 +28,6 @@ logger: true
 project: "adsflow"
 run_name: "gauntlet-full"
 ckpt_dir: "checkpoints"
-ckpt_monitor: "val/loss"
 ckpt_path: null
 
 # misc
