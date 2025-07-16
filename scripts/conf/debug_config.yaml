@@ -28,10 +28,6 @@ logger: true
 project: "adsflow"
 run_name: "gauntlet-mini"
 ckpt_dir: "checkpoints"
-ckpt_monitor: "val/loss"
-ckpt_mode: "min"
-ckpt_save_top_k: 3
-ckpt_save_last: true
 ckpt_path: null
 
 # misc

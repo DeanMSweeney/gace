@@ -25,6 +25,56 @@ from adsflow.utils.data_handling import OCP_DataHandler
 
 @dataclass
 class Config:
+    """
+    This class integrates Hydra to build a dynamic hierarchical configruation 
+    for the model 
+
+    Args
+    _________
+
+    model_cfg: DictConfig 
+        Configuration file (.yaml) for the run 
+    oc20_train: str 
+        File path to the training set 
+    oc20_val: str
+        File path to the validation set 
+    oc20_mini: str
+        Path to the oc20 100 dataset 
+    batch_size: int
+        Batch size for training 
+    num_workers: int
+        Cpu cores used for the DataLoader 
+    lr: float
+        Learning rate
+    max_epochs: int 
+        Max numner of trianing iterations
+    accumulate_grad_batches: int 
+        Number of gradients to accumulate before updating the weights 
+    accelerator: str
+        Device (cpu, gpu)
+    num_nodes: int
+        Number of nodes 
+    strategy: str 
+        Parallelization strategy => Default: "auto" 
+    precision: str 
+        Digit precision 
+    debug_mode: bool
+        Set to True if debugging for trianing on OC20-mini dataset => Default: False
+    logger: bool
+        Whether to use WandB logger => Default: False
+    project: str 
+        Project name (for logging)
+    run_name: str
+        Iteration name (for logging/checkpointing)
+    ckpt_dir: str
+        File path for storing model checkpoints 
+    ckpt_path: str
+        Filepath to previous checkpoints to restart model trianing
+    seed: int
+        Seed for random number generators for reproducibility => Default: 42
+    from_noise: bool
+        Whether to sample x0 from noise or use initial geometries => Default: False
+    """
     # Hydra composition entry for model hyperparameters
     model_cfg: DictConfig = MISSING
 
@@ -50,15 +100,11 @@ class Config:
     precision:   str = "16-mixed"
 
     # Checkpointing & logging
-    debug_mode:       bool         = MISSING
-    logger:           bool         = MISSING
+    debug_mode:       bool         = False
+    logger:           bool         = False
     project:          str          = MISSING
     run_name:         str          = MISSING
     ckpt_dir:         str          = "checkpoints"
-    ckpt_monitor:     str          = "val/loss"
-    ckpt_mode:        str          = "min"
-    ckpt_save_top_k:  int          = 3
-    ckpt_save_last:   bool         = True
     ckpt_path:        Optional[str] = None
 
     # Misc
@@ -208,7 +254,7 @@ def print_config(cfg: DictConfig) -> None:
     config_path="conf", # ./conf
     config_name="train_config",
 )
-def main(cfg: DictConfig) -> None:
+def main(cfg: Config) -> None:
 
     # seed for reproducibility & multi-gpu weight updates
     pl.seed_everything(cfg.seed, workers=True)
@@ -277,10 +323,10 @@ def main(cfg: DictConfig) -> None:
     checkpoint_cb = ModelCheckpoint(
         dirpath=cfg.ckpt_dir,
         filename=f"{cfg.run_name}-{{epoch:02d}}",
-        monitor=cfg.ckpt_monitor,
-        mode=cfg.ckpt_mode,
-        save_top_k=cfg.ckpt_save_top_k,
-        save_last=cfg.ckpt_save_last,
+        monitor="val/loss",
+        mode="min",
+        save_top_k=3,
+        save_last=True,
     )
 
     # define trainer 
