@@ -33,7 +33,8 @@ class Config:
     _________
 
     model_cfg: DictConfig 
-        Configuration file (.yaml) for the run 
+        Configuration file (.yaml) for the run,
+        including model selection and hyperparameters 
     oc20_train: str 
         File path to the training set 
     oc20_val: str
