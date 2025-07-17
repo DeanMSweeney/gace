@@ -342,7 +342,7 @@ def main(cfg: Config) -> None:
         precision=cfg.precision,
         max_epochs=cfg.max_epochs,
         accumulate_grad_batches=cfg.accumulate_grad_batches,
-        log_every_n_steps=10,
+        log_every_n_steps=2,
     )
 
     # fit the model 
