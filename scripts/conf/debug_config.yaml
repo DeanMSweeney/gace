@@ -19,7 +19,7 @@ accumulate_grad_batches: 4
 accelerator: "cpu"
 devices: 8
 num_nodes: 1
-strategy: "auto"
+strategy: "ddp_find_unused_parameters_true"
 precision: "16-mixed"
 
 # checkpointing/logging
@@ -32,5 +32,6 @@ ckpt_path: null
 
 # misc
 seed: 42
+flow_matching: true
 from_noise: false
 

@@ -32,5 +32,6 @@ ckpt_path: null
 
 # misc
 seed: 42
+flow_matching: true
 from_noise: false
 
