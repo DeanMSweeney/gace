@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
+from adsflow.models.gemnet.gemnet_base import GemNetOC
 from adsflow.utils.data_handling import OCP_DataHandler
 
 
@@ -73,6 +74,8 @@ class Config:
         Filepath to previous checkpoints to restart model trianing
     seed: int
         Seed for random number generators for reproducibility => Default: 42
+    flow_matching: bool 
+        Whether to perform force regression or velcoity field predictions => Default: True
     from_noise: bool
         Whether to sample x0 from noise or use initial geometries => Default: False
     """
@@ -110,6 +113,7 @@ class Config:
 
     # Misc
     seed:       int  = 42
+    flow_matching: bool = True
     from_noise: bool = False
 
 
@@ -128,8 +132,9 @@ class LightFlowMatch(pl.LightningModule):
     """
     def __init__(
             self, 
-            model: GemNetFlow,
+            model,
             lr: int = 1e-3, 
+            flow_matching: bool = True,
             from_noise: bool = False,
         ):
         
@@ -137,31 +142,39 @@ class LightFlowMatch(pl.LightningModule):
         self.save_hyperparameters(ignore="model")  # all __init__ args saved as hyperparameters
         self.model = model
         self.loss_fn = nn.MSELoss() # mean squared error loss function 
+        self.flow_matching = flow_matching
         self.from_noise = from_noise
 
     def forward(self, data):
         return self.model(data)
     
     def _compute_loss(self, data: Data) -> torch.Tensor: 
-        x1 = data.pos_relaxed.clone() # sample relaxed positions and discard
-        del data.pos_relaxed
+        if self.flow_matching: 
+            x1 = data.pos_relaxed.clone() # sample relaxed positions and discard
+            del data.pos_relaxed
 
-        if self.from_noise:
-            x0 = torch.randn_like(x1) # sample noise 
-        else:
-            x0 = data.pos_init.clone() # sample initial positions and discard 
-            del data.pos_init
+            if self.from_noise:
+                x0 = torch.randn_like(x1) # sample noise 
+            else:
+                x0 = data.pos_init.clone() # sample initial positions and discard 
+                del data.pos_init
 
-        t_graph = torch.rand(len(data.natoms), 1, device=x1.device) # t~U for each graph
-        t = t_graph[data.batch] # expand t to each atom of graph 
+            t_graph = torch.rand(len(data.natoms), 1, device=x1.device) # t~U for each graph
+            t = t_graph[data.batch] # expand t to each atom of graph 
 
-        xt = x1 * t + (1 - t) * x0 # interpolation scheme 
-        data.pos = xt # reassign xt to pos 
-        data.t = t
+            xt = x1 * t + (1 - t) * x0 # interpolation scheme 
+            data.pos = xt # reassign xt to pos 
+            data.t = t
 
-        u_hat = self(data) # compute velocity field 
-        u = x1 - x0
-        return self.loss_fn(u_hat, u)
+            u_hat = self(data) # compute velocity field 
+            u = x1 - x0
+            loss = self.loss_fn(u_hat, u)
+        else: 
+            F = data.force
+            F_hat = self(data)
+            loss = self.loss_fn(F_hat, F) # compute MSE training loss
+
+        return loss
 
     # define training and validation methods 
     def training_step(self, data: Data, batch_idx):
@@ -244,7 +257,7 @@ class LightFlowMatch(pl.LightningModule):
                 },
         }
 
-# convert OmegaConf → dict
+# print model/trianing config at rank 0 uding decorator
 @rank_zero_only
 def print_config(cfg: DictConfig) -> None:
     print(f'>>> Training and model configurations:\n {OmegaConf.to_yaml(cfg)}')
@@ -253,7 +266,7 @@ def print_config(cfg: DictConfig) -> None:
 @hydra.main(
     version_base=None,        
     config_path="conf", # ./conf
-    config_name="train_config",
+    config_name="debug_config",
 )
 def main(cfg: Config) -> None:
 
@@ -263,14 +276,17 @@ def main(cfg: Config) -> None:
     # build model with configuration file
     pin_memory = True if cfg.accelerator == "gpu" else False # configured for GPU
 
-    model: GemNetFlow = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
+    if cfg.flow_matching:
+        model: GemNetFlow = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
+    else: 
+        model: GemNetOC = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
 
     # print configuration file at rank 0
     config = print_config(cfg)
 
     # build trianing set 
     if not cfg.debug_mode:
-        train_set = OCP_DataHandler(cfg.oc20_train, pbc=True)
+        train_set = OCP_DataHandler(cfg.oc20_train, pbc=True, flow_matching=cfg.flow_matching)
         train_loader = DataLoader(
             train_set, 
             batch_size=cfg.batch_size,
@@ -279,7 +295,7 @@ def main(cfg: Config) -> None:
         )
         
         # build validation set 
-        val_set = OCP_DataHandler(cfg.oc20_val, pbc=True)
+        val_set = OCP_DataHandler(cfg.oc20_val, pbc=True, flow_matching=cfg.flow_matching)
         val_loader = DataLoader(
             val_set, 
             batch_size=cfg.batch_size,
@@ -289,7 +305,7 @@ def main(cfg: Config) -> None:
     
     else: 
         print(">>> DEBUG MODE with OC20-mini")
-        dataset = OCP_DataHandler(cfg.oc20_mini, pbc=True)
+        dataset = OCP_DataHandler(cfg.oc20_mini, pbc=True, flow_matching=cfg.flow_matching)
         train_set, val_set = random_split(dataset, [0.80, 0.20])
 
         train_loader = DataLoader(
@@ -307,7 +323,12 @@ def main(cfg: Config) -> None:
         )
 
     # compile lightning model 
-    lightning = LightFlowMatch(model, lr=cfg.lr, from_noise=cfg.from_noise)
+    lightning = LightFlowMatch(
+        model=model, 
+        lr=cfg.lr,
+        flow_matching=cfg.flow_matching,
+        from_noise=cfg.from_noise,
+    )
 
     # compile W&B logger
     if cfg.logger:

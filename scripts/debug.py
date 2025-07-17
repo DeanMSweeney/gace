@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
+from adsflow.models.gemnet.gemnet_base import GemNetOC
 from adsflow.utils.data_handling import OCP_DataHandler
 
 
