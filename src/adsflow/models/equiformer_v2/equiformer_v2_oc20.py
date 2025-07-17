@@ -79,14 +79,14 @@ class EquiformerV2_Flow(BaseModel):
 
     Args:
         use_pbc (bool):         Use periodic boundary conditions
-        flow_matching (bool):  Compute velocity
+        flow_matching (bool):   Compute velocity
         otf_graph (bool):       Compute graph On The Fly (OTF)
         max_neighbors (int):    Maximum number of neighbors per atom
         max_radius (float):     Maximum distance between nieghboring atoms in Angstroms
         max_num_elements (int): Maximum atomic number
 
-        num_layers (int):             Number of layers in the GNN
-        sphere_channels (int):        Number of spherical channels (one set per resolution)
+        num_layers (int):           Number of layers in the GNN
+        sphere_channels (int):      Number of spherical channels (one set per resolution)
         attn_hidden_channels (int): Number of hidden channels used during SO(2) graph attention
         num_heads (int):            Number of attention heads
         attn_alpha_head (int):      Number of channels for alpha vector in each attention head
