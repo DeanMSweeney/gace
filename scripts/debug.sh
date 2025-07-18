@@ -2,7 +2,7 @@
 #SBATCH -A chm250007p                      # your project/account
 #SBATCH -p RM-shared                       # GPU partition
 #SBATCH --nodes=1                          # 1 node
-#SBATCH --ntasks-per-node=8                # one process per node
+#SBATCH --ntasks-per-node=16                # one process per node
 #SBATCH --cpus-per-task=5                  # 5 cpus per process
 #SBATCH -t 22:00:00                        # walltime
 #SBATCH -J adsflow_train-0                 # job name

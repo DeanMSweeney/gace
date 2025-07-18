@@ -1,6 +1,6 @@
 # model configuration
 defaults:
-  - model_cfg: gemnet_cfg # direcotry in conf: file name
+  - model_cfg: gemnet-flow_cfg # direcotry in conf: file name
   - _self_
 
 # dataset info
@@ -8,7 +8,7 @@ oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all
 oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data.lmdb"
 oc20_mini: "/workspace/datasets/mini/data.lmdb"
 batch_size: 4
-num_workers: 3
+num_workers: 0
 
 # training hyperparameters 
 lr: 1e-3
@@ -17,7 +17,7 @@ accumulate_grad_batches: 4
 
 # computer arch
 accelerator: "gpu"
-devices: 8
+devices: 4
 num_nodes: 1
 strategy: "ddp_find_unused_parameters_true"
 precision: "16-mixed"
@@ -28,7 +28,7 @@ logger: true
 project: "adsflow"
 run_name: "gauntlet-full"
 ckpt_dir: "checkpoints"
-ckpt_path: null
+ckpt_path: "./checkpoints/last-v1.ckpt"
 
 # misc
 seed: 42
