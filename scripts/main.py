@@ -186,6 +186,7 @@ class LightFlowMatch(pl.LightningModule):
             on_epoch=True,
             prog_bar=True, 
             batch_size=len(data.natoms),
+            sync_dist=True,
         )
 
         self.log(
@@ -205,6 +206,7 @@ class LightFlowMatch(pl.LightningModule):
             loss, 
             prog_bar=True, 
             batch_size=len(data.natoms),
+            sync_dist=True,
         )
         return loss
 
@@ -266,7 +268,7 @@ def print_config(cfg: DictConfig) -> None:
 @hydra.main(
     version_base=None,        
     config_path="conf", # ./conf
-    config_name="debug_config",
+    config_name="train_config",
 )
 def main(cfg: Config) -> None:
 
@@ -299,7 +301,7 @@ def main(cfg: Config) -> None:
         val_loader = DataLoader(
             val_set, 
             batch_size=cfg.batch_size,
-            num_workers=cfg.num_workers,
+            num_workers=0,
             pin_memory=pin_memory,
         )
     
@@ -336,7 +338,7 @@ def main(cfg: Config) -> None:
             project=cfg.project,
             name=cfg.run_name,
             config=OmegaConf.to_container(cfg, resolve=True),
-            log_model="all",
+            log_model="False",
         )
     else: 
         logger = cfg.logger
