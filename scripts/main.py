@@ -21,7 +21,6 @@ from typing import Optional
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
 from adsflow.models.gemnet.gemnet_base import GemNetOC
 from adsflow.utils.data_handling import OCP_DataHandler
-from adsflow.utils.lmdb_dataset import LazyLmdbDataset
 from fairchem.core.datasets.lmdb_dataset import LmdbDataset
 
 
@@ -291,7 +290,7 @@ def main(cfg: Config) -> None:
     if not cfg.debug_mode:
         #train_set = OCP_DataHandler(cfg.oc20_train, pbc=True, flow_matching=cfg.flow_matching)
         pt = {"src": cfg.oc20_train}
-        train_set = LazyLmdbDataset(pt)
+        train_set = LmdbDataset(pt)
         train_loader = DataLoader(
             train_set, 
             batch_size=cfg.batch_size,
@@ -302,7 +301,7 @@ def main(cfg: Config) -> None:
         # build validation set 
         #val_set = OCP_DataHandler(cfg.oc20_val, pbc=True, flow_matching=cfg.flow_matching)
         pv = {"src": cfg.oc20_val}
-        val_set = LazyLmdbDataset(pv)
+        val_set = LmdbDataset(pv)
         val_loader = DataLoader(
             val_set, 
             batch_size=cfg.batch_size,
@@ -384,4 +383,5 @@ def main(cfg: Config) -> None:
 
 if __name__ == "__main__":
     main()
+
 
