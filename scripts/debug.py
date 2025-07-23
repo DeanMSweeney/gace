@@ -21,7 +21,6 @@ from typing import Optional
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
 from adsflow.models.gemnet.gemnet_base import GemNetOC
 from adsflow.utils.data_handling import OCP_DataHandler
-from adsflow.utils.lmdb_dataset import LazyLmdbDataset
 from fairchem.core.datasets.lmdb_dataset import LmdbDataset
 
 
@@ -269,7 +268,7 @@ def print_config(cfg: DictConfig) -> None:
 @hydra.main(
     version_base=None,        
     config_path="conf", # ./conf
-    config_name="debug_config",
+    config_name="train_config",
 )
 def main(cfg: Config) -> None:
 
@@ -291,7 +290,7 @@ def main(cfg: Config) -> None:
     if not cfg.debug_mode:
         #train_set = OCP_DataHandler(cfg.oc20_train, pbc=True, flow_matching=cfg.flow_matching)
         pt = {"src": cfg.oc20_train}
-        train_set = LazyLmdbDataset(pt)
+        train_set = LmdbDataset(pt)
         train_loader = DataLoader(
             train_set, 
             batch_size=cfg.batch_size,
@@ -302,18 +301,18 @@ def main(cfg: Config) -> None:
         # build validation set 
         #val_set = OCP_DataHandler(cfg.oc20_val, pbc=True, flow_matching=cfg.flow_matching)
         pv = {"src": cfg.oc20_val}
-        val_set = LazyLmdbDataset(pv)
+        val_set = LmdbDataset(pv)
         val_loader = DataLoader(
             val_set, 
             batch_size=cfg.batch_size,
-            num_workers=0,
+            num_workers=cfg.num_workers,
             pin_memory=pin_memory,
         )
     
     else: 
         print(">>> Running OC20-mini")
         #dataset = OCP_DataHandler(cfg.oc20_mini, pbc=True, flow_matching=cfg.flow_matching)
-        p = {"src": cfg.oc20_mini}
+        p = {"src": cfg.oc20_train}
         dataset = LmdbDataset(p)
         train_set, val_set = random_split(dataset, [0.80, 0.20])
 
