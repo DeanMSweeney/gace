@@ -16,14 +16,14 @@ max_epochs: 3000
 accumulate_grad_batches: 4
 
 # computer arch
-accelerator: "gpu"
-devices: 2
+accelerator: "cpu"
+devices: 8
 num_nodes: 1
 strategy: "ddp_find_unused_parameters_true"
 precision: "16-mixed"
 
 # checkpointing/logging
-debug_mode: false
+debug_mode: true
 logger: false
 project: "adsflow"
 run_name: "debug_run"

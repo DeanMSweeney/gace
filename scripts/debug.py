@@ -21,6 +21,7 @@ from typing import Optional
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
 from adsflow.models.gemnet.gemnet_base import GemNetOC
 from adsflow.utils.data_handling import OCP_DataHandler
+from fairchem.core.datasets.lmdb_dataset import LmdbDataset
 
 
 
@@ -156,8 +157,7 @@ class LightFlowMatch(pl.LightningModule):
             if self.from_noise:
                 x0 = torch.randn_like(x1) # sample noise 
             else:
-                x0 = data.pos_init.clone() # sample initial positions and discard 
-                del data.pos_init
+                x0 = data.pos.clone() # sample initial positions and discard 
 
             t_graph = torch.rand(len(data.natoms), 1, device=x1.device) # t~U for each graph
             t = t_graph[data.batch] # expand t to each atom of graph 
@@ -186,6 +186,7 @@ class LightFlowMatch(pl.LightningModule):
             on_epoch=True,
             prog_bar=True, 
             batch_size=len(data.natoms),
+            sync_dist=True,
         )
 
         self.log(
@@ -205,6 +206,7 @@ class LightFlowMatch(pl.LightningModule):
             loss, 
             prog_bar=True, 
             batch_size=len(data.natoms),
+            sync_dist=True,
         )
         return loss
 
@@ -286,7 +288,9 @@ def main(cfg: Config) -> None:
 
     # build trianing set 
     if not cfg.debug_mode:
-        train_set = OCP_DataHandler(cfg.oc20_train, pbc=True, flow_matching=cfg.flow_matching)
+        #train_set = OCP_DataHandler(cfg.oc20_train, pbc=True, flow_matching=cfg.flow_matching)
+        pt = {"src": cfg.oc20_train}
+        train_set = LmdbDataset(pt)
         train_loader = DataLoader(
             train_set, 
             batch_size=cfg.batch_size,
@@ -295,17 +299,21 @@ def main(cfg: Config) -> None:
         )
         
         # build validation set 
-        val_set = OCP_DataHandler(cfg.oc20_val, pbc=True, flow_matching=cfg.flow_matching)
+        #val_set = OCP_DataHandler(cfg.oc20_val, pbc=True, flow_matching=cfg.flow_matching)
+        pv = {"src": cfg.oc20_val}
+        val_set = LmdbDataset(pv)
         val_loader = DataLoader(
             val_set, 
             batch_size=cfg.batch_size,
-            num_workers=cfg.num_workers,
+            num_workers=0,
             pin_memory=pin_memory,
         )
     
     else: 
-        print(">>> DEBUG MODE with OC20-mini")
-        dataset = OCP_DataHandler(cfg.oc20_mini, pbc=True, flow_matching=cfg.flow_matching)
+        print(">>> Running OC20-mini")
+        #dataset = OCP_DataHandler(cfg.oc20_mini, pbc=True, flow_matching=cfg.flow_matching)
+        p = {"src": cfg.oc20_mini}
+        dataset = LmdbDataset(p)
         train_set, val_set = random_split(dataset, [0.80, 0.20])
 
         train_loader = DataLoader(
@@ -336,7 +344,7 @@ def main(cfg: Config) -> None:
             project=cfg.project,
             name=cfg.run_name,
             config=OmegaConf.to_container(cfg, resolve=True),
-            log_model="all",
+            log_model="False",
         )
     else: 
         logger = cfg.logger
