@@ -4,7 +4,7 @@
 #SBATCH --nodes=1                          # 1 node
 #SBATCH --ntasks-per-node=4                # one process per node
 #SBATCH --cpus-per-task=5                  # cpus per process
-#SBATCH --gres=gpu:v100-32:4               # 1 × V100-32 GB GPU
+#SBATCH --gres=gpu:h100-80:4               # 1 × V100-32 GB GPU
 #SBATCH -t 10:00:00                        # walltime
 #SBATCH -J adsflow_train-0                 # job name
 #SBATCH --mail-type=ALL
@@ -37,18 +37,16 @@ export WANDB_ARTIFACT_DIR=$MY_WANDB_ROOT/artifacts
 # (optional) where wandb caches things like artifact definitions
 export WANDB_CACHE_DIR=$MY_WANDB_ROOT/cache
 
-mkdir -p \
-  $WANDB_DIR \
-  $WANDB_DATA_DIR \
-  $WANDB_ARTIFACT_DIR \
-  $WANDB_CACHE_DIR
-
-
 # Run command
 srun singularity exec --nv \
     --bind "${PROJECT_DIR}":/workspace \
     "$SCRATCH/.imgs/adsflow.sif" \
     bash -c "\
+      mkdir -p \
+  	$WANDB_DIR \
+  	$WANDB_DATA_DIR \
+  	$WANDB_ARTIFACT_DIR \
+  	$WANDB_CACHE_DIR
       cd /workspace${SLURM_SUBMIT_DIR#$PROJECT_DIR} && \
       python main.py \
       num_nodes=1 \

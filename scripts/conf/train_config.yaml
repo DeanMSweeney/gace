@@ -7,7 +7,7 @@ defaults:
 oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb"
 oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data.lmdb"
 oc20_mini: "/workspace/datasets/mini/data.lmdb"
-batch_size: 4
+batch_size: 8
 num_workers: 0
 
 # training hyperparameters 
@@ -17,18 +17,18 @@ accumulate_grad_batches: 4
 
 # computer arch
 accelerator: "gpu"
-devices: 4
+devices: 2
 num_nodes: 1
 strategy: "ddp_find_unused_parameters_true"
 precision: "16-mixed"
 
 # checkpointing/logging
 debug_mode: false
-logger: true
+logger: false
 project: "adsflow"
 run_name: "gauntlet-full"
 ckpt_dir: "checkpoints"
-ckpt_path: "./checkpoints/last-v1.ckpt"
+ckpt_path: null #"./checkpoints/last-v1.ckpt"
 
 # misc
 seed: 42
