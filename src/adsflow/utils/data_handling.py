@@ -44,7 +44,6 @@ class OCP_DataHandler():
             tags           = samp['tags'].clone().detach().long(),
             fixed          = samp['fixed'].clone().detach().long(),
             pos            = samp['pos'].clone().detach().float(),
-            pos_init       = samp['pos'].clone().detach().float(),
             pos_relaxed    = samp['pos_relaxed'].clone().detach().float(),
             edge_index     = samp['edge_index'].clone().detach().float(),
             cell_offsets   = samp['cell_offsets'].clone().detach().float(),
@@ -59,11 +58,14 @@ class OCP_DataHandler():
 ### Testing ###
 if __name__ == "__main__":
     from torch_geometric.loader import DataLoader
+    from fairchem.core.datasets.lmdb_dataset import LmdbDataset
 
+    dict = {"src": "/workspace/datasets/mini/data.lmdb"}
     dataset = OCP_DataHandler("/workspace/datasets/mini/data.lmdb", pbc=True)
     loader = DataLoader(dataset, batch_size=25)
 
     with open("testing.txt", "w") as f:
         for data in loader:
             f.write(str(data) + "\n\n") 
+
      
