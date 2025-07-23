@@ -21,6 +21,7 @@ from typing import Optional
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
 from adsflow.models.gemnet.gemnet_base import GemNetOC
 from adsflow.utils.data_handling import OCP_DataHandler
+from adsflow.utils.lmdb_dataset import LazyLmdbDataset
 from fairchem.core.datasets.lmdb_dataset import LmdbDataset
 
 
@@ -321,6 +322,7 @@ def main(cfg: Config) -> None:
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
+            multiprocessing_context="spawn",
         )
         
         val_loader = DataLoader(
@@ -328,6 +330,7 @@ def main(cfg: Config) -> None:
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
+            multiprocessing_context="spawn",
         )
 
     # compile lightning model 
