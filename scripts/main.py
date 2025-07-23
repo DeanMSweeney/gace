@@ -305,7 +305,7 @@ def main(cfg: Config) -> None:
         val_loader = DataLoader(
             val_set, 
             batch_size=cfg.batch_size,
-            num_workers=0,
+            num_workers=cfg.num_workers,
             pin_memory=pin_memory,
         )
     
