@@ -291,23 +291,27 @@ def main(cfg: Config) -> None:
     if not cfg.debug_mode:
         #train_set = OCP_DataHandler(cfg.oc20_train, pbc=True, flow_matching=cfg.flow_matching)
         pt = {"src": cfg.oc20_train}
-        train_set = LmdbDataset(pt)
+        train_set = LazyLmdbDataset(pt)
         train_loader = DataLoader(
             train_set, 
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
+            multiprocessing_context="spawn",
+            persistent_workers=True,
         )
         
         # build validation set 
         #val_set = OCP_DataHandler(cfg.oc20_val, pbc=True, flow_matching=cfg.flow_matching)
         pv = {"src": cfg.oc20_val}
-        val_set = LmdbDataset(pv)
+        val_set = LazyLmdbDataset(pv)
         val_loader = DataLoader(
             val_set, 
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
+            multiprocessing_context="spawn",
+            persistent_workers=True,
         )
     
     else: 
