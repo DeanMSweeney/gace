@@ -276,6 +276,9 @@ def main(cfg: Config) -> None:
     # seed for reproducibility & multi-gpu weight updates
     pl.seed_everything(cfg.seed, workers=True)
     
+    # enable TF32 on matmuls
+    torch.set_float32_matmul_precision('medium')
+    
     # build model with configuration file
     pin_memory = True if cfg.accelerator == "gpu" else False # configured for GPU
 
