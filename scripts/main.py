@@ -147,13 +147,6 @@ class LightFlowMatch(pl.LightningModule):
         self.flow_matching = flow_matching
         self.from_noise = from_noise
 
-        # freeze eenergy based parameters (necessary for DDP)
-        for name, p in self.model.named_parameters():
-                if ("seq_energy2" in name) \
-                or name.startswith("out_mlp_E") \
-                or name == "out_energy":
-                    p.requires_grad = False
-
     def forward(self, data):
         return self.model(data)
     
@@ -218,16 +211,6 @@ class LightFlowMatch(pl.LightningModule):
         )
         return loss
     
-    def on_after_backward(self):
-        # called immediately after loss.backward()
-        unused = []
-        for name, p in self.named_parameters():
-            if p.requires_grad and p.grad is None:
-                unused.append(name)
-        if unused:
-            print(f"⏹️ Unused params ({len(unused)}):")
-            print("\n".join(unused))
-
     def configure_optimizers(self):
         optimizer = optim.AdamW(self.parameters(), lr=self.hparams.lr)
 
@@ -317,8 +300,8 @@ def main(cfg: Config) -> None:
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
-            multiprocessing_context="spawn",
-            persistent_workers=True,
+            #multiprocessing_context="spawn",
+            #persistent_workers=True,
         )
         
         # build validation set 
@@ -330,8 +313,8 @@ def main(cfg: Config) -> None:
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
-            multiprocessing_context="spawn",
-            persistent_workers=True,
+            #multiprocessing_context="spawn",
+            #persistent_workers=True,
         )
     
     else: 
