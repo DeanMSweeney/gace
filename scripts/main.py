@@ -147,6 +147,13 @@ class LightFlowMatch(pl.LightningModule):
         self.flow_matching = flow_matching
         self.from_noise = from_noise
 
+        # freeze eenergy based parameters (necessary for DDP)
+        for name, p in self.model.named_parameters():
+                if ("seq_energy2" in name) \
+                or name.startswith("out_mlp_E") \
+                or name == "out_energy":
+                    p.requires_grad = False
+
     def forward(self, data):
         return self.model(data)
     
