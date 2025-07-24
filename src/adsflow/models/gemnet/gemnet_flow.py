@@ -1284,8 +1284,10 @@ class GemNetFlow(nn.Module, GraphModelMixin):
             xs_vt.append(x_vt)
         # Global output block for final predictions
 
-        # Output energy and velocity 
+        # Output energy 
         #x_E = self.out_mlp_E(torch.cat(xs_E, dim=-1))
+
+        #Output velcoity
         x_vt = self.out_mlp_vt(torch.cat(xs_vt, dim=-1))
             
         with torch.autocast("cuda", enabled=False):
