@@ -320,7 +320,7 @@ def main(cfg: Config) -> None:
     else: 
         print(">>> Running OC20-mini")
         #dataset = OCP_DataHandler(cfg.oc20_mini, pbc=True, flow_matching=cfg.flow_matching)
-        p = {"src": cfg.oc20_train}
+        p = {"src": cfg.oc20_mini}
         dataset = LmdbDataset(p)
         train_set, val_set = random_split(dataset, [0.80, 0.20])
 
