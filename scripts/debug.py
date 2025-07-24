@@ -21,6 +21,7 @@ from typing import Optional
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
 from adsflow.models.gemnet.gemnet_base import GemNetOC
 from adsflow.utils.data_handling import OCP_DataHandler
+from adsflow.utils.lmdb_dataset import LazyLmdbDataset
 from fairchem.core.datasets.lmdb_dataset import LmdbDataset
 
 
@@ -146,6 +147,13 @@ class LightFlowMatch(pl.LightningModule):
         self.flow_matching = flow_matching
         self.from_noise = from_noise
 
+        # freeze eenergy based parameters (necessary for DDP)
+        for name, p in self.model.named_parameters():
+                if ("seq_energy2" in name) \
+                or name.startswith("out_mlp_E") \
+                or name == "out_energy":
+                    p.requires_grad = False
+
     def forward(self, data):
         return self.model(data)
     
@@ -209,6 +217,16 @@ class LightFlowMatch(pl.LightningModule):
             sync_dist=True,
         )
         return loss
+    
+    def on_after_backward(self):
+        # called immediately after loss.backward()
+        unused = []
+        for name, p in self.named_parameters():
+            if p.requires_grad and p.grad is None:
+                unused.append(name)
+        if unused:
+            print(f"⏹️ Unused params ({len(unused)}):")
+            print("\n".join(unused))
 
     def configure_optimizers(self):
         optimizer = optim.AdamW(self.parameters(), lr=self.hparams.lr)
@@ -268,12 +286,15 @@ def print_config(cfg: DictConfig) -> None:
 @hydra.main(
     version_base=None,        
     config_path="conf", # ./conf
-    config_name="train_config",
+    config_name="debug_config",
 )
 def main(cfg: Config) -> None:
 
     # seed for reproducibility & multi-gpu weight updates
     pl.seed_everything(cfg.seed, workers=True)
+    
+    # enable TF32 on matmuls
+    torch.set_float32_matmul_precision('medium')
     
     # build model with configuration file
     pin_memory = True if cfg.accelerator == "gpu" else False # configured for GPU
@@ -282,6 +303,13 @@ def main(cfg: Config) -> None:
         model: GemNetFlow = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
     else: 
         model: GemNetOC = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
+    
+    # 1) Check that your out_blocks really are FlowOutputBlock
+    print("Out‐block class:", type(model.out_blocks[0]))
+
+    # 2) List every submodule in that first block
+    for name, mod in model.out_blocks[0].named_modules():
+        print(f"{name:40s} → {mod.__class__.__name__}") 
 
     # print configuration file at rank 0
     config = print_config(cfg)
@@ -290,29 +318,33 @@ def main(cfg: Config) -> None:
     if not cfg.debug_mode:
         #train_set = OCP_DataHandler(cfg.oc20_train, pbc=True, flow_matching=cfg.flow_matching)
         pt = {"src": cfg.oc20_train}
-        train_set = LmdbDataset(pt)
+        train_set = LazyLmdbDataset(pt)
         train_loader = DataLoader(
             train_set, 
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
+            multiprocessing_context="spawn",
+            persistent_workers=True,
         )
         
         # build validation set 
         #val_set = OCP_DataHandler(cfg.oc20_val, pbc=True, flow_matching=cfg.flow_matching)
         pv = {"src": cfg.oc20_val}
-        val_set = LmdbDataset(pv)
+        val_set = LazyLmdbDataset(pv)
         val_loader = DataLoader(
             val_set, 
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
+            multiprocessing_context="spawn",
+            persistent_workers=True,
         )
     
     else: 
         print(">>> Running OC20-mini")
         #dataset = OCP_DataHandler(cfg.oc20_mini, pbc=True, flow_matching=cfg.flow_matching)
-        p = {"src": cfg.oc20_train}
+        p = {"src": cfg.oc20_mini}
         dataset = LmdbDataset(p)
         train_set, val_set = random_split(dataset, [0.80, 0.20])
 
@@ -383,4 +415,5 @@ def main(cfg: Config) -> None:
 
 if __name__ == "__main__":
     main()
+
 
