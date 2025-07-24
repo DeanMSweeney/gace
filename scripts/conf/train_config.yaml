@@ -7,8 +7,8 @@ defaults:
 oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb"
 oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data.lmdb"
 oc20_mini: "/workspace/datasets/mini/data.lmdb"
-batch_size: 8
-num_workers: 0
+batch_size: 16
+num_workers: 8
 
 # training hyperparameters 
 lr: 1e-3
@@ -17,7 +17,7 @@ accumulate_grad_batches: 4
 
 # computer arch
 accelerator: "gpu"
-devices: 2
+devices: 4
 num_nodes: 1
 strategy: "ddp_find_unused_parameters_true"
 precision: "16-mixed"
