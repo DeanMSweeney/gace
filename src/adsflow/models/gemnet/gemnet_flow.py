@@ -4,6 +4,13 @@ This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 """
 
+#----------------------------------------------------------------------------------
+# Modifications by Dean M. Sweeney, 2025-07-24
+# - Inserted FlowOutputBlock 
+# - Replaced force prediciton with velocity predicitions (variable change)
+#----------------------------------------------------------------------------------
+
+
 from __future__ import annotations
 
 import logging
@@ -24,7 +31,6 @@ from fairchem.core.models.base import BackboneInterface, GraphModelMixin, HeadIn
 from fairchem.core.modules.scaling.compat import load_scales_compat
 from fairchem.core.models.gemnet_oc.initializers import get_initializer
 from fairchem.core.models.gemnet_oc.interaction_indices import get_mixed_triplets, get_quadruplets, get_triplets
-from fairchem.core.models.gemnet_oc.layers.atom_update_block import OutputBlock
 from fairchem.core.models.gemnet_oc.layers.base_layers import Dense, ResidualLayer
 from fairchem.core.models.gemnet_oc.layers.efficient import BasisEmbedding
 from fairchem.core.models.gemnet_oc.layers.embedding_block import AtomEmbedding, EdgeEmbedding
@@ -41,11 +47,13 @@ from fairchem.core.models.gemnet_oc.utils import (
     repeat_blocks,
 )
 
+from .layers.flow_output_block import FlowOutputBlock
+
 if typing.TYPE_CHECKING:
     from torch_geometric.data.batch import Batch
 
 
-@registry.register_model("gemnet_oc")
+@registry.register_model("gemnet_flow")
 
 
 class GemNetFlow(nn.Module, GraphModelMixin):
@@ -339,35 +347,24 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         self.int_blocks = torch.nn.ModuleList(int_blocks)
 
         out_blocks = []
+        #++++++++
+        # Swaped OutputBlock() for FlowOutputBlock()
+        #++++++++
         for _ in range(num_blocks + 1):
             out_blocks.append(
-                OutputBlock(
-                    emb_size_atom=emb_size_atom,
+                FlowOutputBlock( 
                     emb_size_edge=emb_size_edge,
                     emb_size_rbf=emb_size_rbf,
                     nHidden=num_atom,
-                    nHidden_afteratom=num_output_afteratom,
                     activation=activation,
-                    direct_forces=self.flow_matching # added to ensure velcoity regresson
                 )
             )
+        
         self.out_blocks = torch.nn.ModuleList(out_blocks)
 
-        out_mlp_E = [
-            Dense(
-                emb_size_atom * (num_blocks + 1),
-                emb_size_atom,
-                activation=activation,
-            )
-        ] + [
-            ResidualLayer(
-                emb_size_atom,
-                activation=activation,
-            )
-            for _ in range(num_global_out_layers)
-        ]
-        self.out_mlp_E = torch.nn.Sequential(*out_mlp_E)
-        self.out_energy = Dense(emb_size_atom, num_targets, bias=False, activation=None)
+        #--------
+        # Removed out_mlp_E, self.out_mlp_Em and self.out_energy
+        #--------
         
         # Output velciity 
         out_mlp_vt = [
@@ -387,7 +384,10 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         self.out_velocity = Dense(emb_size_edge, num_targets, bias=False, activation=None) # Output shape: (N_atoms, 3)
 
         out_initializer = get_initializer(output_init)
-        self.out_energy.reset_parameters(out_initializer)
+
+        #------
+        # Removed self.out_energy.reset_parameters
+        #------
         self.out_velocity.reset_parameters(out_initializer)
 
         load_scales_compat(self, scale_file)
@@ -1252,10 +1252,12 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         m = self.edge_emb(h, basis_rad_raw, main_graph["edge_index"])
         # (nEdges, emb_size_edge)
        
-        
-        x_E, x_vt = self.out_blocks[0](h, m, basis_output, idx_t)
+       # ----
+       # Removed x_E, xs_E
+       # ---- 
+        x_vt = self.out_blocks[0](h, m, basis_output, idx_t)
         # (nAtoms, emb_size_atom), (nEdges, emb_size_edge)
-        xs_E, xs_vt = [x_E], [x_vt]
+        xs_vt = [x_vt]
 
         for i in range(self.num_blocks):
             # Interaction block
@@ -1278,16 +1280,19 @@ class GemNetFlow(nn.Module, GraphModelMixin):
                 quad_idx=quad_idx,
             )  # (nAtoms, emb_size_atom), (nEdges, emb_size_edge)
 
-            x_E, x_vt = self.out_blocks[i + 1](h, m, basis_output, idx_t)
+            # ----
+            # Removed x_E, xs_E
+            # ---- 
+            x_vt = self.out_blocks[i + 1](h, m, basis_output, idx_t)
             # (nAtoms, emb_size_atom), (nEdges, emb_size_edge)
-            xs_E.append(x_E)
             xs_vt.append(x_vt)
         # Global output block for final predictions
 
-        # Output energy 
-        #x_E = self.out_mlp_E(torch.cat(xs_E, dim=-1))
+        #-------------
+        # removed x_E
+        # ------------      
 
-        #Output velcoity
+        # Output velcoity
         x_vt = self.out_mlp_vt(torch.cat(xs_vt, dim=-1))
             
         with torch.autocast("cuda", enabled=False):
@@ -1295,25 +1300,13 @@ class GemNetFlow(nn.Module, GraphModelMixin):
 
         nMolecules = torch.max(batch) + 1
 
-        """
-        ##############################################################
-                                # Energy Head 
-        ############################################################## 
-        if self.extensive:
-            E_t = scatter_det(
-                E_t, batch, dim=0, dim_size=nMolecules, reduce="add"
-            )  # (nMolecules, 1)
-        else:
-            E_t = scatter_det(
-                E_t, batch, dim=0, dim_size=nMolecules, reduce="mean"
-            )  # (nMolecules, 1)
+        #----
+        # Removed Energy Head
+        #----
 
-        E_t = E_t.squeeze(1)  # (num_molecules)
-        print(E_t)
-        """
-        ##############################################################
-                                # Velcoity Head 
-        ##############################################################                           
+        #+++++++++++++
+        # Added velocity head instead of force head  
+        #++++++++++++                        
         if self.flow_matching:
             # map forces in edge directions
             vt_st_vec = vt_st[:, :, None] * main_graph["vector"][:, None, :]
@@ -1328,7 +1321,7 @@ class GemNetFlow(nn.Module, GraphModelMixin):
 
             vt_t = vt_t.squeeze(1)  # (num_calc_forces_and_updateatoms, 3)
 
-        return vt_t
+        return vt_t # return velocity
 
     @property
     def num_params(self) -> int:
