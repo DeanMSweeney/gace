@@ -17,18 +17,18 @@ accumulate_grad_batches: 4
 
 # computer arch
 accelerator: "gpu"
-devices: 2
+devices: 4
 num_nodes: 1
-strategy: "ddp_find_unused_parameters_true"
+strategy: "ddp_find_unused_parameters_false"
 precision: "16-mixed"
 
 # checkpointing/logging
 debug_mode: false
-logger: false
+logger: true
 project: "adsflow"
-run_name: "gauntlet-full"
+run_name: "gauntlet-sonic"
 ckpt_dir: "checkpoints"
-ckpt_path: null #"./checkpoints/last-v1.ckpt"
+ckpt_path: null 
 
 # misc
 seed: 42
