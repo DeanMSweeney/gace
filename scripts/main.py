@@ -210,6 +210,16 @@ class LightFlowMatch(pl.LightningModule):
             sync_dist=True,
         )
         return loss
+    
+    def on_after_backward(self):
+        # called immediately after loss.backward()
+        unused = []
+        for name, p in self.named_parameters():
+            if p.requires_grad and p.grad is None:
+                unused.append(name)
+        if unused:
+            print(f"⏹️ Unused params ({len(unused)}):")
+            print("\n".join(unused))
 
     def configure_optimizers(self):
         optimizer = optim.AdamW(self.parameters(), lr=self.hparams.lr)
