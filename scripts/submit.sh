@@ -3,9 +3,8 @@
 #SBATCH -p GPU-shared                      # GPU partition
 #SBATCH --nodes=1                          # 1 node
 #SBATCH --ntasks-per-node=4                # one process per node
-#SBATCH --cpus-per-task=5                  # cpus per process
 #SBATCH --gres=gpu:h100-80:4               # 1 × V100-32 GB GPU
-#SBATCH -t 10:00:00                        # walltime
+#SBATCH -t 23:00:00                        # walltime
 #SBATCH -J adsflow_train-0                 # job name
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=dmsween@umich.edu
@@ -51,7 +50,7 @@ srun singularity exec --nv \
       python main.py \
       num_nodes=1 \
       devices=4 \
-      num_workers=0 \
+      num_workers=8 \
       logger=True \
       flow_matching=True \
     "
