@@ -16,10 +16,10 @@ max_epochs: 3000
 accumulate_grad_batches: 4
 
 # computer arch
-accelerator: "gpu"
+accelerator: "cpu"
 devices: 2
 num_nodes: 1
-strategy: "ddp_find_unused_parameters_true"
+strategy: "ddp_find_unused_parameters_false"
 precision: "16-mixed"
 
 # checkpointing/logging
