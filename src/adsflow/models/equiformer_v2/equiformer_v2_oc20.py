@@ -40,33 +40,33 @@ try:
 except ImportError:
     pass
 
-from .base import BaseModel
-from .gaussian_rbf import GaussianRadialBasisLayer
+from .layers.base import BaseModel
+from .layers.gaussian_rbf import GaussianRadialBasisLayer
 from torch.nn import Linear
-from .edge_rot_mat import init_edge_rot_mat
-from .so3 import (
+from .layers.edge_rot_mat import init_edge_rot_mat
+from .layers.so3 import (
     CoefficientMappingModule,
     SO3_Embedding,
     SO3_Grid,
     SO3_Rotation,
     SO3_LinearV2
 )
-from .module_list import ModuleListInfo
-from .so2_ops import SO2_Convolution
-from .radial_function import RadialFunction
-from .layer_norm import (
+from .layers.module_list import ModuleListInfo
+from .layers.so2_ops import SO2_Convolution
+from .layers.radial_function import RadialFunction
+from .layers.layer_norm import (
     EquivariantLayerNormArray, 
     EquivariantLayerNormArraySphericalHarmonics, 
     EquivariantRMSNormArraySphericalHarmonics,
     EquivariantRMSNormArraySphericalHarmonicsV2,
     get_normalization_layer
 )
-from .transformer_block import (
+from .layers.transformer_block import (
     SO2EquivariantGraphAttention,
     FeedForwardNetwork,
     TransBlockV2, 
 )
-from .input_block import EdgeDegreeEmbedding
+from .layers.input_block import EdgeDegreeEmbedding
 
 # Statistics of IS2RE 100K 
 _AVG_NUM_NODES  = 77.81317
@@ -292,7 +292,6 @@ class EquiformerV2_Flow(BaseModel):
                 )
             self.SO3_grid.append(SO3_m_grid)
     
-
         # Edge-degree embedding
         self.edge_degree_embedding = EdgeDegreeEmbedding(
             self.sphere_channels,
@@ -407,6 +406,7 @@ class EquiformerV2_Flow(BaseModel):
         pos = data.pos
         t = data.t # extract time 
 
+        # Build graph 
         (
             edge_index,
             edge_distance,
@@ -445,18 +445,17 @@ class EquiformerV2_Flow(BaseModel):
 
         # Time embedding 
         time_embeds = self.time_emb(self.process_time_embeds(t))
-        x.embedding[:, 0, :] += time_embeds 
-
         offset_res = 0
         offset = 0
         # Initialize the l = 0, m = 0 coefficients for each resolution
         for i in range(self.num_resolutions):
             if self.num_resolutions == 1:
-                x.embedding[:, offset_res, :] = self.sphere_embedding(atomic_numbers)
+                x.embedding[:, offset_res, :] = self.sphere_embedding(atomic_numbers) + time_embeds
+                
             else:
                 x.embedding[:, offset_res, :] = self.sphere_embedding(
                     atomic_numbers
-                    )[:, offset : offset + self.sphere_channels]
+                    )[:, offset : offset + self.sphere_channels] + time_embeds 
             offset = offset + self.sphere_channels
             offset_res = offset_res + int((self.lmax_list[i] + 1) ** 2)
 
