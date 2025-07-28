@@ -32,9 +32,7 @@ class FlowOutputBlock(torch.nn.Module):
         Number of residual blocks before adding the atom embedding.
     activation: str
         Name of the activation function to use in the dense layers.
-    direct_forces: bool
-        If true directly predict forces, i.e. without taking the gradient
-        of the energy potential.
+
     """
 
     def __init__(
@@ -46,11 +44,11 @@ class FlowOutputBlock(torch.nn.Module):
     ) -> None:
         super().__init__() 
 
-        self.scale_rbf_F = ScaleFactor()
-        self.seq_forces = self.get_mlp(
+        self.scale_rbf_v = ScaleFactor()
+        self.seq_velocity = self.get_mlp(
             emb_size_edge, emb_size_edge, nHidden, activation
         )
-        self.dense_rbf_F = Dense(
+        self.dense_rbf_v = Dense(
             emb_size_rbf, emb_size_edge, activation=None, bias=False
         )
         
@@ -80,13 +78,13 @@ class FlowOutputBlock(torch.nn.Module):
 
         # ------------------------- Edge embeddings ------------------------ #
         x_v = m
-        for _, layer in enumerate(self.seq_forces):
+        for _, layer in enumerate(self.seq_velocity):
             x_v = layer(x_v)  # (nEdges, emb_size_edge)
 
-        basis_emb_F = self.dense_rbf_F(basis_rad)
+        basis_emb_v = self.dense_rbf_v(basis_rad)
         # (nEdges, emb_size_edge)
-        x_v_basis = x_v * basis_emb_F
-        x_v = self.scale_rbf_F(x_v_basis, ref=x_v)
+        x_v_basis = x_v * basis_emb_v
+        x_v = self.scale_rbf_v(x_v_basis, ref=x_v)
         # ------------------------------------------------------------------ #
 
         return x_v
