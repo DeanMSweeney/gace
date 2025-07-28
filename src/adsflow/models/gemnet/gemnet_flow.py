@@ -104,9 +104,6 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         Number of residual blocks after the concatenation.
     num_atom: int
         Number of residual blocks in the atom embedding blocks.
-    num_output_afteratom: int
-        Number of residual blocks in the output blocks
-        after adding the atom embedding.
     num_atom_emb_layers: int
         Number of residual blocks for transforming atom embeddings.
     num_global_out_layers: int
@@ -205,14 +202,12 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         num_after_skip: int,
         num_concat: int,
         num_atom: int,
-        num_output_afteratom: int,
         num_targets: int = 1,
         num_atom_emb_layers: int = 0,
         num_global_out_layers: int = 2,
         flow_matching: bool = True,
         use_pbc: bool = True,
         use_pbc_single: bool = False,
-        scale_backprop_forces: bool = False,
         cutoff: float = 6.0,
         cutoff_qint: float | None = None,
         cutoff_aeaint: float | None = None,
@@ -280,14 +275,9 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         self.enforce_max_neighbors_strictly = enforce_max_neighbors_strictly
         self.use_pbc = use_pbc
         self.use_pbc_single = use_pbc_single
-        
         self.flow_matching = flow_matching
-        self.force_scaler = ForceScaler(enabled=scale_backprop_forces)
         
-        # dummy variables for flow matching 
-        self.regress_forces = True
-        self.direct_forces = True
-
+        # initialize basis function with input parameters
         self.init_basis_functions(
             num_radial,
             num_spherical,
@@ -301,7 +291,8 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         self.init_shared_basis_layers(
             num_radial, num_spherical, emb_size_rbf, emb_size_cbf, emb_size_sbf
         )
-    
+
+        # register time_freqs tensor as a buffer, not a parameter        
         self.register_buffer(
             'time_freqs', 
             torch.arange(1, time_n_freqs + 1) * torch.pi,
@@ -309,14 +300,14 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         ) 
     
 
-        # Embedding blocks
+        # Embedding blocks - atom, time, and edge embeddings 
         self.atom_emb = AtomEmbedding(emb_size_atom, num_elements)
         self.time_emb = nn.Linear(2 * time_n_freqs, emb_size_atom)
         self.edge_emb = EdgeEmbedding(
             emb_size_atom, num_radial, emb_size_edge, activation=activation
         )
 
-        # Interaction Blocks
+        # Interaction Blocks - message passing core 
         int_blocks = []
         for _ in range(num_blocks):
             int_blocks.append(
@@ -344,12 +335,14 @@ class GemNetFlow(nn.Module, GraphModelMixin):
                     activation=activation,
                 )
             )
-        self.int_blocks = torch.nn.ModuleList(int_blocks)
+        self.int_blocks = torch.nn.ModuleList(int_blocks) 
 
         out_blocks = []
         #++++++++
         # Swaped OutputBlock() for FlowOutputBlock()
         #++++++++
+
+        # Output block - learns transformation from edge embeddings for velocity 
         for _ in range(num_blocks + 1):
             out_blocks.append(
                 FlowOutputBlock( 
@@ -391,6 +384,10 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         self.out_velocity.reset_parameters(out_initializer)
 
         load_scales_compat(self, scale_file)
+
+    #++++++
+    # Added time embedding function 
+    #++++++
     
     def process_time_embeds(self, t:torch.Tensor):
         """
@@ -400,6 +397,7 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         t = torch.cat((t.cos(), t.sin()), dim=-1)   # (bz, 2*self.time_n_freqs)
         return t
     
+    # Define neighbor cutoffs 
     def set_cutoffs(self, cutoff, cutoff_qint, cutoff_aeaint, cutoff_aint):
         self.cutoff = cutoff
 
@@ -427,6 +425,7 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         assert self.cutoff_aeaint <= self.cutoff_aint
         assert self.cutoff_qint <= self.cutoff_aint
 
+    # Define max neighbors
     def set_max_neighbors(
         self,
         max_neighbors,
@@ -460,6 +459,7 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         assert self.max_neighbors_aeaint <= self.max_neighbors_aint
         assert self.max_neighbors_qint <= self.max_neighbors_aint
 
+    # Initialize basis functions 
     def init_basis_functions(
         self,
         num_radial,
@@ -941,7 +941,7 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         )
 
     def get_graphs_and_indices(self, data):
-        """ "Generate embedding and interaction graphs and indices."""
+        """Generate embedding and interaction graphs and indices."""
         num_atoms = data.atomic_numbers.size(0)
 
         # Atom interaction graph is always the largest
@@ -1209,7 +1209,8 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         t = data.t
         atomic_numbers = data.atomic_numbers.long()
         num_atoms = atomic_numbers.shape[0]
-
+        
+        # Build embedding and interaction graphs and indices
         (
             main_graph,
             a2a_graph,
@@ -1223,6 +1224,7 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         ) = self.get_graphs_and_indices(data)
         _, idx_t = main_graph["edge_index"]
 
+        # Calcualte and transform basis functions
         (
             basis_rad_raw,
             basis_atom_update,
@@ -1244,21 +1246,22 @@ class GemNetFlow(nn.Module, GraphModelMixin):
             num_atoms=num_atoms,
         )
         
-        # Embedding block
-        h = self.atom_emb(atomic_numbers)                                 # (bz, nAtoms, emb_size_atom)      
-        # Time embedding 
+        # Atom embeddings 
+        h = self.atom_emb(atomic_numbers) # (bz, nAtoms, emb_size_atom)      
         time_embeds = self.time_emb(self.process_time_embeds(t))  # (bz, 1, emb_size_atom)
-        h += time_embeds                                                    # (nAtoms, emb_size_atom)
+        h += time_embeds # (nAtoms, emb_size_atom)
+
+        # Edge embeddings 
         m = self.edge_emb(h, basis_rad_raw, main_graph["edge_index"])
         # (nEdges, emb_size_edge)
        
        # ----
        # Removed x_E, xs_E
        # ---- 
-        x_vt = self.out_blocks[0](h, m, basis_output, idx_t)
-        # (nAtoms, emb_size_atom), (nEdges, emb_size_edge)
+        x_vt = self.out_blocks[0](h, m, basis_output, idx_t) # (nAtoms, emb_size_atom), (nEdges, emb_size_edge)
         xs_vt = [x_vt]
 
+        # Message passing 
         for i in range(self.num_blocks):
             # Interaction block
             h, m = self.int_blocks[i](
@@ -1306,7 +1309,8 @@ class GemNetFlow(nn.Module, GraphModelMixin):
 
         #+++++++++++++
         # Added velocity head instead of force head  
-        #++++++++++++                        
+        #++++++++++++                 
+        # Final velcoity regression        
         if self.flow_matching:
             # map forces in edge directions
             vt_st_vec = vt_st[:, :, None] * main_graph["vector"][:, None, :]
