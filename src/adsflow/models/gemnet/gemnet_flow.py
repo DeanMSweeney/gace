@@ -276,6 +276,8 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         self.use_pbc = use_pbc
         self.use_pbc_single = use_pbc_single
         self.flow_matching = flow_matching
+        self.regress_forces=True
+        self.direct_forces=True
         
         # initialize basis function with input parameters
         self.init_basis_functions(
