@@ -17,7 +17,6 @@ num_before_skip:    1
 num_after_skip:     1
 num_concat:         1
 num_atom:           1
-num_output_afteratom: 1
 cutoff:              7.0
 cutoff_qint:         7.0
 cutoff_aeaint:       7.0
