@@ -181,6 +181,8 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         Which atom tags to use quadruplet interactions for.
         0=sub-surface bulk, 1=surface, 2=adsorbate atoms.
     """
+    def print_banner(self) -> None:
+        print(">>> NOTE: Running GemNet-OC Lean for Flow Matching 🦌")
 
     def __init__(
         self,
@@ -390,7 +392,7 @@ class GemNetFlow(nn.Module, GraphModelMixin):
     #++++++
     # Added time embedding function 
     #++++++
-    
+
     def process_time_embeds(self, t:torch.Tensor):
         """
         t: (bz,1)

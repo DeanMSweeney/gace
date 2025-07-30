@@ -24,8 +24,6 @@ from adsflow.utils.data_handling import OCP_DataHandler
 from adsflow.utils.lmdb_dataset import LazyLmdbDataset
 from fairchem.core.datasets.lmdb_dataset import LmdbDataset
 
-
-
 @dataclass
 class Config:
     """
@@ -266,10 +264,16 @@ def print_config(cfg: DictConfig) -> None:
     print(f'>>> Training and model configurations:\n {OmegaConf.to_yaml(cfg)}')
     return 
 
+@rank_zero_only
+def model_banner(model) -> None:
+    print("Model Banner \n")
+    model.print_banner() # print model banner
+    return 
+
 @hydra.main(
     version_base=None,        
     config_path="conf", # ./conf
-    config_name="train_config",
+    config_name="debug_config",
 )
 def main(cfg: Config) -> None:
 
@@ -284,6 +288,8 @@ def main(cfg: Config) -> None:
 
     if cfg.flow_matching:
         model: GemNetFlow = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
+        model_banner(model)
+
     else: 
         model: GemNetOC = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
 
@@ -300,8 +306,6 @@ def main(cfg: Config) -> None:
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
-            #multiprocessing_context="spawn",
-            #persistent_workers=True,
         )
         
         # build validation set 
@@ -313,8 +317,6 @@ def main(cfg: Config) -> None:
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
-            #multiprocessing_context="spawn",
-            #persistent_workers=True,
         )
     
     else: 
@@ -329,7 +331,6 @@ def main(cfg: Config) -> None:
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
-            multiprocessing_context="spawn",
         )
         
         val_loader = DataLoader(
@@ -337,7 +338,6 @@ def main(cfg: Config) -> None:
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
-            multiprocessing_context="spawn",
         )
 
     # compile lightning model 
