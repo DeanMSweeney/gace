@@ -1,6 +1,6 @@
 # model configuration
 defaults:
-  - model_cfg: mini_gemnet-oc_cfg # direcotry in conf: file name
+  - model_cfg: mini_gemnet-flow_cfg # direcotry in conf: file name
   - _self_
 
 # dataset info
