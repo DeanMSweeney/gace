@@ -7,13 +7,15 @@ defaults:
 oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb"
 oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data.lmdb"
 oc20_mini: "/workspace/datasets/mini/data.lmdb"
+oc20_test: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/test_id/data.lmdb"
 batch_size: 32
 num_workers: 8
 
-# training hyperparameters 
+# training hyperparameters/settings
 lr: 1e-3
 max_epochs: 3000
 accumulate_grad_batches: 1
+val_check_interval: 5000
 
 # computer arch
 accelerator: "gpu"
@@ -23,12 +25,14 @@ strategy: "ddp_find_unused_parameters_false"
 precision: "16-mixed"
 
 # checkpointing/logging
-debug_mode: false
-logger: true
+logger: false
 project: "adsflow"
 run_name: "gauntlet-sonic"
 ckpt_dir: "checkpoints"
 ckpt_path: null 
+
+# Model mode
+mode: "train"
 
 # misc
 seed: 42
