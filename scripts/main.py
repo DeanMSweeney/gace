@@ -370,7 +370,7 @@ def main(cfg: Config) -> None:
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
         )
-        # configure model checkpoints during training 
+        # configure model checkpoint callbacks during training 
         checkpoint_cb.append(ModelCheckpoint(
         dirpath=cfg.ckpt_dir,
         filename=f"{cfg.run_name}-{{epoch:02d}}",
