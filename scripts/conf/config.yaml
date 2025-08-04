@@ -32,7 +32,7 @@ ckpt_dir: "checkpoints"
 ckpt_path: "checkpoints/gauntlet_trained.ckpt" 
 
 # Model mode
-mode: "test"
+mode: "eval"
 
 # misc
 seed: 42
