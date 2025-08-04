@@ -8,7 +8,7 @@ oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all
 oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data.lmdb"
 oc20_mini: "/workspace/datasets/mini/data.lmdb"
 oc20_test: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/test_id/data.lmdb"
-batch_size: 8
+batch_size: 32
 num_workers: 8
 
 # training hyperparameters/settings
@@ -18,7 +18,7 @@ accumulate_grad_batches: 1
 val_check_interval: 5000
 
 # computer arch
-accelerator: "cpu"
+accelerator: "gpu"
 devices: 2
 num_nodes: 1
 strategy: "ddp_find_unused_parameters_false"
