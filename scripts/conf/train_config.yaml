@@ -3,6 +3,9 @@ defaults:
   - model_cfg: gemnet-flow_cfg # direcotry in conf: file name
   - _self_
 
+# Model mode
+mode: "eval"
+
 # dataset info
 oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb"
 oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data.lmdb"
@@ -19,7 +22,7 @@ val_check_interval: 5000
 
 # computer arch
 accelerator: "gpu"
-devices: 8
+devices: 4
 num_nodes: 1
 strategy: "ddp_find_unused_parameters_false"
 precision: "16-mixed"
@@ -29,10 +32,7 @@ logger: false
 project: "adsflow"
 run_name: "gauntlet-sonic"
 ckpt_dir: "checkpoints"
-ckpt_path: null 
-
-# Model mode
-mode: "train"
+ckpt_path: "checkpoints/gauntlet-sonic-epoch=108.ckpt" 
 
 # misc
 seed: 42
