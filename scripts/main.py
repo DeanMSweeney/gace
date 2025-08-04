@@ -205,7 +205,7 @@ class LightFlowMatch(pl.LightningModule):
             data.t = t
         
         if hasattr(data, "pos_relaxed"):
-            struc_mse = self.loss_fn()
+            struc_mse = self.loss_fn(data.pos, data.pos_relaxed)
             struc_rmse = torch.sqrt(struc_mse)
             return data, struc_rmse
         else: 
@@ -306,8 +306,8 @@ class LightFlowMatch(pl.LightningModule):
 
 # print model/trianing config at rank 0 using decorator
 @rank_zero_only
-def print_config(cfg: DictConfig) -> None:
-    print(f'>>> Training and model configurations:\n {OmegaConf.to_yaml(cfg)}')
+def declare(statement) -> None:
+    print(statement)
     return 
 
 @rank_zero_only
@@ -340,11 +340,11 @@ def main(cfg: Config) -> None:
         model: GemNetOC = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
 
     # print configuration file at rank 0
-    print_config(cfg)
+    declare(f">>> Training and model configurations:\n {OmegaConf.to_yaml(cfg)}")
 
     checkpoint_cb = []
     if cfg.mode == "debug": 
-        print(">>> Activated Debug mode with OC20-mini 🕷️")
+        declare(">>> Activated Debug mode with OC20-mini 🕷️")
 
         # build trianing set 
         p = {"src": cfg.oc20_mini}
@@ -365,7 +365,7 @@ def main(cfg: Config) -> None:
             pin_memory=pin_memory,
         )
     elif cfg.mode == "train": 
-        print(">>> Activated Train mode with OC20 🦛")
+        declare(">>> Activated Train mode with OC20 🦛")
 
         # build training set
         pt = {"src": cfg.oc20_train}
@@ -397,7 +397,7 @@ def main(cfg: Config) -> None:
         ))
 
     elif cfg.mode == "eval":
-        print(">>> Activated Evaluation mode with OC20-test 🦉")
+        declare(">>> Activated Evaluation mode with OC20-test 🦉")
         ptst = {"src": cfg.oc20_test}
         test_set = LazyLmdbDataset(ptst)
         test_loader = DataLoader(
@@ -407,7 +407,7 @@ def main(cfg: Config) -> None:
             pin_memory=pin_memory,
         )
     elif cfg.mode == "generate": 
-        print(">>> Activated Generation mode with user input 🧚‍♀️")
+        declare(">>> Activated Generation mode with user input 🧚‍♀️")
 
     # compile lightning model 
     if cfg.ckpt_path: # if checkpoint file is provided 
