@@ -319,7 +319,7 @@ def model_banner(model) -> None:
 @hydra.main(
     version_base=None,        
     config_path="conf", # ./conf
-    config_name="train_config",
+    config_name="config",
 )
 
 def main(cfg: Config) -> None:
