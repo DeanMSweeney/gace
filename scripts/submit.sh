@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH -A chm250007p                      # your project/account
-#SBATCH -p GPU                             # GPU partition
+#SBATCH -p GPU-shared                      # GPU partition
 #SBATCH --nodes=1                          # 1 node
-#SBATCH --ntasks-per-node=8                # one process per node
-#SBATCH --gres=gpu:h100-80:8               # 1 × V100-32 GB GPU
+#SBATCH --ntasks-per-node=4                # one process per node
+#SBATCH --gres=gpu:h100-80:4               # 1 × V100-32 GB GPU
 #SBATCH --cpus-per-task=12                 # cpus per process 
 #SBATCH -t 23:00:00                        # walltime
 #SBATCH -J adsflow_train-0                 # job name
@@ -49,8 +49,9 @@ srun singularity exec --nv \
   	$WANDB_CACHE_DIR
       cd /workspace${SLURM_SUBMIT_DIR#$PROJECT_DIR} && \
       python main.py \
+      mode=eval \
       num_nodes=1 \
-      devices=8 \
+      devices=4 \
       batch_size=32 \
       num_workers=8 \
       logger=True \
