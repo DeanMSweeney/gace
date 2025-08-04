@@ -386,6 +386,7 @@ def main(cfg: Config) -> None:
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
         )
+
         # configure model checkpoint callbacks during training 
         checkpoint_cb.append(ModelCheckpoint(
         dirpath=cfg.ckpt_dir,
@@ -413,7 +414,7 @@ def main(cfg: Config) -> None:
     if cfg.ckpt_path: # if checkpoint file is provided 
         lightning = LightFlowMatch.load_from_checkpoint(
             checkpoint_path=cfg.ckpt_path, 
-            strict=False,
+            strict=True,
             model=model,
             lr=cfg.lr, 
             flow_matching=cfg.flow_matching, 

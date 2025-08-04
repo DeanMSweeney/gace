@@ -1,13 +1,13 @@
 # model configuration
 defaults:
-  - model_cfg: mini_gemnet-flow_cfg # direcotry in conf: file name
+  - model_cfg: gemnet-flow_cfg # direcotry in conf: file name
   - _self_
 
 # dataset info
 oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb"
 oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data.lmdb"
 oc20_mini: "/workspace/datasets/mini/data.lmdb"
-oc20_test: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/test_id/data.lmdb"
+oc20_test: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_ood_both/data.lmdb"
 batch_size: 32
 num_workers: 8
 
@@ -19,7 +19,7 @@ val_check_interval: 5000
 
 # computer arch
 accelerator: "gpu"
-devices: 2
+devices: 1
 num_nodes: 1
 strategy: "ddp_find_unused_parameters_false"
 precision: "16-mixed"
@@ -29,10 +29,10 @@ logger: false
 project: "adsflow"
 run_name: "gauntlet-sonic"
 ckpt_dir: "checkpoints"
-ckpt_path: null 
+ckpt_path: "checkpoints/gauntlet_trained.ckpt" 
 
 # Model mode
-mode: "train"
+mode: "test"
 
 # misc
 seed: 42
