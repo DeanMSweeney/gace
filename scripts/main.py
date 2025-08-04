@@ -13,7 +13,7 @@ from torch_geometric.data import Data
 import hydra
 from omegaconf import OmegaConf, DictConfig, MISSING
 from dataclasses import dataclass
-from typing import Optional, Literal
+from typing import Optional, Literal, Union, Tuple
 
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
 from adsflow.models.gemnet.gemnet_base import GemNetOC
@@ -109,7 +109,7 @@ class Config:
     ckpt_path:        Optional[str] = None
 
     # Model run mode
-    mode:             Literal["debug", "train", "eval", "prod"] = "train"
+    mode:             Literal["debug", "train", "eval", "generate"] = "train"
 
     # Misc
     seed:             int            = 42
@@ -148,7 +148,9 @@ class LightFlowMatch(pl.LightningModule):
     def forward(self, data):
         return self.model(data)
     
-    def _compute_loss(self, data: Data) -> torch.Tensor: 
+    def _transport_loss(self, input_data: Data) -> torch.Tensor: 
+        data = input_data.clone()
+
         if self.flow_matching: 
             x1 = data.pos_relaxed.clone() # sample relaxed positions and discard
 
@@ -157,8 +159,8 @@ class LightFlowMatch(pl.LightningModule):
             else:
                 x0 = data.pos.clone() # sample initial positions and discard 
 
-            t_graph = torch.rand(len(data.natoms), 1, device=x1.device) # t~U for each graph
-            t = t_graph[data.batch] # expand t to each atom of graph 
+            t_graph = torch.rand(len(data.natoms), 1, device=x1.device) # (batch_size, 1)
+            t = t_graph[data.batch] # (num_atoms, 1)
 
             xt = x1 * t + (1 - t) * x0 # interpolation scheme 
             data.pos = xt # reassign xt to pos 
@@ -168,21 +170,50 @@ class LightFlowMatch(pl.LightningModule):
             u_hat = self(data) # compute velocity field 
             u = x1 - x0
             loss = self.loss_fn(u_hat, u)
-
-            struc_mse = self.loss_fn(x1, xt) # compute rmse between optimized and generate structures
-            struc_rmse = torch.sqrt(struc_mse)
         else: 
             F = data.force
             F_hat = self(data)
             loss = self.loss_fn(F_hat, F) # compute MSE training loss
-            struc_rmse = []
-          
-        return loss, struc_rmse
-        
 
+        return loss
+    
+    def _sample_dist(
+            self, 
+            input_data: Data,
+            N: int=100,
+    ) -> Union[Data, Tuple[Data, torch.Tensor]]:
+        
+        data = input_data.clone()
+        xt = data.pos.clone()   # (num_atoms, 3)
+
+        # define intgeration interval and time step
+        t0 = torch.zeros(len(xt), 1, device=xt.device, dtype=xt.dtype)
+        dt = torch.ones(len(xt), 1, device=xt.device, dtype=xt.dtype) / N
+
+        # perform Euler integratuion from 0 to 1
+        t = t0
+        data.t = t
+        for _ in range(N):
+            
+            # regress velocity field and update xt and t
+            u = self(data) # (num_atoms, 3)
+            xt += dt * u # (num_atoms, 3)
+            t += dt # (num_atoms, 1)
+
+            # redefine data object 
+            data.pos = xt 
+            data.t = t
+        
+        if hasattr(data, "pos_relaxed"):
+            struc_mse = self.loss_fn()
+            struc_rmse = torch.sqrt(struc_mse)
+            return data, struc_rmse
+        else: 
+            return data
+    
     # define training and validation methods 
     def training_step(self, data: Data, batch_idx):
-        loss, struc_rmse = self._compute_loss(data)
+        loss = self._transport_loss(data)
 
         self.log( # log train loss per epoch 
             "train/loss_epoch",
@@ -190,16 +221,6 @@ class LightFlowMatch(pl.LightningModule):
             on_step=False, 
             on_epoch=True,
             prog_bar=True, 
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-
-        self.log( # log structural rmse per epoch 
-            "train/struc_rmse", 
-            struc_rmse, 
-            on_step=False, 
-            on_epoch=True,
-            prog_bar=True,
             batch_size=len(data.natoms),
             sync_dist=True,
         )
@@ -214,22 +235,12 @@ class LightFlowMatch(pl.LightningModule):
             sync_dist=True,
         )
 
-
-        self.log( # log structural rmse per epoch 
-            "train/struc_rmse", 
-            struc_rmse, 
-            on_step=True, 
-            on_epoch=False,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-
-
         return loss
     
     def validation_step(self, data: Data, batch_idx):
-        loss, struc_rmse = self._compute_loss(data)
+        loss = self._transport_loss(data)
+        opt_struc, struc_rmse = self._sample_dist(data)
+
         self.log(
             "val/loss", 
             loss, 
@@ -249,7 +260,9 @@ class LightFlowMatch(pl.LightningModule):
         return loss
 
     def test_step(self, data: Data, batch_idx):
-        loss, struc_rmse = self._compute_loss(data)
+        loss = self._transport_loss(data)
+        opt_struc, struc_rmse = self._sample_dist(data)
+
         self.log(
             "test/loss", 
             loss, 
@@ -267,6 +280,10 @@ class LightFlowMatch(pl.LightningModule):
         )
 
         return loss    
+    
+    def predict_step(self, data: Data): 
+        opt_struc = self._sample_dist(data)
+        return
     
     def configure_optimizers(self):
         optimizer = optim.AdamW(self.parameters(), lr=self.hparams.lr)
@@ -287,7 +304,7 @@ class LightFlowMatch(pl.LightningModule):
         }
             
 
-# print model/trianing config at rank 0 uding decorator
+# print model/trianing config at rank 0 using decorator
 @rank_zero_only
 def print_config(cfg: DictConfig) -> None:
     print(f'>>> Training and model configurations:\n {OmegaConf.to_yaml(cfg)}')
@@ -310,12 +327,11 @@ def main(cfg: Config) -> None:
     # seed for reproducibility & multi-gpu weight updates
     pl.seed_everything(cfg.seed, workers=True)
     
-    # enable TF32 on matmuls
+    # enable TF32 on matmuls and memory pinning
     torch.set_float32_matmul_precision('medium')
-    
-    # build model with configuration file
     pin_memory = True if cfg.accelerator == "gpu" else False # configured for GPU
 
+    # build model with  provided configuration file
     if cfg.flow_matching:
         model: GemNetFlow = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
         model_banner(model)
@@ -326,11 +342,11 @@ def main(cfg: Config) -> None:
     # print configuration file at rank 0
     print_config(cfg)
 
-    # build trianing set 
     checkpoint_cb = []
     if cfg.mode == "debug": 
         print(">>> Activated Debug mode with OC20-mini 🕷️")
-        #dataset = OCP_DataHandler(cfg.oc20_mini, pbc=True, flow_matching=cfg.flow_matching)
+
+        # build trianing set 
         p = {"src": cfg.oc20_mini}
         dataset = LmdbDataset(p)
         train_set, val_set = random_split(dataset, [0.80, 0.20])
@@ -350,7 +366,8 @@ def main(cfg: Config) -> None:
         )
     elif cfg.mode == "train": 
         print(">>> Activated Train mode with OC20 🦛")
-        #train_set = OCP_DataHandler(cfg.oc20_train, pbc=True, flow_matching=cfg.flow_matching)
+
+        # build training set
         pt = {"src": cfg.oc20_train}
         train_set = LazyLmdbDataset(pt)
         train_loader = DataLoader(
@@ -361,7 +378,6 @@ def main(cfg: Config) -> None:
         )
         
         # build validation set 
-        #val_set = OCP_DataHandler(cfg.oc20_val, pbc=True, flow_matching=cfg.flow_matching)
         pv = {"src": cfg.oc20_val}
         val_set = LazyLmdbDataset(pv)
         val_loader = DataLoader(
@@ -390,8 +406,8 @@ def main(cfg: Config) -> None:
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
         )
-    elif cfg.mode == "prod": 
-        print(">>> Activated Performance mode with user input 🧚‍♀️")
+    elif cfg.mode == "generate": 
+        print(">>> Activated Generation mode with user input 🧚‍♀️")
 
     # compile lightning model 
     if cfg.ckpt_path: # if checkpoint file is provided 
@@ -403,7 +419,7 @@ def main(cfg: Config) -> None:
             flow_matching=cfg.flow_matching, 
             from_noise=cfg.from_noise,
         )
-    else: # if checkpoint file is not provided
+    else: 
         lightning = LightFlowMatch(
             model=model, 
             lr=cfg.lr,
@@ -411,8 +427,8 @@ def main(cfg: Config) -> None:
             from_noise=cfg.from_noise,
         )
 
-    # compile W&B logger when logger is activated and performance mode is off 
-    if cfg.logger and cfg.mode != "prod": 
+    # compile W&B logger when logger is activated and generation mode is off 
+    if cfg.logger and cfg.mode != "generate": 
         logger = WandbLogger(
             project=cfg.project,
             name=cfg.run_name,
@@ -449,8 +465,9 @@ def main(cfg: Config) -> None:
             train_dataloaders=train_loader,
             val_dataloaders=val_loader,
         )
+    elif cfg.mode == "generate":
+        trainer.predict(model=lightning)
 
 if __name__ == "__main__":
     main()
-
-
+   
