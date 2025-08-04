@@ -3,6 +3,9 @@ defaults:
   - model_cfg: gemnet-flow_cfg # direcotry in conf: file name
   - _self_
 
+# Model mode
+mode: "eval"
+
 # dataset info
 oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb"
 oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data.lmdb"
@@ -30,9 +33,6 @@ project: "adsflow"
 run_name: "gauntlet-sonic"
 ckpt_dir: "checkpoints"
 ckpt_path: "checkpoints/gauntlet_trained.ckpt" 
-
-# Model mode
-mode: "eval"
 
 # misc
 seed: 42

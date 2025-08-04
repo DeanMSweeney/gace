@@ -412,6 +412,8 @@ def main(cfg: Config) -> None:
 
     # compile lightning model 
     if cfg.ckpt_path: # if checkpoint file is provided 
+        declare(f">>> Loaded model from: {cfg.ckpt_path:} 🦞")
+
         lightning = LightFlowMatch.load_from_checkpoint(
             checkpoint_path=cfg.ckpt_path, 
             strict=True,
