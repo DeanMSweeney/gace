@@ -344,7 +344,7 @@ def main(cfg: Config) -> None:
 
     checkpoint_cb = []
     if cfg.mode == "debug": 
-        declare(">>> Activated Debug mode with OC20-mini 🕷️")
+        declare(f">>> Activated Debug mode with OC20-mini: {cfg.oc20_debug} 🕷️")
 
         # build trianing set 
         p = {"src": cfg.oc20_mini}
@@ -365,7 +365,7 @@ def main(cfg: Config) -> None:
             pin_memory=pin_memory,
         )
     elif cfg.mode == "train": 
-        declare(">>> Activated Train mode with OC20 🦛")
+        declare(f">>> Activated Train mode with OC20: {cfg.oc20_train} 🦛")
 
         # build training set
         pt = {"src": cfg.oc20_train}
@@ -398,7 +398,7 @@ def main(cfg: Config) -> None:
         ))
 
     elif cfg.mode == "eval":
-        declare(">>> Activated Evaluation mode with OC20-test 🦉")
+        declare(f">>> Activated Evaluation mode with OC20-test: {cfg.oc20_test} 🦉")
         ptst = {"src": cfg.oc20_test}
         test_set = LazyLmdbDataset(ptst)
         test_loader = DataLoader(
