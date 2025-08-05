@@ -9,6 +9,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.utilities import rank_zero_only
 from torch_geometric.loader import DataLoader
 from torch_geometric.data import Data
+from torchdiffeq import odeint
 
 import hydra
 from omegaconf import OmegaConf, DictConfig, MISSING
@@ -136,6 +137,9 @@ class LightFlowMatch(pl.LightningModule):
             lr: int = 1e-3, 
             flow_matching: bool = True,
             from_noise: bool = False,
+            rtol: float = 1e-7, 
+            atol: float = 1e-9,
+            ode_method: str = "dopri5",
         ):
         
         super().__init__()
@@ -144,6 +148,8 @@ class LightFlowMatch(pl.LightningModule):
         self.loss_fn = nn.MSELoss() # mean squared error loss function 
         self.flow_matching = flow_matching
         self.from_noise = from_noise
+        self.rtol = rtol
+        self.atol = atol 
 
     def forward(self, data):
         return self.model(data)
@@ -162,7 +168,7 @@ class LightFlowMatch(pl.LightningModule):
             t_graph = torch.rand(len(data.natoms), 1, device=x1.device) # (batch_size, 1)
             t = t_graph[data.batch] # (num_atoms, 1)
 
-            xt = x1 * t + (1 - t) * x0 # interpolation scheme 
+            xt = x1 * t + (1 - t) * x0 # define path via linear interpolation
             data.pos = xt # reassign xt to pos 
             data.pos_init = x0
             data.t = t
@@ -177,14 +183,16 @@ class LightFlowMatch(pl.LightningModule):
 
         return loss
     
-    def _sample_dist(
+    def _sampler(
             self, 
             input_data: Data,
-            N: int=100,
+            
     ) -> Union[Data, Tuple[Data, torch.Tensor]]:
         
         data = input_data.clone()
         xt = data.pos.clone()   # (num_atoms, 3)
+
+        func = self(data)
 
         # define intgeration interval and time step
         t0 = torch.zeros(len(xt), 1, device=xt.device, dtype=xt.dtype)
@@ -352,6 +360,7 @@ def main(cfg: Config) -> None:
         save_last=True,
     ))]
 
+    # load datasets
     if cfg.mode == "debug": 
         declare(f">>> Activated Debug mode with OC20-mini: {cfg.oc20_debug} 🕷️")
 
@@ -451,20 +460,17 @@ def main(cfg: Config) -> None:
             model=lightning,
             train_dataloaders=train_loader,
             val_dataloaders=val_loader,
-            ckpt_path=cfg.ckpt_path,
+            ckpt_path=cfg.ckpt_path, # use for model training restart and evaluation
         )
     elif cfg.mode == "eval": 
         trainer.test(
             model=lightning,
             dataloaders=test_loader,
-            ckpt_path=cfg.ckpt_path,
+            ckpt_path=cfg.ckpt_path, # use for model training restart and evaluation
         )
     elif cfg.mode == "generate":
         trainer.predict(model=lightning)
     
-    if cfg.ckpt_path: # if checkpoint file is provided 
-        declare(f">>> Loaded model from: {cfg.ckpt_path:} 🦞")
-
 if __name__ == "__main__":
     main()
    
