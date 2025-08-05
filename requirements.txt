@@ -9,4 +9,5 @@ e3nn
 lightning
 wandb
 deepspeed
+torchdiffeq
 fairchem-core==1.10.0
