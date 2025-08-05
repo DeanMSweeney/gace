@@ -342,7 +342,16 @@ def main(cfg: Config) -> None:
     # print configuration file at rank 0
     declare(f">>> Training and model configurations:\n {OmegaConf.to_yaml(cfg)}")
 
-    checkpoint_cb = []
+    # configure model checkpoint callbacks
+    checkpoint_cb = [(ModelCheckpoint(
+        dirpath=cfg.ckpt_dir,
+        filename=f"{cfg.run_name}-{{epoch:02d}}",
+        monitor="val/loss",
+        mode="min",
+        save_top_k=3,
+        save_last=True,
+    ))]
+
     if cfg.mode == "debug": 
         declare(f">>> Activated Debug mode with OC20-mini: {cfg.oc20_debug} 🕷️")
 
@@ -364,6 +373,8 @@ def main(cfg: Config) -> None:
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
         )
+
+        checkpoint_cb = [] # deactivate call backs fo debugging 
     elif cfg.mode == "train": 
         declare(f">>> Activated Train mode with OC20: {cfg.oc20_train} 🦛")
 
@@ -387,16 +398,6 @@ def main(cfg: Config) -> None:
             pin_memory=pin_memory,
         )
 
-        # configure model checkpoint callbacks during training 
-        checkpoint_cb.append(ModelCheckpoint(
-        dirpath=cfg.ckpt_dir,
-        filename=f"{cfg.run_name}-{{epoch:02d}}",
-        monitor="val/loss",
-        mode="min",
-        save_top_k=3,
-        save_last=True,
-        ))
-
     elif cfg.mode == "eval":
         declare(f">>> Activated Evaluation mode with OC20-test: {cfg.oc20_test} 🦉")
         ptst = {"src": cfg.oc20_test}
@@ -410,20 +411,7 @@ def main(cfg: Config) -> None:
     elif cfg.mode == "generate": 
         declare(">>> Activated Generation mode with user input 🧚‍♀️")
 
-    # compile lightning model 
-    if cfg.ckpt_path: # if checkpoint file is provided 
-        declare(f">>> Loaded model from: {cfg.ckpt_path:} 🦞")
-        """
-         lightning = LightFlowMatch.load_from_checkpoint(
-            checkpoint_path=cfg.ckpt_path, 
-            strict=True,
-            model=model,
-            lr=cfg.lr, 
-            flow_matching=cfg.flow_matching, 
-            from_noise=cfg.from_noise,
-        )
-        """
-        
+    # compile lightning module 
     lightning = LightFlowMatch(
         model=model, 
         lr=cfg.lr,
@@ -473,6 +461,9 @@ def main(cfg: Config) -> None:
         )
     elif cfg.mode == "generate":
         trainer.predict(model=lightning)
+    
+    if cfg.ckpt_path: # if checkpoint file is provided 
+        declare(f">>> Loaded model from: {cfg.ckpt_path:} 🦞")
 
 if __name__ == "__main__":
     main()
