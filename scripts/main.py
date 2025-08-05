@@ -455,7 +455,6 @@ def main(cfg: Config) -> None:
         accumulate_grad_batches=cfg.accumulate_grad_batches,
         val_check_interval=cfg.val_check_interval,
         log_every_n_steps=10,
-        limit_test_batches=0.1,
     )
 
     # fit the model 
