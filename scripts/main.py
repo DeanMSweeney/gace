@@ -413,8 +413,8 @@ def main(cfg: Config) -> None:
     # compile lightning model 
     if cfg.ckpt_path: # if checkpoint file is provided 
         declare(f">>> Loaded model from: {cfg.ckpt_path:} 🦞")
-
-        lightning = LightFlowMatch.load_from_checkpoint(
+        """
+         lightning = LightFlowMatch.load_from_checkpoint(
             checkpoint_path=cfg.ckpt_path, 
             strict=True,
             model=model,
@@ -422,6 +422,7 @@ def main(cfg: Config) -> None:
             flow_matching=cfg.flow_matching, 
             from_noise=cfg.from_noise,
         )
+        """
     else: 
         lightning = LightFlowMatch(
             model=model, 
@@ -458,16 +459,18 @@ def main(cfg: Config) -> None:
     )
 
     # fit the model 
-    if cfg.mode == "eval": 
-        trainer.test(
-            model=lightning,
-            dataloaders=test_loader,
-        )
-    elif cfg.mode == "debug" or cfg.mode == "train":
+    if cfg.mode == "debug" or cfg.mode == "train":
         trainer.fit(
             model=lightning,
             train_dataloaders=train_loader,
             val_dataloaders=val_loader,
+            ckpt_path=cfg.ckpt_path,
+        )
+    elif cfg.mode == "eval": 
+        trainer.test(
+            model=lightning,
+            dataloaders=test_loader,
+            ckpt_path=cfg.ckpt_path,
         )
     elif cfg.mode == "generate":
         trainer.predict(model=lightning)
