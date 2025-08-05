@@ -423,13 +423,13 @@ def main(cfg: Config) -> None:
             from_noise=cfg.from_noise,
         )
         """
-    else: 
-        lightning = LightFlowMatch(
-            model=model, 
-            lr=cfg.lr,
-            flow_matching=cfg.flow_matching,
-            from_noise=cfg.from_noise,
-        )
+        
+    lightning = LightFlowMatch(
+        model=model, 
+        lr=cfg.lr,
+        flow_matching=cfg.flow_matching,
+        from_noise=cfg.from_noise,
+    )
 
     # compile W&B logger when logger is activated and generation mode is off 
     if cfg.logger and cfg.mode != "generate": 
