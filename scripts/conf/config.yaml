@@ -20,6 +20,11 @@ max_epochs: 3000
 accumulate_grad_batches: 1
 val_check_interval: 5000
 
+# sampler setings
+rtol: 1e-9
+atol: 1e-7
+ode_method: "dopri5"
+
 # computer arch
 accelerator: "gpu"
 devices: 1
@@ -35,7 +40,6 @@ ckpt_dir: "checkpoints"
 ckpt_path: "checkpoints/gauntlet_trained.ckpt" 
 
 # misc
-seed: 42
 flow_matching: true
 from_noise: false
 
