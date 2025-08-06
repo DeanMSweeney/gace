@@ -1,3 +1,4 @@
+import os
 import torch
 from torch import optim
 from torch.utils.data import random_split
@@ -80,42 +81,46 @@ class Config:
     model_cfg: DictConfig = MISSING
 
     # Dataset paths
-    oc20_train: str = MISSING
-    oc20_val:   str = MISSING
-    oc20_test:  str = MISSING
-    oc20_mini:  str = MISSING
+    oc20_train:                      Optional[str] = None
+    oc20_val:                        Optional[str] = None
+    oc20_test:                       Optional[str] = None
+    oc20_mini:                       Optional[str] = None
 
     # DataLoader settings
-    batch_size:      int = MISSING
-    num_workers:     int = MISSING
+    batch_size:                      int = 8
+    num_workers:                     Optional[int] = None
 
     # Training hyperparameters/settings
-    lr:                       float = 1e-3
-    max_epochs:               int   = 3000
-    accumulate_grad_batches:  int   = 4
-    val_check_interval:       int   = 1000
+    lr:                              float = 1e-3
+    max_epochs:                      int   = 3000
+    accumulate_grad_batches:         int   = 4
+    val_check_interval:              int   = 1000
 
     # Compute architecture
-    accelerator: str = MISSING
-    devices:     int = MISSING
-    num_nodes:   int = MISSING
-    strategy:    str = "auto"
-    precision:   Literal[16, "16-mixed", "32-true"] = "16-mixed"
+    accelerator:                     str = "gpu"
+    devices:                         int = 1
+    num_nodes:                       int = 1
+    strategy:                        str = "auto"
+    precision:                       Literal[16, "16-mixed", "32-true"] = "16-mixed"
 
     # Checkpointing & logging
-    logger:           bool         = False
-    project:          str          = MISSING
-    run_name:         str          = MISSING
-    ckpt_dir:         str          = "checkpoints"
-    ckpt_path:        Optional[str] = None
+    logger:                          bool                    = False
+    project:                         str                     = "NAME_PROJ"
+    run_name:                        str                     = "NAME_RUN"
+    ckpt_dir:                        str                     = "checkpoints"
+    ckpt_path:                       Optional[str]           = None
 
     # Model run mode
-    mode:             Literal["debug", "train", "eval", "generate"] = "train"
+    mode:                            Literal["debug", "train", "eval", "generate"] = "train"
+
+    # Sampler settings (ODEINT)
+    rtol:                            float           = 1e-7
+    atol:                            float           = 1e-9
+    ode_method:                      str             = "dopri5"
 
     # Misc
-    seed:             int            = 42
-    flow_matching:    bool           = True
-    from_noise:       bool           = False
+    seed:                            int            = 42
+    from_noise:                      bool           = False
 
 
 class LightFlowMatch(pl.LightningModule):
@@ -157,29 +162,24 @@ class LightFlowMatch(pl.LightningModule):
     def _transport_loss(self, input_data: Data) -> torch.Tensor: 
         data = input_data.clone()
 
-        if self.flow_matching: 
-            x1 = data.pos_relaxed.clone() # sample relaxed positions and discard
+        x1 = data.pos_relaxed.clone() # sample relaxed positions and discard
 
-            if self.from_noise:
-                x0 = torch.randn_like(x1) # sample noise 
-            else:
-                x0 = data.pos.clone() # sample initial positions and discard 
+        if self.from_noise:
+            x0 = torch.randn_like(x1) # sample noise 
+        else:
+            x0 = data.pos.clone() # sample initial positions and discard 
 
-            t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device) # (batch_size, 1)
-            t = t_per_graph[data.batch] # (num_atoms, 1)
+        t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device) # (batch_size, 1)
+        t = t_per_graph[data.batch] # (num_atoms, 1)
 
-            xt = x1 * t + (1 - t) * x0 # define path via linear interpolation
-            data.pos = xt # reassign xt to pos 
-            data.pos_init = x0
-            data.t = t
+        xt = x1 * t + (1 - t) * x0 # define path via linear interpolation
+        data.pos = xt # reassign xt to pos 
+        data.pos_init = x0
+        data.t = t
 
-            u_hat = self(data) # compute velocity field 
-            u = x1 - x0
-            loss = self.loss_fn(u_hat, u)
-        else: 
-            F = data.force
-            F_hat = self(data)
-            loss = self.loss_fn(F_hat, F) # compute MSE training loss
+        u_hat = self(data) # compute velocity field 
+        u = x1 - x0
+        loss = self.loss_fn(u_hat, u)
 
         return loss
     
@@ -209,7 +209,7 @@ class LightFlowMatch(pl.LightningModule):
             t=t,
             rtol=self.rtol,
             atol=self.atol,
-            method=self.method,
+            method=self.ode_method,
         )
         data.pos = xt[-1]
 
@@ -248,7 +248,7 @@ class LightFlowMatch(pl.LightningModule):
     
     def validation_step(self, data: Data, batch_idx):
         loss = self._transport_loss(data)
-        opt_struc, struc_rmse = self._sample_dist(data)
+        opt_graph, struc_rmse = self._sampler(data)
 
         self.log(
             "val/loss", 
@@ -270,7 +270,7 @@ class LightFlowMatch(pl.LightningModule):
 
     def test_step(self, data: Data, batch_idx):
         loss = self._transport_loss(data)
-        opt_struc, struc_rmse = self._sample_dist(data)
+        opt_graph, struc_rmse = self._sampler(data)
 
         self.log(
             "test/loss", 
@@ -291,8 +291,8 @@ class LightFlowMatch(pl.LightningModule):
         return loss    
     
     def predict_step(self, data: Data): 
-        opt_struc = self._sample_dist(data)
-        return
+        opt_graph = self._sampler(data)
+        return opt_graph
     
     def configure_optimizers(self):
         optimizer = optim.AdamW(self.parameters(), lr=self.hparams.lr)
@@ -362,8 +362,11 @@ def main(cfg: Config) -> None:
     ))]
 
     # load datasets
-    if cfg.mode == "debug": 
-        declare(f">>> Activated Debug mode with OC20-mini: {cfg.oc20_debug} 🕷️")
+    if cfg.num_workers is None: 
+        cfg.num_workers = max(1, os.cpu_count() - 2) # leave 2 cores free 
+
+    if cfg.mode == "debug" and cfg.oc20_mini: 
+        declare(f">>> Activated Debug mode with OC20-mini: {cfg.oc20_mini} 🕷️")
 
         # build trianing set 
         p = {"src": cfg.oc20_mini}
@@ -385,7 +388,8 @@ def main(cfg: Config) -> None:
         )
 
         checkpoint_cb = [] # deactivate call backs fo debugging 
-    elif cfg.mode == "train": 
+
+    elif cfg.mode == "train" and cfg.oc20_train:
         declare(f">>> Activated Train mode with OC20: {cfg.oc20_train} 🦛")
 
         # build training set
@@ -408,7 +412,7 @@ def main(cfg: Config) -> None:
             pin_memory=pin_memory,
         )
 
-    elif cfg.mode == "eval":
+    elif cfg.mode == "eval" and cfg.oc20_test:
         declare(f">>> Activated Evaluation mode with OC20-test: {cfg.oc20_test} 🦉")
         ptst = {"src": cfg.oc20_test}
         test_set = LazyLmdbDataset(ptst)
@@ -427,6 +431,9 @@ def main(cfg: Config) -> None:
         lr=cfg.lr,
         flow_matching=cfg.flow_matching,
         from_noise=cfg.from_noise,
+        rtol=cfg.rtol, 
+        atol=cfg.atol,
+        ode_method=cfg.ode_method
     )
 
     # compile W&B logger when logger is activated and generation mode is off 
