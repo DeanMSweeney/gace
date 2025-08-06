@@ -165,8 +165,8 @@ class LightFlowMatch(pl.LightningModule):
             else:
                 x0 = data.pos.clone() # sample initial positions and discard 
 
-            t_graph = torch.rand(len(data.natoms), 1, device=x1.device) # (batch_size, 1)
-            t = t_graph[data.batch] # (num_atoms, 1)
+            t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device) # (batch_size, 1)
+            t = t_per_graph[data.batch] # (num_atoms, 1)
 
             xt = x1 * t + (1 - t) * x0 # define path via linear interpolation
             data.pos = xt # reassign xt to pos 
@@ -190,35 +190,36 @@ class LightFlowMatch(pl.LightningModule):
     ) -> Union[Data, Tuple[Data, torch.Tensor]]:
         
         data = input_data.clone()
-        xt = data.pos.clone()   # (num_atoms, 3)
+        x0 = data.pos
 
-        func = self(data)
+        def dx_dt(t: torch.Tensor, xt: torch.Tensor) -> torch.Tensor:
+            """
+            Wrap Pytorch model in a function with format: f(t, y)
+            """
+            data.pos = xt
+            data.t = t.view(1,1).expand(len(xt), -1)
+            return self(data)
 
-        # define intgeration interval and time step
-        t0 = torch.zeros(len(xt), 1, device=xt.device, dtype=xt.dtype)
-        dt = torch.ones(len(xt), 1, device=xt.device, dtype=xt.dtype) / N
+        # define time interval for the IVP
+        t = torch.linspace(0., 1., 10, 
+                           device=x0.device, dtype=x0.dtype)
+        xt = odeint(
+            func=dx_dt, 
+            y0=x0,
+            t=t,
+            rtol=self.rtol,
+            atol=self.atol,
+            method=self.method,
+        )
+        data.pos = xt[-1]
 
-        # perform Euler integratuion from 0 to 1
-        t = t0
-        data.t = t
-        for _ in range(N):
-            
-            # regress velocity field and update xt and t
-            u = self(data) # (num_atoms, 3)
-            xt += dt * u # (num_atoms, 3)
-            t += dt # (num_atoms, 1)
-
-            # redefine data object 
-            data.pos = xt 
-            data.t = t
-        
         if hasattr(data, "pos_relaxed"):
             struc_mse = self.loss_fn(data.pos, data.pos_relaxed)
             struc_rmse = torch.sqrt(struc_mse)
             return data, struc_rmse
         else: 
             return data
-    
+ 
     # define training and validation methods 
     def training_step(self, data: Data, batch_idx):
         loss = self._transport_loss(data)
@@ -474,4 +475,3 @@ def main(cfg: Config) -> None:
 if __name__ == "__main__":
     main()
    
-
