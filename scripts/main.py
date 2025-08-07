@@ -197,7 +197,8 @@ class LightFlowMatch(pl.LightningModule):
             data.pos = xt
             data.t = t.view(1,1).expand(len(xt), -1)
             u = self(data)
-            print(u)
+            print(u[0])
+            print((data.pos_relaxed - input_data.pos)[0])
             return u
 
         # define time interval for the IVP
