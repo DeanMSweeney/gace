@@ -211,8 +211,6 @@ class LightFlowMatch(pl.LightningModule):
         data.pos_generated = xt[-1] # write generate possitional coordinates to pos_gen attribute 
         data.pos = input_data.pos
 
-        print(data.pos == data.pos_generated)
-
         if hasattr(data, "pos_relaxed"):
             struc_rmse = torch.sqrt(self.loss_fn(data.pos_generated, data.pos_relaxed))
             null_struc_rmse = torch.sqrt(self.loss_fn(data.pos, data.pos_relaxed))
@@ -290,7 +288,7 @@ class LightFlowMatch(pl.LightningModule):
 
         self.log(
             "test/null_struc_rmse", 
-            struc_rmse, 
+            null_struc_rmse, 
             prog_bar=True, 
             batch_size=len(data.natoms),
             sync_dist=True,
