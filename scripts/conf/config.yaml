@@ -31,7 +31,7 @@ ckpt_path: "checkpoints/gauntlet_trained.ckpt"
 # sampler setings
 rtol: 1e-7
 atol: 1e-9
-ode_method: "euler"
+ode_method: "rk4"
 
 # computer arch
 accelerator: "gpu"
