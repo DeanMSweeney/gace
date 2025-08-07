@@ -9,8 +9,9 @@ mode: "eval"
 # dataset info
 oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb"
 oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data.lmdb"
-oc20_mini: "/workspace/datasets/mini/data.lmdb"
-oc20_test: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_ood_both/data.lmdb"
+oc20_mini:  "/workspace/datasets/mini/data.lmdb"
+oc20_test:  "/workspace/datasets/mini/data.lmdb"
+#"/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_ood_both/data.lmdb"
 
 # training hyperparameters/settings
 batch_size: 32
@@ -21,7 +22,7 @@ accumulate_grad_batches: 1
 val_check_interval: 1000
 
 # checkpointing/logging
-logger: true
+logger: false
 project: "adsflow"
 run_name: "gauntlet-sonic"
 ckpt_dir: "checkpoints"
@@ -30,7 +31,7 @@ ckpt_path: "checkpoints/gauntlet_trained.ckpt"
 # sampler setings
 rtol: 1e-7
 atol: 1e-9
-ode_method: "dopri5"
+ode_method: "euler"
 
 # computer arch
 accelerator: "gpu"
