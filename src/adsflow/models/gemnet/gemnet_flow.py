@@ -1303,7 +1303,7 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         x_vt = self.out_mlp_vt(torch.cat(xs_vt, dim=-1))
             
         with torch.autocast("cuda", enabled=False):
-           vt_st = self.out_velocity(x_vt.to(self.dtype))
+           vt_st = self.out_velocity(x_vt.float())
 
         nMolecules = torch.max(batch) + 1
 
