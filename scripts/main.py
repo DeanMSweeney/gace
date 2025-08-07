@@ -189,8 +189,6 @@ class LightFlowMatch(pl.LightningModule):
     ) -> Union[Data, Tuple[Data, torch.Tensor]]:
         
         data = input_data.clone()
-        x0 = data.pos
-
         def dx_dt(t: torch.Tensor, xt: torch.Tensor) -> torch.Tensor:
             """
             Wrap Pytorch model in a function with format: f(t, y)
@@ -201,21 +199,22 @@ class LightFlowMatch(pl.LightningModule):
 
         # define time interval for the IVP
         t = torch.linspace(0., 1., 10, 
-                           device=x0.device, dtype=x0.dtype)
+                           device=data.pos.device, dtype=data.pos.dtype)
         xt = odeint(
             func=dx_dt, 
-            y0=x0,
+            y0=input_data.pos,
             t=t,
             rtol=self.rtol,
             atol=self.atol,
             method=self.ode_method,
         )
-        data.pos = xt[-1]
+        data.pos_generated = xt[-1] # write generate possitional coordinates to pos_gen attribute 
+        data.pos = input_data.pos
 
         if hasattr(data, "pos_relaxed"):
-            struc_mse = self.loss_fn(data.pos, data.pos_relaxed)
-            struc_rmse = torch.sqrt(struc_mse)
-            return data, struc_rmse
+            struc_rmse = torch.sqrt(self.loss_fn(data.pos_generated, data.pos_relaxed))
+            null_struc_rmse = torch.sqrt(self.loss_fn(data.pos, data.pos_relaxed))
+            return data, struc_rmse, null_struc_rmse
         else: 
             return data
  
@@ -269,7 +268,7 @@ class LightFlowMatch(pl.LightningModule):
 
     def test_step(self, data: Data, batch_idx):
         loss = self._transport_loss(data)
-        opt_graph, struc_rmse = self._sampler(data)
+        opt_graph, struc_rmse, null_struc_rmse = self._sampler(data)
 
         self.log(
             "test/loss", 
@@ -281,6 +280,14 @@ class LightFlowMatch(pl.LightningModule):
 
         self.log(
             "test/struc_rmse", 
+            struc_rmse, 
+            prog_bar=True, 
+            batch_size=len(data.natoms),
+            sync_dist=True,
+        )
+
+        self.log(
+            "test/null_struc_rmse", 
             struc_rmse, 
             prog_bar=True, 
             batch_size=len(data.natoms),
