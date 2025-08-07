@@ -5,7 +5,7 @@
 #SBATCH --ntasks-per-node=1                # one process per node
 #SBATCH --gres=gpu:h100-80:1               # 1 × V100-32 GB GPU
 #SBATCH --cpus-per-task=12                 # cpus per process 
-#SBATCH -t 23:00:00                        # walltime
+#SBATCH -t 22:00:00                        # walltime
 #SBATCH -J adsflow_train-0                 # job name
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=dmsween@umich.edu
