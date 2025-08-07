@@ -189,56 +189,27 @@ class LightFlowMatch(pl.LightningModule):
             
     ) -> Union[Data, Tuple[Data, torch.Tensor]]:
         
-        if custom_euler:
-            print("Using custom Euler")
-            data = input_data.clone()
-            xt = data.pos.clone()   # (num_atoms, 3)
+        data = input_data.clone()
+        def dx_dt(t: torch.Tensor, xt: torch.Tensor) -> torch.Tensor:
+            """
+            Wrap Pytorch model in a function with format: f(t, y)
+            """
+            data.pos = xt
+            data.t = t.view(1,1).expand(len(xt), -1)
+            return data.pos_relaxed - input_data.pos
 
-            # define intgeration interval and time step
-            t0 = torch.zeros(len(xt), 1, device=xt.device, dtype=xt.dtype)
-            dt = torch.ones(len(xt), 1, device=xt.device, dtype=xt.dtype) / 100
-
-            # perform Euler integratuion from 0 to 1
-            t = t0
-            data.t = t
-            for _ in range(100):
-                
-                # regress velocity field and update xt and t
-                u = self(data) # (num_atoms, 3)
-                if _ % 20 == 0: 
-                    print(u[0])
-
-                xt += dt * u # (num_atoms, 3)
-                t += dt # (num_atoms, 1)
-
-                data.pos = xt
-                data.t = t
-
-            data.pos_generated = xt
-
-        else:
-            data = input_data.clone()
-            def dx_dt(t: torch.Tensor, xt: torch.Tensor) -> torch.Tensor:
-                """
-                Wrap Pytorch model in a function with format: f(t, y)
-                """
-                data.pos = xt
-                data.t = t.view(1,1).expand(len(xt), -1)
-                return self(data)
-
-            # define time interval for the IVP
-            t = torch.linspace(0., 1., 10, 
-                            device=data.pos.device, dtype=data.pos.dtype)
-            xt = odeint(
-                func=dx_dt, 
-                y0=input_data.pos,
-                t=t,
-                rtol=self.rtol,
-                atol=self.atol,
-                method=self.ode_method,
-            )
-            data.pos_generated = xt[-1] # write generate possitional coordinates to pos_gen attribute 
-
+        # define time interval for the IVP
+        t = torch.linspace(0., 1., 10, 
+                        device=data.pos.device, dtype=data.pos.dtype)
+        xt = odeint(
+            func=dx_dt, 
+            y0=input_data.pos,
+            t=t,
+            rtol=self.rtol,
+            atol=self.atol,
+            method=self.ode_method,
+        )
+        data.pos_generated = xt[-1] # write generate possitional coordinates to pos_gen attribute 
         data.pos = input_data.pos
 
         if hasattr(data, "pos_relaxed"):
