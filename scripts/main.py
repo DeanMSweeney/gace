@@ -206,8 +206,12 @@ class LightFlowMatch(pl.LightningModule):
                 u = self(data) # (num_atoms, 3)
                 xt += dt * u # (num_atoms, 3)
                 t += dt # (num_atoms, 1)
+
+                data.pos = xt
+                data.t = t
+                
             data.pos_generated = xt
-            
+
         else:
             data = input_data.clone()
             def dx_dt(t: torch.Tensor, xt: torch.Tensor) -> torch.Tensor:
