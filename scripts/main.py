@@ -190,6 +190,7 @@ class LightFlowMatch(pl.LightningModule):
     ) -> Union[Data, Tuple[Data, torch.Tensor]]:
         
         if custom_euler:
+            print("Using custom Euler")
             data = input_data.clone()
             xt = data.pos.clone()   # (num_atoms, 3)
 
@@ -204,12 +205,15 @@ class LightFlowMatch(pl.LightningModule):
                 
                 # regress velocity field and update xt and t
                 u = self(data) # (num_atoms, 3)
+                if _ % 20 == 0: 
+                    print(u[0])
+
                 xt += dt * u # (num_atoms, 3)
                 t += dt # (num_atoms, 1)
 
                 data.pos = xt
                 data.t = t
-                
+
             data.pos_generated = xt
 
         else:
@@ -518,4 +522,5 @@ def main(cfg: Config) -> None:
     
 if __name__ == "__main__":
     main()
+    
    
