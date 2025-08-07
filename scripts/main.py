@@ -2,6 +2,7 @@ import os
 import torch
 from torch import optim
 from torch.utils.data import random_split
+from torch.cuda.amp import autocast
 from torch.optim.lr_scheduler import LinearLR, ExponentialLR, ReduceLROnPlateau, SequentialLR
 import torch.nn as nn
 import pytorch_lightning as pl
@@ -185,7 +186,6 @@ class LightFlowMatch(pl.LightningModule):
     def _sampler(
             self, 
             input_data: Data,
-            custom_euler: bool=False,
             
     ) -> Union[Data, Tuple[Data, torch.Tensor]]:
         
@@ -196,6 +196,7 @@ class LightFlowMatch(pl.LightningModule):
             """
             data.pos = xt
             data.t = t.view(1,1).expand(len(xt), -1)
+            print(data.pos_relaxed - input_data.pos)
             return data.pos_relaxed - input_data.pos
 
         # define time interval for the IVP
@@ -210,6 +211,7 @@ class LightFlowMatch(pl.LightningModule):
             method=self.ode_method,
         )
         data.pos_generated = xt[-1] # write generate possitional coordinates to pos_gen attribute 
+
         data.pos = input_data.pos
 
         if hasattr(data, "pos_relaxed"):
