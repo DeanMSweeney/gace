@@ -14,7 +14,7 @@ from torchdiffeq import odeint
 
 import hydra
 from omegaconf import OmegaConf, DictConfig, MISSING
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import Optional, Literal, Union, Tuple
 
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
@@ -140,7 +140,6 @@ class LightFlowMatch(pl.LightningModule):
             self, 
             model,
             lr: int = 1e-3, 
-            flow_matching: bool = True,
             from_noise: bool = False,
             rtol: float = 1e-7, 
             atol: float = 1e-9,
@@ -151,10 +150,10 @@ class LightFlowMatch(pl.LightningModule):
         self.save_hyperparameters(ignore="model")  # all __init__ args saved as hyperparameters
         self.model = model
         self.loss_fn = nn.MSELoss() # mean squared error loss function 
-        self.flow_matching = flow_matching
         self.from_noise = from_noise
         self.rtol = rtol
         self.atol = atol 
+        self.ode_method = ode_method
 
     def forward(self, data):
         return self.model(data)
@@ -332,6 +331,15 @@ def model_banner(model) -> None:
 )
 
 def main(cfg: Config) -> None:
+    # 1) instantiate Python defaults
+    defaults = Config()
+
+    # 2) convert dataclass to dict, then to DictConfig
+    defaults_dict = asdict(defaults)
+    defaults_cfg  = OmegaConf.create(defaults_dict)
+
+    # 3) merge YAML-loaded cfg on top of defaults
+    cfg = OmegaConf.merge(defaults_cfg, cfg)
 
     # seed for reproducibility & multi-gpu weight updates
     pl.seed_everything(cfg.seed, workers=True)
@@ -341,12 +349,9 @@ def main(cfg: Config) -> None:
     pin_memory = True if cfg.accelerator == "gpu" else False # configured for GPU
 
     # build model with  provided configuration file
-    if cfg.flow_matching:
-        model: GemNetFlow = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
-        model_banner(model)
+    model: GemNetFlow = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
+    model_banner(model)
 
-    else: 
-        model: GemNetOC = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
 
     # print configuration file at rank 0
     declare(f">>> Training and model configurations:\n {OmegaConf.to_yaml(cfg)}")
@@ -429,7 +434,6 @@ def main(cfg: Config) -> None:
     lightning = LightFlowMatch(
         model=model, 
         lr=cfg.lr,
-        flow_matching=cfg.flow_matching,
         from_noise=cfg.from_noise,
         rtol=cfg.rtol, 
         atol=cfg.atol,

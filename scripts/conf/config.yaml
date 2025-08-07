@@ -1,6 +1,6 @@
 # model configuration
 defaults:
-  - model_cfg: gemnet-flow_cfg # direcotry in conf: file name
+  - model_cfg: mini_gemnet-flow_cfg # direcotry in conf: file name
   - _self_
 
 # Model mode
@@ -10,36 +10,36 @@ mode: "eval"
 oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb"
 oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data.lmdb"
 oc20_mini: "/workspace/datasets/mini/data.lmdb"
-oc20_test: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_ood_both/data.lmdb"
-batch_size: 32
-num_workers: 8
+oc20_test: "/workspace/datasets/mini/data.lmdb"
+
+#"/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_ood_both/data.lmdb"
 
 # training hyperparameters/settings
+batch_size: 2
+num_workers: 0
 lr: 1e-3
 max_epochs: 3000
 accumulate_grad_batches: 1
-val_check_interval: 5000
-
-# sampler setings
-rtol: 1e-9
-atol: 1e-7
-ode_method: "dopri5"
-
-# computer arch
-accelerator: "gpu"
-devices: 1
-num_nodes: 1
-strategy: "ddp_find_unused_parameters_false"
-precision: "16-mixed"
+val_check_interval: 10
 
 # checkpointing/logging
 logger: false
 project: "adsflow"
 run_name: "gauntlet-sonic"
 ckpt_dir: "checkpoints"
-ckpt_path: "checkpoints/gauntlet_trained.ckpt" 
+#ckpt_path: "checkpoints/gauntlet_trained.ckpt" 
+
+# sampler setings
+rtol: 1e-2
+atol: 1e-2
+ode_method: "euler"
+
+# computer arch
+accelerator: "cpu"
+devices: 2
+num_nodes: 1
+strategy: "ddp_find_unused_parameters_false"
+precision: "16-mixed"
 
 # misc
-flow_matching: true
 from_noise: false
-
