@@ -185,7 +185,7 @@ class LightFlowMatch(pl.LightningModule):
     def _sampler(
             self, 
             input_data: Data,
-            custom_euler: bool=True,
+            custom_euler: bool=False,
             
     ) -> Union[Data, Tuple[Data, torch.Tensor]]:
         
