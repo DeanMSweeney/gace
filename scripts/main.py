@@ -19,7 +19,7 @@ from dataclasses import dataclass, asdict
 from typing import Optional, Literal, Union, Tuple
 
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
-from adsflow.models.gemnet.gemnet_base import GemNetOC
+from adsflow.utils.flow_matching import OptTransportMixin
 from adsflow.utils.lmdb_dataset import LazyLmdbDataset
 from fairchem.core.datasets.lmdb_dataset import LmdbDataset
 
@@ -124,7 +124,7 @@ class Config:
     from_noise:                      bool           = False
 
 
-class LightFlowMatch(pl.LightningModule):
+class LightFlowMatch(pl.LightningModule, OptTransportMixin):
     """
     This class defines the training algorithm for the conditional flow matching model using optimal transport 
     
@@ -160,27 +160,9 @@ class LightFlowMatch(pl.LightningModule):
         return self.model(data)
     
     def _transport_loss(self, input_data: Data) -> torch.Tensor: 
-        data = input_data.clone()
-
-        x1 = data.pos_relaxed.clone() # sample relaxed positions and discard
-
-        if self.from_noise:
-            x0 = torch.randn_like(x1) # sample noise 
-        else:
-            x0 = data.pos.clone() # sample initial positions and discard 
-
-        t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device) # (batch_size, 1)
-        t = t_per_graph[data.batch] # (num_atoms, 1)
-
-        xt = x1 * t + (1 - t) * x0 # define path via linear interpolation
-        data.pos = xt # reassign xt to pos 
-        data.pos_init = x0
-        data.t = t
-
+        data, u = self.path(input_data)
         u_hat = self(data) # compute velocity field 
-        u = x1 - x0
         loss = self.loss_fn(u_hat, u)
-
         return loss
     
     def _sampler(
