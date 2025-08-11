@@ -149,3 +149,20 @@ def data_list_collater(
             logging.warning("Missing edge_index; set otf_graph=True")
     return dict(batch.items()) if to_dict else batch
 
+
+
+### Testing ###
+if __name__ == "__main__":
+    from torch_geometric.loader import DataLoader
+    from fairchem.core.datasets.lmdb_dataset import LmdbDataset
+
+    dict = {"src": "/workspace/datasets/mini/data.lmdb"}
+    dataset = LazyLmdbDataset(dict)
+    loader = DataLoader(dataset, batch_size=25)
+
+    with open("testing-fair.txt", "w") as f:
+        for data in loader:
+            f.write(str(data) + "\n\n") 
+            delta = abs(data.pos - data.pos_relaxed)
+            max_delta = torch.max(delta, 1)
+            f.write(str(delta) + "\n\n") 
