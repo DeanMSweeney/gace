@@ -1,0 +1,66 @@
+import torch
+from torch import Tensor
+from torch_geometric.data import Data
+from typing import Optional, Literal, Union, Tuple
+
+
+class OptTransportMixin: 
+   
+    @staticmethod # define as normal function within class's namespace (does not need self)
+    def _pbc_aware_disp(
+                cell: Tensor, 
+                pos: Tensor, 
+                pos_relaxed: Tensor, 
+                batch: Tensor, 
+    ) -> Tensor:
+          
+          if cell.dim() == 2: 
+                cell = cell.unsqueeze(0) # for single graphs batch_size=1
+
+          A =  cell[batch] # N, 3, 3
+          x0 = pos
+          x1 = pos_relaxed
+
+          f0 = torch.linalg.solve(A.transpose(1,2), x0.unsqueeze(-1)).squeeze(-1)  # (N,3)
+          f1 = torch.linalg.solve(A.transpose(1,2), x1.unsqueeze(-1)).squeeze(-1)  # (N,3)
+
+          ds_f = f1 - f0 # N, 3
+          ds_f[:, :2] -= torch.floor(ds_f[:, :2] + 0.5)
+          ds = torch.bmm(ds_f.unsqueeze(1), A).squeeze(1)  # (N,3)
+
+          return ds
+
+    def path(
+                self, 
+                input_data: Data,
+                from_noise: Optional[bool]=None,
+    ) -> Tuple[Data, Tensor]:
+        
+        data = input_data.clone()
+        from_noise = self.from_noise if from_noise is None else from_noise
+
+        x1 = data.pos_relaxed # sample relaxed positions and discard
+
+        if from_noise:
+                x0 = torch.randn_like(x1) # sample noise 
+        else:
+                x0 = data.pos.clone() # sample initial positions and discard 
+
+        t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device) # (batch_size, 1)
+        t = t_per_graph[data.batch] # (num_atoms, 1)
+
+        displacement = self._pbc_aware_disp(
+              pos=x0, 
+              pos_relaxed=x1,
+              cell=data.cell,
+              batch=data.batch,
+        )
+
+        xt = x0 + t * displacement # x1 * t + (1-x) * x0
+        data.pos = xt # reassign xt to pos 
+        data.pos_init = x0
+        data.t = t
+
+        u = displacement
+
+        return data, u 
