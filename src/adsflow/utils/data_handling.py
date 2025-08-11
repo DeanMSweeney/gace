@@ -59,13 +59,15 @@ class OCP_DataHandler():
 if __name__ == "__main__":
     from torch_geometric.loader import DataLoader
     from fairchem.core.datasets.lmdb_dataset import LmdbDataset
-
-    dict = {"src": "/workspace/datasets/mini/data.lmdb"}
+    
     dataset = OCP_DataHandler("/workspace/datasets/mini/data.lmdb", pbc=True)
     loader = DataLoader(dataset, batch_size=25)
 
     with open("testing.txt", "w") as f:
         for data in loader:
             f.write(str(data) + "\n\n") 
+            delta = abs(data.pos - data.pos_relaxed)
+            max_delta = torch.max(delta, 1)
+            f.write(str(delta) + "\n\n") 
 
      
