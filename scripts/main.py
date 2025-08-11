@@ -1,6 +1,6 @@
 import os
 import torch
-from torch import optim
+from torch import optim 
 from torch.utils.data import random_split
 from torch.cuda.amp import autocast
 from torch.optim.lr_scheduler import LinearLR, ExponentialLR, ReduceLROnPlateau, SequentialLR
@@ -201,7 +201,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
             return data, struc_rmse, null_struc_rmse
         else: 
             return data
- 
+
     # define training and validation methods 
     def training_step(self, data: Data, batch_idx):
         loss = self._transport_loss(data)
@@ -252,7 +252,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
 
     def test_step(self, data: Data, batch_idx):
         loss = self._transport_loss(data)
-        opt_graph, struc_rmse, null_struc_rmse = self._sampler(data)
+        opt_graph, struc_rmse, null_struc_rmse, base_struc_rmse, velocity_loss = self._sampler(data)
 
         self.log(
             "test/loss", 

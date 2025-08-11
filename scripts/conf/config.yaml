@@ -29,16 +29,16 @@ ckpt_dir: "checkpoints"
 ckpt_path: "checkpoints/gauntlet_trained.ckpt" 
 
 # sampler setings
-rtol: 1e-7
-atol: 1e-9
-ode_method: "rk4"
+rtol: 1e-9
+atol: 1e-12
+ode_method: "euler"
 
 # computer arch
 accelerator: "gpu"
 devices: 1
 num_nodes: 1
 strategy: "ddp_find_unused_parameters_false"
-precision: "16-mixed"
+precision: "32"
 
 # misc
 from_noise: false
