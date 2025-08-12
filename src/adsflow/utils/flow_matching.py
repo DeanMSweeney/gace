@@ -25,7 +25,7 @@ class OptTransportMixin:
           f1 = torch.linalg.solve(A.transpose(1,2), x1.unsqueeze(-1)).squeeze(-1)  # (N,3)
 
           ds_f = f1 - f0 # N, 3
-          ds_f[:, :2] -= torch.floor(ds_f[:, :2] + 0.5)
+          ds_f -= torch.floor(ds_f + 0.5)
           ds = torch.bmm(ds_f.unsqueeze(1), A).squeeze(1)  # (N,3)
 
           return ds
