@@ -149,12 +149,46 @@ def data_list_collater(
             logging.warning("Missing edge_index; set otf_graph=True")
     return dict(batch.items()) if to_dict else batch
 
+import torch
+from torch import Tensor
+from torch_geometric.data import Data
+from typing import Optional, Literal, Union, Tuple
+
+
+class OptTransportMixin: 
+   
+    @staticmethod # define as normal function within class's namespace (does not need self)
+    def _pbc_aware_disp(
+                cell: Tensor, 
+                pos: Tensor, 
+                pos_relaxed: Tensor, 
+                batch: Tensor, 
+    ) -> Tensor:
+          
+          if cell.dim() == 2: 
+                cell = cell.unsqueeze(0) # for single graphs batch_size=1
+
+          A =  cell[batch] # N, 3, 3
+          x0 = pos
+          x1 = pos_relaxed
+
+          f0 = torch.linalg.solve(A.transpose(1,2), x0.unsqueeze(-1)).squeeze(-1)  # (N,3)
+          f1 = torch.linalg.solve(A.transpose(1,2), x1.unsqueeze(-1)).squeeze(-1)  # (N,3)
+
+          ds_f = f1 - f0 # N, 3
+          ds_f -= torch.floor(ds_f + 0.5)
+          ds = torch.bmm(ds_f.unsqueeze(1), A).squeeze(1)  # (N,3)
+
+          return ds
 
 
 ### Testing ###
 if __name__ == "__main__":
     from torch_geometric.loader import DataLoader
     from fairchem.core.datasets.lmdb_dataset import LmdbDataset
+    from ase import Atoms
+    from ase.io import write
+
 
     dict = {"src": "/workspace/datasets/mini/data.lmdb"}
     dataset = LazyLmdbDataset(dict)
@@ -163,6 +197,44 @@ if __name__ == "__main__":
     with open("testing-fair.txt", "w") as f:
         for data in loader:
             f.write(str(data) + "\n\n") 
-            delta = abs(data.pos - data.pos_relaxed)
-            max_delta = torch.max(delta, 1)
-            f.write(str(delta) + "\n\n") 
+            delta = data.pos_relaxed - data.pos
+            delta_wrapped = OptTransportMixin._pbc_aware_disp(
+                cell=data.cell, 
+                pos=data.pos,
+                pos_relaxed=data.pos_relaxed,
+                batch=data.batch
+            )
+      
+            # Trigger if ANY component on ANY atom exceeds 10 Å (use .norm(dim=1)>10 for vector length instead)
+            viol_mask = (delta_wrapped.abs() > 5).any(dim=1)   # (N,)
+
+            if viol_mask.any():
+                # first violating atom
+                print('Found mobile atom')
+                idx_atom = viol_mask.nonzero(as_tuple=False)[0, 0].item()
+                idx = int(data.batch[idx_atom].item())  # <-- this is the graph (batch) index you want
+
+                sel = (data.batch == idx)               # boolean mask for atoms in this graph
+
+                # pick the right cell for this graph
+                cell_g = data.cell[idx] if data.cell.dim() == 3 else data.cell
+
+                # atomic numbers (use .z fallback if needed)
+                Z = data.atomic_numbers if hasattr(data, "atomic_numbers") else data.z
+
+                atoms1 = Atoms(
+                    positions=data.pos[sel].detach().cpu().numpy(),          # initial
+                    numbers=Z[sel].detach().cpu().numpy(),
+                    cell=cell_g.detach().cpu().numpy(),
+                    pbc=True,  # or (True,True,False) for a slab
+                )
+                atoms2 = Atoms(
+                    positions=data.pos_relaxed[sel].detach().cpu().numpy(),  # relaxed
+                    numbers=Z[sel].detach().cpu().numpy(),
+                    cell=cell_g.detach().cpu().numpy(),
+                    pbc=True,
+                )
+
+                write("POSCAR",  atoms1, vasp5=True, direct=False)  # Cartesian
+                write("CONTCAR", atoms2, vasp5=True, direct=False)
+                break
