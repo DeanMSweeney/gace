@@ -188,6 +188,7 @@ if __name__ == "__main__":
     from fairchem.core.datasets.lmdb_dataset import LmdbDataset
     from ase import Atoms
     from ase.io import write
+    from ase.constraints import FixAtoms
 
 
     dict = {"src": "/workspace/datasets/mini/data.lmdb"}
@@ -197,6 +198,7 @@ if __name__ == "__main__":
     with open("testing-fair.txt", "w") as f:
         for data in loader:
             f.write(str(data) + "\n\n") 
+            
             delta = data.pos_relaxed - data.pos
             delta_wrapped = OptTransportMixin._pbc_aware_disp(
                 cell=data.cell, 
@@ -206,7 +208,7 @@ if __name__ == "__main__":
             )
       
             # Trigger if ANY component on ANY atom exceeds 10 Å (use .norm(dim=1)>10 for vector length instead)
-            viol_mask = (delta_wrapped.abs() > 5).any(dim=1)   # (N,)
+            viol_mask = (delta.abs() > 15).any(dim=1)   # (N,)
 
             if viol_mask.any():
                 # first violating atom
@@ -221,20 +223,26 @@ if __name__ == "__main__":
 
                 # atomic numbers (use .z fallback if needed)
                 Z = data.atomic_numbers if hasattr(data, "atomic_numbers") else data.z
+                mask = np.array(data.fixed[sel], dtype=bool)
+                print(np.sum(mask)/len(mask))
 
                 atoms1 = Atoms(
-                    positions=data.pos[sel].detach().cpu().numpy(),          # initial
+                    positions=data.pos[sel].detach().cpu().numpy(), # initial
                     numbers=Z[sel].detach().cpu().numpy(),
                     cell=cell_g.detach().cpu().numpy(),
                     pbc=True,  # or (True,True,False) for a slab
                 )
+                atoms1.set_constraint(FixAtoms(mask=mask))
+
                 atoms2 = Atoms(
                     positions=data.pos_relaxed[sel].detach().cpu().numpy(),  # relaxed
                     numbers=Z[sel].detach().cpu().numpy(),
                     cell=cell_g.detach().cpu().numpy(),
                     pbc=True,
                 )
+                atoms2.set_constraint(FixAtoms(mask=mask))
 
                 write("POSCAR",  atoms1, vasp5=True, direct=False)  # Cartesian
                 write("CONTCAR", atoms2, vasp5=True, direct=False)
                 break
+                

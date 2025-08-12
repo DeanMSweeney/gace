@@ -1,4 +1,2 @@
 DataBatch(edge_index=[2, 90067], pos=[2463, 3], cell=[25, 3, 3], atomic_numbers=[2463], natoms=[25], cell_offsets=[90067, 3], force=[2463, 3], fixed=[2463], tags=[2463], y_init=[25], y_relaxed=[25], pos_relaxed=[2463, 3], sid=[25], batch=[2463], ptr=[26])
 
-DataBatch(edge_index=[2, 68755], pos=[1892, 3], cell=[25, 3, 3], atomic_numbers=[1892], natoms=[25], cell_offsets=[68755, 3], force=[1892, 3], fixed=[1892], tags=[1892], y_init=[25], y_relaxed=[25], pos_relaxed=[1892, 3], sid=[25], batch=[1892], ptr=[26])
-
