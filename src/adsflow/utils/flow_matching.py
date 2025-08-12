@@ -6,7 +6,7 @@ from typing import Optional, Literal, Union, Tuple
 
 class OptTransportMixin: 
    
-    @staticmethod # define as normal function within class's namespace (does not need self)
+    @staticmethod # define as normal function within class's namespace
     def _pbc_aware_disp(
                 cell: Tensor, 
                 pos: Tensor, 
