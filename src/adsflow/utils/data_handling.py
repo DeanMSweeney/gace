@@ -47,6 +47,7 @@ class OCP_DataHandler():
             pos_relaxed    = samp['pos_relaxed'].clone().detach().float(),
             edge_index     = samp['edge_index'].clone().detach().float(),
             cell_offsets   = samp['cell_offsets'].clone().detach().float(),
+            fixed          = samp['fixed'].clone().detach().float(),
         )
 
         if not self.flow_matching:
@@ -66,8 +67,5 @@ if __name__ == "__main__":
     with open("testing.txt", "w") as f:
         for data in loader:
             f.write(str(data) + "\n\n") 
-            delta = abs(data.pos - data.pos_relaxed)
-            max_delta = torch.max(delta, 1)
-            f.write(str(delta) + "\n\n") 
 
      
