@@ -5,9 +5,24 @@ from typing import Optional, Literal, Union, Tuple
 
 
 class OptTransportMixin: 
-   
+    """
+    This Mixin supports image invariant interpolation paths and masked loss for frozen atoms 
+    """
+    
+    @staticmethod
+    def masked_loss(
+          u_hat: Tensor, # N, 3
+          u: Tensor, # N, 3
+          masked_atoms: Tensor, # N, 1
+    ):
+          loss_atom = ((u - u_hat) ** 2).mean(dim=1) # N, 1
+          masked_loss_atom = loss_atom * masked_atoms # N, 1
+          masked_loss = masked_loss_atom.sum() / masked_atoms.sum().clamp_min(1e-8)
+
+          return masked_loss
+
     @staticmethod # define as normal function within class's namespace
-    def _pbc_aware_disp(
+    def pbc_aware_disp(
                 cell: Tensor, 
                 pos: Tensor, 
                 pos_relaxed: Tensor, 
@@ -49,7 +64,7 @@ class OptTransportMixin:
         t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device) # (batch_size, 1)
         t = t_per_graph[data.batch] # (num_atoms, 1)
 
-        displacement = self._pbc_aware_disp(
+        displacement = self.pbc_aware_disp(
               pos=x0, 
               pos_relaxed=x1,
               cell=data.cell,
