@@ -122,6 +122,7 @@ class Config:
     # Misc
     seed:                            int            = 42
     from_noise:                      bool           = False
+    mask_atoms:                      bool           = True 
 
 
 class LightFlowMatch(pl.LightningModule, OptTransportMixin):
@@ -142,6 +143,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
             model,
             lr: int = 1e-3, 
             from_noise: bool = False,
+            mask_atoms: bool = True,
             rtol: float = 1e-7, 
             atol: float = 1e-9,
             ode_method: str = "dopri5",
@@ -152,6 +154,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         self.model = model
         self.loss_fn = nn.MSELoss() # mean squared error loss function 
         self.from_noise = from_noise
+        self.mask_atoms = mask_atoms
         self.rtol = rtol
         self.atol = atol 
         self.ode_method = ode_method
@@ -160,9 +163,15 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         return self.model(data)
     
     def _transport_loss(self, input_data: Data) -> torch.Tensor: 
-        data, u = self.path(input_data)
-        u_hat = self(data) # compute velocity field 
-        loss = self.loss_fn(u_hat, u)
+
+        data, u = self.path(input_data) 
+        u_hat = self(data) # N, 3
+
+        if self.mask_atoms:
+            free_atoms = (1 - data.fixed).unsqueeze(1) # N, 1
+            loss = self.masked_loss(u_hat=u_hat, u=u, masked_atoms=free_atoms) 
+        else:
+            loss = self.loss_fn(u_hat, u)
         return loss
     
     def _sampler(
@@ -180,6 +189,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
             data.t = t.view(1,1).expand(len(xt), -1)
             u = self(data)
             return u 
+        
         # define time interval for the IVP
         t = torch.linspace(0., 1., 100, 
                         device=data.pos.device, dtype=data.pos.dtype)
@@ -225,7 +235,6 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
             batch_size=len(data.natoms),
             sync_dist=True,
         )
-
         return loss
     
     def validation_step(self, data: Data, batch_idx):
@@ -247,7 +256,6 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
             batch_size=len(data.natoms),
             sync_dist=True,
         )
-
         return loss
 
     def test_step(self, data: Data, batch_idx):
@@ -426,6 +434,7 @@ def main(cfg: Config) -> None:
         model=model, 
         lr=cfg.lr,
         from_noise=cfg.from_noise,
+        mask_atoms=cfg.mask_atoms,
         rtol=cfg.rtol, 
         atol=cfg.atol,
         ode_method=cfg.ode_method
