@@ -239,7 +239,6 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
     
     def validation_step(self, data: Data, batch_idx):
         loss = self._transport_loss(data)
-        opt_graph, struc_rmse = self._sampler(data)
 
         self.log(
             "val/loss", 
@@ -248,14 +247,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
             batch_size=len(data.natoms),
             sync_dist=True,
         )
-
-        self.log(
-            "val/struc_rmse", 
-            struc_rmse, 
-            prog_bar=True, 
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
+        
         return loss
 
     def test_step(self, data: Data, batch_idx):
