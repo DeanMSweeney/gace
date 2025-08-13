@@ -17,8 +17,7 @@ class OptTransportMixin:
     ):
           loss_atom = ((u - u_hat) ** 2).mean(dim=1) # N, 1
           masked_loss_atom = loss_atom * masked_atoms # N, 1
-          masked_loss = masked_loss_atom.sum() / masked_atoms.sum().clamp_min(1e-8)
-
+          masked_loss = masked_loss_atom.sum() / masked_atoms.sum().clamp_min(1e-8) 
           return masked_loss
 
     @staticmethod # define as normal function within class's namespace
