@@ -224,7 +224,8 @@ if __name__ == "__main__":
                 # atomic numbers (use .z fallback if needed)
                 Z = data.atomic_numbers if hasattr(data, "atomic_numbers") else data.z
                 mask = np.array(data.fixed[sel], dtype=bool)
-                print(np.sum(mask)/len(mask))
+
+                print(data.fixed.unsqueeze(1).size())
 
                 atoms1 = Atoms(
                     positions=data.pos[sel].detach().cpu().numpy(), # initial
