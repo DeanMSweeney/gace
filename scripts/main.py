@@ -11,7 +11,6 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.utilities import rank_zero_only
 from torch_geometric.loader import DataLoader
 from torch_geometric.data import Data
-from torchdiffeq import odeint
 
 import hydra
 from omegaconf import OmegaConf, DictConfig, MISSING
@@ -112,6 +111,7 @@ class Config:
     ckpt_path:                       Optional[str]           = None
 
     # Model run mode
+    variant:                         Literal["refine", "forge"]
     mode:                            Literal["debug", "train", "eval", "generate"] = "train"
 
     # Sampler settings (ODEINT)
@@ -123,6 +123,7 @@ class Config:
     seed:                            int            = 42
     from_noise:                      bool           = False
     mask_atoms:                      bool           = True 
+    
 
 
 class LightFlowMatch(pl.LightningModule, OptTransportMixin):
@@ -141,9 +142,9 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
     def __init__(
             self, 
             model,
-            lr: int = 1e-3, 
-            from_noise: bool = False,
+            variant: str,
             mask_atoms: bool = True,
+            lr: int = 1e-3, 
             rtol: float = 1e-7, 
             atol: float = 1e-9,
             ode_method: str = "dopri5",
@@ -153,7 +154,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         self.save_hyperparameters(ignore="model")  # all __init__ args saved as hyperparameters
         self.model = model
         self.loss_fn = nn.MSELoss() # mean squared error loss function 
-        self.from_noise = from_noise
+        self.variant = variant
         self.mask_atoms = mask_atoms
         self.rtol = rtol
         self.atol = atol 
@@ -167,50 +168,12 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         data, u = self.path(input_data) 
         u_hat = self(data) # N, 3
 
-        if self.mask_atoms:
+        if self.mask_atoms and self.variant == "forge":
             free_atoms = (1 - data.fixed).unsqueeze(1) # N, 1
             loss = self.masked_loss(u_hat=u_hat, u=u, masked_atoms=free_atoms) 
         else:
             loss = self.loss_fn(u_hat, u)
-        return loss
-    
-    def _sampler(
-            self, 
-            input_data: Data,
-            
-    ) -> Union[Data, Tuple[Data, torch.Tensor]]:
-        
-        data = input_data.clone()
-        def dx_dt(t: torch.Tensor, xt: torch.Tensor) -> torch.Tensor:
-            """
-            Wrap Pytorch model in a function with format: f(t, y)
-            """
-            data.pos = xt
-            data.t = t.view(1,1).expand(len(xt), -1)
-            u = self(data)
-            return u 
-        
-        # define time interval for the IVP
-        t = torch.linspace(0., 1., 100, 
-                        device=data.pos.device, dtype=data.pos.dtype)
-        xt = odeint(
-            func=dx_dt, 
-            y0=input_data.pos,
-            t=t,
-            rtol=self.rtol,
-            atol=self.atol,
-            method=self.ode_method,
-        )
-        data.pos_generated = xt[-1] # write generate possitional coordinates to pos_gen attribute 
-
-        data.pos = input_data.pos
-
-        if hasattr(data, "pos_relaxed"):
-            struc_rmse = torch.sqrt(self.loss_fn(data.pos_generated, data.pos_relaxed))
-            null_struc_rmse = torch.sqrt(self.loss_fn(data.pos, data.pos_relaxed))
-            return data, struc_rmse, null_struc_rmse
-        else: 
-            return data
+        return loss 
 
     # define training and validation methods 
     def training_step(self, data: Data, batch_idx):
