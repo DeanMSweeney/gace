@@ -1,8 +1,12 @@
+
+import numpy as np 
+import contextlib
 import torch
 from torch import Tensor
+import torch.nn as nn
+import torch.nn.functional as F
 from torch_geometric.data import Data
 from typing import Optional, Literal, Union, Tuple
-from torchdiffeq import odeint
 
 
 class OptTransportMixin: 
@@ -14,12 +18,14 @@ class OptTransportMixin:
     def masked_loss(
           u_hat: Tensor, # N, 3
           u: Tensor, # N, 3
-          masked_atoms: Tensor, # N, 1
+          w: Tensor, # N, 1
     ):
-          loss_atom = ((u - u_hat) ** 2).mean(dim=1) # N, 1
-          masked_loss_atom = loss_atom * masked_atoms # N, 1
-          masked_loss = masked_loss_atom.sum() / masked_atoms.sum().clamp_min(1e-8) 
-          return masked_loss
+    
+         per_atom = ((u - u_hat) ** 2).mean(dim=1).unsqueeze(1) # N, 1
+         masked_per_atom = per_atom * w # N, 1
+         masked_loss = masked_per_atom.sum() / w.sum().clamp_min(1e-8) 
+         
+         return masked_loss
 
     @staticmethod # define as normal function within class's namespace
     def pbc_aware_disp(
@@ -32,29 +38,38 @@ class OptTransportMixin:
           if cell.dim() == 2: 
                 cell = cell.unsqueeze(0) # for single graphs batch_size=1
 
-          A =  cell[batch] # N, 3, 3
-          x0 = pos
-          x1 = pos_relaxed
+          A =  cell[batch] # (N,3,3)
+          x0 = pos # (N,3)
+          x1 = pos_relaxed # (N,3)
 
-          f0 = torch.linalg.solve(A.transpose(1,2), x0.unsqueeze(-1)).squeeze(-1)  # (N,3)
-          f1 = torch.linalg.solve(A.transpose(1,2), x1.unsqueeze(-1)).squeeze(-1)  # (N,3)
+          with ctx: 
 
-          ds_f = f1 - f0 # N, 3
-          ds_f -= torch.floor(ds_f + 0.5)
-          ds = torch.bmm(ds_f.unsqueeze(1), A).squeeze(1)  # (N,3)
+            f0 = torch.linalg.solve(A.transpose(1,2), x0.unsqueeze(-1)).squeeze(-1)  # (N,3)
+            f1 = torch.linalg.solve(A.transpose(1,2), x1.unsqueeze(-1)).squeeze(-1)  # (N,3)
+
+            ds_f = f1 - f0 # N, 3
+            ds_f -= torch.floor(ds_f + 0.5)
+            ds = torch.bmm(ds_f.unsqueeze(1), A).squeeze(1)  # (N,3)
+
+            f0 = torch.linalg.solve(A.transpose(1,2), x0.unsqueeze(-1)).squeeze(-1)
+            x_recon = torch.bmm(f0.unsqueeze(1), A).squeeze(1)
+            err = (x0 - x_recon).abs().max()  
+            print(err)         
 
           return ds
 
     def path(
                 self, 
                 input_data: Data,
+                from_noise: Optional[bool]=None,
     ) -> Tuple[Data, Tensor]:
         
         data = input_data.clone()
+        from_noise = self.from_noise if from_noise is None else from_noise
 
         x1 = data.pos_relaxed # sample relaxed positions and discard
 
-        if self.variant == "forge":
+        if from_noise:
                 x0 = torch.randn_like(x1) # sample noise 
         else:
                 x0 = data.pos.clone() # sample initial positions and discard 
@@ -69,7 +84,7 @@ class OptTransportMixin:
               batch=data.batch,
         )
 
-        xt = x0 + t * displacement # x1 * t + (1-x) * x0
+        xt = x0 + t * displacement # x1 * t + (1-t) * x0
         data.pos = xt # reassign xt to pos 
         data.pos_init = x0
         data.t = t
@@ -77,41 +92,3 @@ class OptTransportMixin:
         u = displacement
 
         return data, u 
-    
-    def sampler(
-            self, 
-            input_data: Data,
-            
-    ) -> Union[Data, Tuple[Data, torch.Tensor]]:
-        
-        data = input_data.clone()
-        def dx_dt(t: torch.Tensor, xt: torch.Tensor) -> torch.Tensor:
-            """
-            Wrap Pytorch model in a function with format: f(t, y)
-            """
-            data.pos = xt
-            data.t = t.view(1,1).expand(len(xt), -1)
-            u = self(data)
-            return u 
-        
-        # define time interval for the IVP
-        t = torch.linspace(0., 1., 100, 
-                        device=data.pos.device, dtype=data.pos.dtype)
-        xt = odeint(
-            func=dx_dt, 
-            y0=input_data.pos,
-            t=t,
-            rtol=self.rtol,
-            atol=self.atol,
-            method=self.ode_method,
-        )
-        data.pos_generated = xt[-1] # write generate possitional coordinates to pos_gen attribute 
-
-        data.pos = input_data.pos
-
-        if hasattr(data, "pos_relaxed") and self.variant == "forge":
-            struc_rmse = torch.sqrt(self.loss_fn(data.pos_generated, data.pos_relaxed))
-            null_struc_rmse = torch.sqrt(self.loss_fn(data.pos, data.pos_relaxed))
-            return data, struc_rmse, null_struc_rmse
-        else: 
-            return data
