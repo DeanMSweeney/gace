@@ -55,9 +55,9 @@ class OptTransportMixin:
             x_recon = torch.bmm(f0.unsqueeze(1), A).squeeze(1)
             err = (x0 - x_recon).abs().max()  
             
-      print(err)      
+            print(err)      
                 
-      return ds
+            return ds
 
     def path(
                 self, 
