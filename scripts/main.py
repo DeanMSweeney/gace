@@ -219,7 +219,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         loss = self._transport_loss(data)
 
         self.log( # log train loss per epoch 
-            "train/loss_HELLO",
+            "train/loss",
             loss, 
             on_step=True, 
             on_epoch=True,
