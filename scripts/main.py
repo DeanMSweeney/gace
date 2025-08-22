@@ -21,6 +21,7 @@ from adsflow.models.gemnet.gemnet_flow import GemNetFlow
 from adsflow.utils.flow_matching import OptTransportMixin
 from adsflow.utils.lmdb_dataset import LazyLmdbDataset
 from fairchem.core.datasets.lmdb_dataset import LmdbDataset
+from torchdiffeq import odeint
 
 @dataclass
 class Config:
@@ -168,36 +169,66 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         data, u = self.path(input_data) 
         u_hat = self(data) # N, 3
 
-        if self.mask_atoms and self.variant == "forge":
-            free_atoms = (1 - data.fixed).unsqueeze(1) # N, 1
-            loss = self.masked_loss(u_hat=u_hat, u=u, masked_atoms=free_atoms) 
-        else:
+        if self.mask_atoms:
+            free_atoms = (1 - data.fixed).unsqueeze(1) # N
+            loss = self.masked_loss(u_hat=u_hat, u=u, w=free_atoms) 
+        else: 
             loss = self.loss_fn(u_hat, u)
-        return loss 
+
+        return loss
+    
+    def _sampler(
+            self, 
+            input_data: Data,
+            
+    ) -> Union[Data, Tuple[Data, torch.Tensor]]:
+        
+        data = input_data.clone()
+        def dx_dt(t: torch.Tensor, xt: torch.Tensor) -> torch.Tensor:
+            """
+            Wrap Pytorch model in a function with format: f(t, y)
+            """
+            data.pos = xt
+            data.t = t.view(1,1).expand(len(xt), -1)
+            u = self(data)
+            return u 
+        
+        # define time interval for the IVP
+        t = torch.linspace(0., 1., 100, 
+                        device=data.pos.device, dtype=data.pos.dtype)
+        xt = odeint(
+            func=dx_dt, 
+            y0=input_data.pos,
+            t=t,
+            rtol=self.rtol,
+            atol=self.atol,
+            method=self.ode_method,
+        )
+        data.pos_generated = xt[-1] # write generate possitional coordinates to pos_gen attribute 
+
+        data.pos = input_data.pos
+
+        if hasattr(data, "pos_relaxed"):
+            struc_rmse = torch.sqrt(self.loss_fn(data.pos_generated, data.pos_relaxed))
+            null_struc_rmse = torch.sqrt(self.loss_fn(data.pos, data.pos_relaxed))
+            return data, struc_rmse, null_struc_rmse
+        else: 
+            return data
 
     # define training and validation methods 
     def training_step(self, data: Data, batch_idx):
         loss = self._transport_loss(data)
 
         self.log( # log train loss per epoch 
-            "train/loss_epoch",
+            "train/loss",
             loss, 
-            on_step=False, 
+            on_step=True, 
             on_epoch=True,
             prog_bar=True, 
             batch_size=len(data.natoms),
             sync_dist=True,
         )
 
-        self.log( # log train loss per step. 
-            "train/loss_step", 
-            loss, 
-            on_step=True, 
-            on_epoch=False,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
         return loss
     
     def validation_step(self, data: Data, batch_idx):
