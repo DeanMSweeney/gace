@@ -41,23 +41,20 @@ class OptTransportMixin:
           A =  cell[batch] # (N,3,3)
           x0 = pos # (N,3)
           x1 = pos_relaxed # (N,3)
-
-          with ctx: 
-
-            f0 = torch.linalg.solve(A.transpose(1,2), x0.unsqueeze(-1)).squeeze(-1)  # (N,3)
-            f1 = torch.linalg.solve(A.transpose(1,2), x1.unsqueeze(-1)).squeeze(-1)  # (N,3)
-
-            ds_f = f1 - f0 # N, 3
-            ds_f -= torch.floor(ds_f + 0.5)
-            ds = torch.bmm(ds_f.unsqueeze(1), A).squeeze(1)  # (N,3)
-
-            f0 = torch.linalg.solve(A.transpose(1,2), x0.unsqueeze(-1)).squeeze(-1)
-            x_recon = torch.bmm(f0.unsqueeze(1), A).squeeze(1)
-            err = (x0 - x_recon).abs().max()  
-            
-            print(err)      
-                
-            return ds
+          
+          f0 = torch.linalg.solve(A.transpose(1,2), x0.unsqueeze(-1)).squeeze(-1)  # (N,3)
+          f1 = torch.linalg.solve(A.transpose(1,2), x1.unsqueeze(-1)).squeeze(-1)  # (N,3)
+          
+          ds_f = f1 - f0 # N, 3
+          ds_f -= torch.floor(ds_f + 0.5)
+          ds = torch.bmm(ds_f.unsqueeze(1), A).squeeze(1)  # (N,3)
+          
+          f0 = torch.linalg.solve(A.transpose(1,2), x0.unsqueeze(-1)).squeeze(-1)
+          x_recon = torch.bmm(f0.unsqueeze(1), A).squeeze(1)
+          err = (x0 - x_recon).abs().max()
+          
+          print(err)           
+          return ds
 
     def path(
                 self, 
