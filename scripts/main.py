@@ -11,7 +11,6 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.utilities import rank_zero_only
 from torch_geometric.loader import DataLoader
 from torch_geometric.data import Data
-from torchdiffeq import odeint
 
 import hydra
 from omegaconf import OmegaConf, DictConfig, MISSING
@@ -112,6 +111,7 @@ class Config:
     ckpt_path:                       Optional[str]           = None
 
     # Model run mode
+    variant:                         Literal["refine", "forge"]
     mode:                            Literal["debug", "train", "eval", "generate"] = "train"
 
     # Sampler settings (ODEINT)
@@ -123,6 +123,7 @@ class Config:
     seed:                            int            = 42
     from_noise:                      bool           = False
     mask_atoms:                      bool           = True 
+    
 
 
 class LightFlowMatch(pl.LightningModule, OptTransportMixin):
@@ -141,9 +142,9 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
     def __init__(
             self, 
             model,
-            lr: int = 1e-3, 
-            from_noise: bool = False,
+            variant: str,
             mask_atoms: bool = True,
+            lr: int = 1e-3, 
             rtol: float = 1e-7, 
             atol: float = 1e-9,
             ode_method: str = "dopri5",
@@ -153,7 +154,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         self.save_hyperparameters(ignore="model")  # all __init__ args saved as hyperparameters
         self.model = model
         self.loss_fn = nn.MSELoss() # mean squared error loss function 
-        self.from_noise = from_noise
+        self.variant = variant
         self.mask_atoms = mask_atoms
         self.rtol = rtol
         self.atol = atol 
