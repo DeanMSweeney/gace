@@ -112,7 +112,7 @@ class Config:
     ckpt_path:                       Optional[str]           = None
 
     # Model run mode
-    variant:                         Literal["refine", "forge"]
+    variant:                         Literal["refine", "forge"] = "refine"
     mode:                            Literal["debug", "train", "eval", "generate"] = "train"
 
     # Sampler settings (ODEINT)
@@ -122,7 +122,6 @@ class Config:
 
     # Misc
     seed:                            int            = 42
-    from_noise:                      bool           = False
     mask_atoms:                      bool           = True 
     
 
@@ -143,7 +142,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
     def __init__(
             self, 
             model,
-            variant: str,
+            variant: str = "refine",
             mask_atoms: bool = True,
             lr: int = 1e-3, 
             rtol: float = 1e-7, 
@@ -220,7 +219,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         loss = self._transport_loss(data)
 
         self.log( # log train loss per epoch 
-            "train/loss",
+            "train/loss_HELLO",
             loss, 
             on_step=True, 
             on_epoch=True,
@@ -419,7 +418,6 @@ def main(cfg: Config) -> None:
     lightning = LightFlowMatch(
         model=model, 
         lr=cfg.lr,
-        from_noise=cfg.from_noise,
         mask_atoms=cfg.mask_atoms,
         rtol=cfg.rtol, 
         atol=cfg.atol,
