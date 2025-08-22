@@ -168,10 +168,11 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         u_hat = self(data) # N, 3
 
         if self.mask_atoms:
-            free_atoms = (1 - data.fixed).unsqueeze(1) # N, 1
-            loss = self.masked_loss(u_hat=u_hat, u=u, masked_atoms=free_atoms) 
-        else:
+            free_atoms = (1 - data.fixed).unsqueeze(1) # N
+            loss = self.masked_loss(u_hat=u_hat, u=u, w=free_atoms) 
+        else: 
             loss = self.loss_fn(u_hat, u)
+
         return loss
     
     def _sampler(
@@ -217,24 +218,15 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         loss = self._transport_loss(data)
 
         self.log( # log train loss per epoch 
-            "train/loss_epoch",
+            "train/loss",
             loss, 
-            on_step=False, 
+            on_step=True, 
             on_epoch=True,
             prog_bar=True, 
             batch_size=len(data.natoms),
             sync_dist=True,
         )
 
-        self.log( # log train loss per step. 
-            "train/loss_step", 
-            loss, 
-            on_step=True, 
-            on_epoch=False,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
         return loss
     
     def validation_step(self, data: Data, batch_idx):
