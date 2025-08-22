@@ -21,6 +21,7 @@ from adsflow.models.gemnet.gemnet_flow import GemNetFlow
 from adsflow.utils.flow_matching import OptTransportMixin
 from adsflow.utils.lmdb_dataset import LazyLmdbDataset
 from fairchem.core.datasets.lmdb_dataset import LmdbDataset
+from torchdiffeq import odeint
 
 @dataclass
 class Config:
