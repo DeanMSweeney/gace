@@ -48,12 +48,7 @@ class OptTransportMixin:
           ds_f = f1 - f0 # N, 3
           ds_f -= torch.floor(ds_f + 0.5)
           ds = torch.bmm(ds_f.unsqueeze(1), A).squeeze(1)  # (N,3)
-          
-          f0 = torch.linalg.solve(A.transpose(1,2), x0.unsqueeze(-1)).squeeze(-1)
-          x_recon = torch.bmm(f0.unsqueeze(1), A).squeeze(1)
-          err = (x0 - x_recon).abs().max()
-          
-          print(err)           
+                   
           return ds
 
     def path(
@@ -63,7 +58,6 @@ class OptTransportMixin:
     ) -> Tuple[Data, Tensor]:
         
         data = input_data.clone()
-        from_noise = self.from_noise if from_noise is None else from_noise
 
         x1 = data.pos_relaxed # sample relaxed positions and discard
 
