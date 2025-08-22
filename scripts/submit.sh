@@ -48,11 +48,11 @@ srun singularity exec --nv \
   	$WANDB_ARTIFACT_DIR \
   	$WANDB_CACHE_DIR
       cd /workspace${SLURM_SUBMIT_DIR#$PROJECT_DIR} && \
-      python main.py \
+      python lrg.py \
       mode=train \
       num_nodes=1 \
       devices=8 \
-      batch_size=32 \
+      batch_size=8 \
       num_workers=8 \
       logger=True \
     "
