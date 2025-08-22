@@ -11,7 +11,6 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.utilities import rank_zero_only
 from torch_geometric.loader import DataLoader
 from torch_geometric.data import Data
-from torchdiffeq import odeint
 
 import hydra
 from omegaconf import OmegaConf, DictConfig, MISSING
@@ -22,6 +21,7 @@ from adsflow.models.gemnet.gemnet_flow import GemNetFlow
 from adsflow.utils.flow_matching import OptTransportMixin
 from adsflow.utils.lmdb_dataset import LazyLmdbDataset
 from fairchem.core.datasets.lmdb_dataset import LmdbDataset
+from torchdiffeq import odeint
 
 @dataclass
 class Config:
@@ -112,6 +112,7 @@ class Config:
     ckpt_path:                       Optional[str]           = None
 
     # Model run mode
+    variant:                         Literal["refine", "forge"] = "refine"
     mode:                            Literal["debug", "train", "eval", "generate"] = "train"
 
     # Sampler settings (ODEINT)
@@ -121,8 +122,8 @@ class Config:
 
     # Misc
     seed:                            int            = 42
-    from_noise:                      bool           = False
     mask_atoms:                      bool           = True 
+    
 
 
 class LightFlowMatch(pl.LightningModule, OptTransportMixin):
@@ -141,9 +142,9 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
     def __init__(
             self, 
             model,
-            lr: int = 1e-3, 
-            from_noise: bool = False,
+            variant: str = "refine",
             mask_atoms: bool = True,
+            lr: int = 1e-3, 
             rtol: float = 1e-7, 
             atol: float = 1e-9,
             ode_method: str = "dopri5",
@@ -153,7 +154,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         self.save_hyperparameters(ignore="model")  # all __init__ args saved as hyperparameters
         self.model = model
         self.loss_fn = nn.MSELoss() # mean squared error loss function 
-        self.from_noise = from_noise
+        self.variant = variant
         self.mask_atoms = mask_atoms
         self.rtol = rtol
         self.atol = atol 
@@ -170,8 +171,9 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         if self.mask_atoms:
             free_atoms = (1 - data.fixed).unsqueeze(1) # N
             loss = self.masked_loss(u_hat=u_hat, u=u, w=free_atoms) 
-        else:
+        else: 
             loss = self.loss_fn(u_hat, u)
+
         return loss
     
     def _sampler(
@@ -217,24 +219,15 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         loss = self._transport_loss(data)
 
         self.log( # log train loss per epoch 
-            "train/loss_epoch",
+            "train/loss",
             loss, 
-            on_step=False, 
+            on_step=True, 
             on_epoch=True,
             prog_bar=True, 
             batch_size=len(data.natoms),
             sync_dist=True,
         )
 
-        self.log( # log train loss per step. 
-            "train/loss_step", 
-            loss, 
-            on_step=True, 
-            on_epoch=False,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
         return loss
     
     def validation_step(self, data: Data, batch_idx):
@@ -425,7 +418,6 @@ def main(cfg: Config) -> None:
     lightning = LightFlowMatch(
         model=model, 
         lr=cfg.lr,
-        from_noise=cfg.from_noise,
         mask_atoms=cfg.mask_atoms,
         rtol=cfg.rtol, 
         atol=cfg.atol,

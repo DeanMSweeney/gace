@@ -40,5 +40,4 @@ strategy: "ddp_find_unused_parameters_false"
 precision: "16-mixed"
 
 # misc
-from_noise: false
 mask_atoms: true
