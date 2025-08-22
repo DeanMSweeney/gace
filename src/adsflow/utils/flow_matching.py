@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.data import Data
 from typing import Optional, Literal, Union, Tuple
+from torchdiffeq import odeint
 
 
 class OptTransportMixin: 
@@ -61,15 +62,13 @@ class OptTransportMixin:
     def path(
                 self, 
                 input_data: Data,
-                from_noise: Optional[bool]=None,
     ) -> Tuple[Data, Tensor]:
         
         data = input_data.clone()
-        from_noise = self.from_noise if from_noise is None else from_noise
 
         x1 = data.pos_relaxed # sample relaxed positions and discard
 
-        if from_noise:
+        if self.variant == "forge":
                 x0 = torch.randn_like(x1) # sample noise 
         else:
                 x0 = data.pos.clone() # sample initial positions and discard 
@@ -92,3 +91,41 @@ class OptTransportMixin:
         u = displacement
 
         return data, u 
+    
+    def sampler(
+            self, 
+            input_data: Data,
+            
+    ) -> Union[Data, Tuple[Data, torch.Tensor]]:
+        
+        data = input_data.clone()
+        def dx_dt(t: torch.Tensor, xt: torch.Tensor) -> torch.Tensor:
+            """
+            Wrap Pytorch model in a function with format: f(t, y)
+            """
+            data.pos = xt
+            data.t = t.view(1,1).expand(len(xt), -1)
+            u = self(data)
+            return u 
+        
+        # define time interval for the IVP
+        t = torch.linspace(0., 1., 100, 
+                        device=data.pos.device, dtype=data.pos.dtype)
+        xt = odeint(
+            func=dx_dt, 
+            y0=input_data.pos,
+            t=t,
+            rtol=self.rtol,
+            atol=self.atol,
+            method=self.ode_method,
+        )
+        data.pos_generated = xt[-1] # write generate possitional coordinates to pos_gen attribute 
+
+        data.pos = input_data.pos
+
+        if hasattr(data, "pos_relaxed") and self.variant == "forge":
+            struc_rmse = torch.sqrt(self.loss_fn(data.pos_generated, data.pos_relaxed))
+            null_struc_rmse = torch.sqrt(self.loss_fn(data.pos, data.pos_relaxed))
+            return data, struc_rmse, null_struc_rmse
+        else: 
+            return data
