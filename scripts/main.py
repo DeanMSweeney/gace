@@ -102,7 +102,7 @@ class Config:
     devices:                         int = 1
     num_nodes:                       int = 1
     strategy:                        str = "auto"
-    precision:                       Literal[16, "16-mixed", "32-true"] = "16-mixed"
+    precision:                       Literal[16, "16-mixed", 32] = 32
 
     # Checkpointing & logging
     logger:                          bool                    = False
@@ -308,12 +308,7 @@ def model_banner(model) -> None:
     model.print_banner() # print model banner
     return 
 
-@hydra.main(
-    version_base=None,        
-    config_path="conf", # ./conf
-    config_name="config",
-)
-
+@hydra.main(version_base=None)
 def main(cfg: Config) -> None:
     # 1) instantiate Python defaults
     defaults = Config()
@@ -329,7 +324,7 @@ def main(cfg: Config) -> None:
     pl.seed_everything(cfg.seed, workers=True)
     
     # enable TF32 on matmuls and memory pinning
-    torch.set_float32_matmul_precision('medium')
+    torch.set_float32_matmul_precision("high")
     pin_memory = True if cfg.accelerator == "gpu" else False # configured for GPU
 
     # build model with  provided configuration file
@@ -448,6 +443,7 @@ def main(cfg: Config) -> None:
         accumulate_grad_batches=cfg.accumulate_grad_batches,
         val_check_interval=cfg.val_check_interval,
         log_every_n_steps=10,
+        gradient_clip_val=1.0,
     )
 
     # fit the model 

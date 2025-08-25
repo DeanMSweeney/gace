@@ -48,12 +48,16 @@ srun singularity exec --nv \
   	$WANDB_ARTIFACT_DIR \
   	$WANDB_CACHE_DIR
       cd /workspace${SLURM_SUBMIT_DIR#$PROJECT_DIR} && \
-      python lrg.py \
+      python main.py \
+      --config-path conf \
+      --config-name config-lrg \
       mode=train \
       num_nodes=1 \
       devices=8 \
-      batch_size=8 \
+      batch_size=4 \
       num_workers=8 \
       logger=True \
+      precision=32 \
+      mask_atoms=false \
     "
 
