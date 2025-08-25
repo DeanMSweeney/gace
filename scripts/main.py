@@ -159,6 +159,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         self.rtol = rtol
         self.atol = atol 
         self.ode_method = ode_method
+        self._prev_loss = None
 
     def forward(self, data):
         return self.model(data)
@@ -167,13 +168,13 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
 
         data, u = self.path(input_data) 
         u_hat = self(data) # N, 3
-
+        
         if self.mask_atoms:
             free_atoms = (1 - data.fixed).unsqueeze(1) # N
             loss = self.masked_loss(u_hat=u_hat, u=u, w=free_atoms) 
         else: 
             loss = self.loss_fn(u_hat, u)
-
+            
         return loss
     
     def _sampler(
