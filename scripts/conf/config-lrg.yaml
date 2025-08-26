@@ -13,7 +13,7 @@ oc20_mini:  "/workspace/datasets/mini/data.lmdb"
 oc20_test:  "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_ood_both/data.lmdb"
 
 # training hyperparameters/settings
-batch_size: 8
+batch_size: 4
 num_workers: 8
 lr: 0.0005
 max_epochs: 3000
@@ -40,4 +40,4 @@ strategy: "ddp_find_unused_parameters_false"
 precision: 32
 
 # misc
-mask_atoms: false
+mask_atoms: true
