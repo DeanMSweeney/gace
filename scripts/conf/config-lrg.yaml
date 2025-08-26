@@ -25,7 +25,7 @@ logger: false
 project: "adsflow"
 run_name: "gauntlet-smart"
 ckpt_dir: "checkpoints"
-ckpt_path: null #"checkpoints/gauntlet_trained.ckpt" 
+ckpt_path: "gauntlet-smart-epoch=23.ckpt"
 
 # sampler setings
 rtol: 1e-9

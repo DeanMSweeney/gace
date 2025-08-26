@@ -50,14 +50,14 @@ srun singularity exec --nv \
       cd /workspace${SLURM_SUBMIT_DIR#$PROJECT_DIR} && \
       python main.py \
       --config-path conf \
-      --config-name config-lrg \
+      --config-name config \
       mode=train \
       num_nodes=1 \
       devices=8 \
-      batch_size=4 \
+      batch_size=16 \
       num_workers=8 \
       logger=True \
       precision=32 \
-      mask_atoms=false \
+      mask_atoms=true \
     "
 
