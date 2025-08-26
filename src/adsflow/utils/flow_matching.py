@@ -1,6 +1,6 @@
 
 import numpy as np 
-import contextlib
+import ase
 import torch
 from torch import Tensor
 import torch.nn as nn
@@ -45,10 +45,14 @@ class OptTransportMixin:
           ds = x1 - x0
      
           ds_f = torch.linalg.solve(A.transpose(1,2), ds.unsqueeze(-1)).squeeze(-1)  # (N,3)
-          ds_f = ds_f - torch.round(ds_f)
-          d_mic = torch.bmm(ds_f.unsqueeze(1), A).squeeze(1)
-                   
-          return d_mic
+          ds_f -= torch.floor(ds_f + 0.5)
+          
+          if ds_f.abs().max() < 0.5: 
+                d_mic = torch.bmm(ds_f.unsqueeze(1), A).squeeze(-1)
+                return d_mic 
+          else:
+                print("Non-orthorhomic unit cell")
+                return d_mic
 
     def path(
                 self, 
