@@ -38,17 +38,17 @@ class OptTransportMixin:
           if cell.dim() == 2: 
                 cell = cell.unsqueeze(0) # for single graphs batch_size=1
 
-          A  =  cell[batch].transpose(1,2) # (N,3,3)
+          A  =  cell[batch] #.transpose(1,2) # (N,3,3)
           x0 = pos # (N,3)
           x1 = pos_relaxed # (N,3)
           
           ds = x1 - x0
+     
           ds_f = torch.linalg.solve(A, ds.unsqueeze(-1)).squeeze(-1)  # (N,3)
-   
           ds_f = ds_f - torch.round(ds_f)
           d_mic = (A @ ds_f.unsqueeze(-1)).squeeze(-1)
                    
-          return d_mic #x1 - x0
+          return d_mic
 
     def path(
                 self, 
@@ -68,7 +68,7 @@ class OptTransportMixin:
         t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device) # (batch_size, 1)
         t = t_per_graph[data.batch] # (num_atoms, 1)
         
-        pbc_invar = True
+        pbc_invar = False
         if pbc_invar:
             displacement = self.pbc_aware_disp(
                   pos=x0, 
