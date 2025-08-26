@@ -1,4 +1,4 @@
-cimport os
+import os
 import torch
 from torch import optim 
 from torch.utils.data import random_split
