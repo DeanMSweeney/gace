@@ -156,94 +156,92 @@ from typing import Optional, Literal, Union, Tuple
 
 
 class OptTransportMixin: 
+    """
+    This Mixin supports image invariant interpolation paths and masked loss for frozen atoms 
+    """
    
-    @staticmethod # define as normal function within class's namespace (does not need self)
-    def _pbc_aware_disp(
+    @staticmethod # define as normal function within class's namespace
+    def pbc_aware_disp(
                 cell: Tensor, 
                 pos: Tensor, 
                 pos_relaxed: Tensor, 
                 batch: Tensor, 
+                naive: bool,
     ) -> Tensor:
           
-          if cell.dim() == 2: 
-                cell = cell.unsqueeze(0) # for single graphs batch_size=1
+          A  =  cell[batch]  # (N,3,3)
+          G = A @ A.transpose(1,2) # (N, 3, 3)
+          x0 = pos # (N,3)
+          x1 = pos_relaxed # (N,3)
+          N = len(batch)
+          
+          u = x1 - x0 # (N,3)
+          u_f = torch.linalg.solve(A.transpose(1,2), u.unsqueeze(-1)).squeeze(-1)  # (N,3)
+          n0 = torch.round(u_f)
 
-          A =  cell[batch] # N, 3, 3
-          x0 = pos
-          x1 = pos_relaxed
-
-          f0 = torch.linalg.solve(A.transpose(1,2), x0.unsqueeze(-1)).squeeze(-1)  # (N,3)
-          f1 = torch.linalg.solve(A.transpose(1,2), x1.unsqueeze(-1)).squeeze(-1)  # (N,3)
-
-          ds_f = f1 - f0 # N, 3
-          ds_f -= torch.floor(ds_f + 0.5)
-          ds = torch.bmm(ds_f.unsqueeze(1), A).squeeze(1)  # (N,3)
-
-          return ds
+          if naive:
+                print("Naive method")
+                u_f_min = u_f - n0
+          else: 
+                print("27 image search")
+                # nearest neighbor search algorithm 
+                D = torch.tensor(list(itertools.product([-1, 0, 1], repeat=3)), dtype=torch.int) # (27, 3)
+                n = n0.unsqueeze(1) + D.unsqueeze(0) # (N, 1, 3) + (1, 27, 3) = (N, 27, 3) 
+                U_f_n = u_f.unsqueeze(1) - n # (N, 1, 3) - (N, 27, 3) = (N, 27, 3)
+                W = U_f_n @ G # (N, 27, 3)
+                u_f2 = (W * U_f_n).sum(dim=-1) # (N, 27)
+                  
+                # output 
+                k_min = u_f2.argmin(dim=1) # N
+                u_f_min = U_f_n[torch.arange(N), k_min]
+                
+          u_min = torch.bmm(u_f_min.unsqueeze(1), A).squeeze(1) 
+          return u_min
 
 
 ### Testing ###
 if __name__ == "__main__":
+    from torch_geometric.data import Data
     from torch_geometric.loader import DataLoader
-    from fairchem.core.datasets.lmdb_dataset import LmdbDataset
-    from ase import Atoms
-    from ase.io import write
-    from ase.constraints import FixAtoms
-
-
+    import itertools
+    
     dict = {"src": "/workspace/datasets/mini/data.lmdb"}
     dataset = LazyLmdbDataset(dict)
-    loader = DataLoader(dataset, batch_size=25)
-
-    with open("testing-fair.txt", "w") as f:
-        for data in loader:
-            f.write(str(data) + "\n\n") 
-            
-            delta = data.pos_relaxed - data.pos
-            delta_wrapped = OptTransportMixin._pbc_aware_disp(
-                cell=data.cell, 
-                pos=data.pos,
-                pos_relaxed=data.pos_relaxed,
-                batch=data.batch
+    loader = DataLoader(
+        dataset=dataset,
+        batch_size=100,
+    )
+    
+    u1 = []
+    u2 = []
+    for data in loader: 
+            naive = OptTransportMixin.pbc_aware_disp(
+                  cell = data.cell,
+                  pos = data.pos, 
+                  pos_relaxed = data.pos_relaxed, 
+                  batch = data.batch,
+                  naive=True,
             )
-      
-            # Trigger if ANY component on ANY atom exceeds 10 Å (use .norm(dim=1)>10 for vector length instead)
-            viol_mask = (delta.abs() > 15).any(dim=1)   # (N,)
-
-            if viol_mask.any():
-                # first violating atom
-                print('Found mobile atom')
-                idx_atom = viol_mask.nonzero(as_tuple=False)[0, 0].item()
-                idx = int(data.batch[idx_atom].item())  # <-- this is the graph (batch) index you want
-
-                sel = (data.batch == idx)               # boolean mask for atoms in this graph
-
-                # pick the right cell for this graph
-                cell_g = data.cell[idx] if data.cell.dim() == 3 else data.cell
-
-                # atomic numbers (use .z fallback if needed)
-                Z = data.atomic_numbers if hasattr(data, "atomic_numbers") else data.z
-                mask = np.array(data.fixed[sel], dtype=bool)
-
-                print(data.fixed.unsqueeze(1).size())
-
-                atoms1 = Atoms(
-                    positions=data.pos[sel].detach().cpu().numpy(), # initial
-                    numbers=Z[sel].detach().cpu().numpy(),
-                    cell=cell_g.detach().cpu().numpy(),
-                    pbc=True,  # or (True,True,False) for a slab
-                )
-                atoms1.set_constraint(FixAtoms(mask=mask))
-
-                atoms2 = Atoms(
-                    positions=data.pos_relaxed[sel].detach().cpu().numpy(),  # relaxed
-                    numbers=Z[sel].detach().cpu().numpy(),
-                    cell=cell_g.detach().cpu().numpy(),
-                    pbc=True,
-                )
-                atoms2.set_constraint(FixAtoms(mask=mask))
-
-                write("POSCAR",  atoms1, vasp5=True, direct=False)  # Cartesian
-                write("CONTCAR", atoms2, vasp5=True, direct=False)
-                break
+            
+            neighbor = naive = OptTransportMixin.pbc_aware_disp(
+                  cell = data.cell,
+                  pos = data.pos, 
+                  pos_relaxed = data.pos_relaxed, 
+                  batch = data.batch,
+                  naive=False
+            )
+            
+            u1.append(naive)
+            u2.append(neighbor)
+            
+    print(u1 == u2)
+        
+            
+     
+            
+            
+            
+            
+            
+    
                 
