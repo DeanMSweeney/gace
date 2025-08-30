@@ -139,10 +139,3 @@ if __name__ == "__main__":
       
       write("POSCART",  atoms, vasp5=True, direct=False)  # Cartesian
             
-      
-      
-<<<<<<< HEAD
-        
-=======
-        
->>>>>>> ef48ee36f4a28a0e309e00bab3e0f4ce56dd0de0
