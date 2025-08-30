@@ -198,50 +198,40 @@ class OptTransportMixin:
           u_min = torch.bmm(u_f_min.unsqueeze(1), A).squeeze(1) 
           return u_min
 
-
 ### Testing ###
 if __name__ == "__main__":
     from torch_geometric.data import Data
     from torch_geometric.loader import DataLoader
     import itertools
-    
-    dict = {"src": "/workspace/datasets/mini/data.lmdb"}
+
+    dict = {"src": "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb"}
     dataset = LazyLmdbDataset(dict)
     loader = DataLoader(
         dataset=dataset,
-        batch_size=100,
+        batch_size=10000,
+        pin_memory=True,
     )
-    
+
     u1 = []
     u2 = []
-    for data in loader: 
+    for data in loader:
             naive = OptTransportMixin.pbc_aware_disp(
                   cell = data.cell,
-                  pos = data.pos, 
-                  pos_relaxed = data.pos_relaxed, 
+                  pos = data.pos,
+                  pos_relaxed = data.pos_relaxed,
                   batch = data.batch,
                   naive=True,
             )
-            
+
             neighbor = naive = OptTransportMixin.pbc_aware_disp(
                   cell = data.cell,
-                  pos = data.pos, 
-                  pos_relaxed = data.pos_relaxed, 
+                  pos = data.pos,
+                  pos_relaxed = data.pos_relaxed,
                   batch = data.batch,
                   naive=False
             )
-            
+
             u1.append(naive)
             u2.append(neighbor)
-            
+
     print(u1 == u2)
-        
-            
-     
-            
-            
-            
-            
-            
-    
-                
