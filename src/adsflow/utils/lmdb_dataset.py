@@ -205,11 +205,12 @@ if __name__ == "__main__":
     from torch_geometric.loader import DataLoader
     import itertools
     
-    dict = {"src": "/workspace/datasets/mini/data.lmdb"}
+    dict = {"src": "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb"}
     dataset = LazyLmdbDataset(dict)
     loader = DataLoader(
         dataset=dataset,
-        batch_size=100,
+        batch_size=10000,
+        pin_memory=True,
     )
     
     u1 = []
