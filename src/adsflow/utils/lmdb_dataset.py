@@ -180,10 +180,8 @@ class OptTransportMixin:
           n0 = torch.round(u_f)
 
           if naive:
-                print("Naive method")
                 u_f_min = u_f - n0
           else: 
-                print("27 image search")
                 # nearest neighbor search algorithm 
                 D = torch.tensor(list(itertools.product([-1, 0, 1], repeat=3)), dtype=torch.int) # (27, 3)
                 n = n0.unsqueeze(1) + D.unsqueeze(0) # (N, 1, 3) + (1, 27, 3) = (N, 27, 3) 
@@ -203,22 +201,18 @@ if __name__ == "__main__":
     from torch_geometric.data import Data
     from torch_geometric.loader import DataLoader
     import itertools
-<<<<<<< HEAD
     
-=======
-
->>>>>>> 3c7151e724353e6442f04bea19ce8cf54fead95d
     dict = {"src": "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb"}
     dataset = LazyLmdbDataset(dict)
     loader = DataLoader(
         dataset=dataset,
-        batch_size=10000,
+        batch_size=1,
         pin_memory=True,
     )
 
     u1 = []
     u2 = []
-    for data in loader:
+    for iter, data in enumerate(loader):
             naive = OptTransportMixin.pbc_aware_disp(
                   cell = data.cell,
                   pos = data.pos,
@@ -234,12 +228,47 @@ if __name__ == "__main__":
                   batch = data.batch,
                   naive=False
             )
-
-            u1.append(naive)
-            u2.append(neighbor)
-<<<<<<< HEAD
             
-    print(u1 == u2)
+            print(f"Iteration: {iter}")
+            
+            if (naive != neighbor).all(): 
+                print("strucs unequal")
+                
+                # Convert to numpy
+                z_np        = data.atomic_numbers.detach().cpu().numpy()
+                cell_np     = data.cell.detach().cpu().numpy()
+                x0_np       = data.pos.detach().cpu().numpy()
+                xt_naive_np = (data.pos + naive).detach().cpu().numpy()
+                xt_27_np    = (data.pos + neighbor).detach().cpu().numpy()
+
+                # Save to current directory
+                atoms = Atoms(
+                  positions=x0_np, # initial
+                  numbers=z_np,
+                  cell=cell_np,
+                  pbc=True,  # or (True,True,False) for a slab
+                )
+                write("POSCAR",  atoms, vasp5=True, direct=False)  # Cartesian
+                
+                atoms1 = Atoms(
+                  positions=xt_naive_np, # initial
+                  numbers=z_np,
+                  cell=cell_np,
+                  pbc=True,  # or (True,True,False) for a slab
+                )
+                write("POSCAR1",  atoms1, vasp5=True, direct=False)  # Cartesian
+                
+                atoms2 = Atoms(
+                  positions=xt_27_np, # initial
+                  numbers=z_np,
+                  cell=cell_np,
+                  pbc=True,  # or (True,True,False) for a slab
+                )
+                write("POSCAR2",  atoms2, vasp5=True, direct=False)  # Cartesian
+                
+                break 
+            
+
         
             
      
@@ -250,7 +279,3 @@ if __name__ == "__main__":
             
     
                 
-=======
-
-    print(u1 == u2)
->>>>>>> 3c7151e724353e6442f04bea19ce8cf54fead95d
