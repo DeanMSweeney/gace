@@ -172,8 +172,8 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
     
     def _transport_loss(self, input_data: Data) -> torch.Tensor: 
 
-        #if self.global_step - 43176 > 0: 
-            #self._prev_loss = self._loss.item()
+        if self.global_step - 43176 > 0: 
+            self._prev_loss = self._loss.item()
             
         data, u = self.path(input_data) 
         u_hat = self(data) # N, 3
@@ -183,8 +183,9 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
             loss = self.masked_loss(u_hat=u_hat, u=u, w=free_atoms) 
         else: 
             loss = self.loss_fn(u_hat, u)
-            self._loss = loss
-        """
+        
+        self._loss = loss
+        
         if self._prev_loss is not None and loss > 10 * self._prev_loss:
             self.print(
                  f">>> [SPIKE] \n"
@@ -220,7 +221,6 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
                 write("POSCAR0",  x0, direct=False)  # Cartesian
                 write("POSCAR1",  x1, direct=False)  # Cartesian
                 write("POSCART",  xt, direct=False)  # Cartesian
-        """
             
         return loss
     
