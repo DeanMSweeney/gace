@@ -34,6 +34,7 @@ class OptTransportMixin:
                 pos: Tensor, 
                 pos_relaxed: Tensor, 
                 batch: Tensor, 
+                naive: bool=True,
     ) -> Tensor:
           
           A  =  cell[batch]  # (N,3,3)
@@ -45,8 +46,7 @@ class OptTransportMixin:
           u = x1 - x0 # (N,3)
           u_f = torch.linalg.solve(A.transpose(1,2), u.unsqueeze(-1)).squeeze(-1)  # (N,3)
           n0 = torch.round(u_f)
-          
-          naive = True
+      
           if naive:
                 u_f_min = u_f - n0
                 
@@ -72,7 +72,7 @@ class OptTransportMixin:
                 self, 
                 input_data: Data,
                 from_noise: Optional[bool]=None,
-                otf_velocity: bool=False,
+                otf_velocity: bool=True,
     ) -> Tuple[Data, Tensor]:
         
         data = input_data.clone()
@@ -86,6 +86,8 @@ class OptTransportMixin:
 
         t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device) # (batch_size, 1)
         t = t_per_graph[data.batch] # (num_atoms, 1)
+        
+        print(t[0])
         
         if otf_velocity:
             u = self.pbc_aware_disp(
@@ -119,15 +121,36 @@ if __name__ == "__main__":
       x0 = torch.tensor(pos.get_positions())
       x1 = torch.tensor(con.get_positions())
       cell = torch.tensor(pos.cell.array)
+      atomic_numbers = torch.tensor(pos.get_atomic_numbers())
+      natoms = torch.ones(len(atomic_numbers))
       
+      data = Data(
+            pos=x0, 
+            pos_relaxed=x1, 
+            cell=cell.unsqueeze(0), 
+            atomic_numbers=atomic_numbers,
+            batch = torch.zeros(len(x0), dtype=torch.long),
+            natoms=natoms,
+      )
+      
+      mixin = OptTransportMixin()
+      data, u = mixin.path(
+            input_data=data,
+      )
+      
+      print(atomic_numbers)
       u = OptTransportMixin.pbc_aware_disp(
             cell = cell.unsqueeze(0),
             pos = x0, 
             pos_relaxed = x1, 
             batch = torch.zeros(len(x0), dtype=torch.long),
+            naive=True,
       )
       
-      xt = x0 + u
+      xt = x0 + 0.3575 * u
+      
+      xt = data.pos
+
       atoms = Atoms(
                   positions=xt.detach().cpu().numpy(), # initial
                   numbers=pos.get_atomic_numbers(),
@@ -135,7 +158,7 @@ if __name__ == "__main__":
                   pbc=True,  # or (True,True,False) for a slab
             )
       
-      atoms.wrap()
+      #atoms.wrap()
       
       write("POSCART",  atoms, vasp5=True, direct=False)  # Cartesian
             
