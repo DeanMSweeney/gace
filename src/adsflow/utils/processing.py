@@ -6,84 +6,94 @@ import torch
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 from adsflow.utils.lmdb_dataset import LazyLmdbDataset
-from adsflow.utils.flow_matching import OptTransportMixin
+from adsflow.utils.flow_matching import OptTransportMixin as OTM
 
-class GenVel(OptTransportMixin):
+
+def precompute_vel(
+    src_path: str = "/workspace/datasets/mini/data.lmdb",
+    dst_path: str = "/workspace/datasets/mini/data_refined.lmdb",
+    map_size_mult: float = 1.5, 
+    commit_every: int = 10,
+    batch_size: int = 1,
+    num_workers: int = 0,
+):
     
-    def __init__(
-        self,
-        src_path: str,
-        dst_path: str, 
-        map_size_mult: float = 1.5, 
-        commit_every: int = 5000,
-        batch_size: int = 400000, 
-    ):
+    cfg = {"src": src_path}
+    dataset = LazyLmdbDataset(cfg)
+    loader = DataLoader(
+        dataset=dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+    )
     
-    def read_src_item_bytes(self, idx: int):
+    src_size = os.path.getsize(src_path)
+    map_size = int(src_size * map_size_mult)
+    
+    src_env = lmdb.open(
+        src_path,
+        subdir=False,
+        readonly=True, 
+        lock=False,
+        readahead=True, 
+        meminit=False,
+    )
+    
+    dst_env = lmdb.open(
+        dst_path,
+        subdir=False,
+        map_size=map_size,
+        lock=True,
+        readahead=False, 
+        meminit=False,
+    )
+        
+    count = 0 
+    txn = dst_env.begin(write=True)
+    for idx, data in enumerate(loader):
+       
+        _, velocity = OTM.path(
+            input_data=data,
+            from_noise=False,
+            otf_velocity=True,
+            naive=True,
+        )
+        
+        data.velocity = velocity.detach().cpu()
+        
         key = str(idx).encode("ascii")
-        with src_env.begin(write=False) as txn:
-            buf = txn.get(key)
-            if buf is None:
-                raise KeyError(f"Missing key {idx} in source LMDB")
-        return buf
+        txn.put(key, pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL))
+        count += 1
+        
+        if count % commit_every == 0:
+            txn.commit()
+            txn = dst_env.begin(write=True)
 
-    def precompute_vel(
-        self,
-    ):
-        dict = {"src": self.src_path}
-        dataset = LazyLmdbDataset(dict)
-        loader = DataLoader(
-            dataset=dataset,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=0,
-        )
-        
-        src_size = os.path.getsize(src_path)
-        map_size = int(src_size * map_size_mult)
-        
-        src_env = lmdb.open(
-            src_path,
-            subdir=False,
-            readonly=True, 
-            lock=False,
-            readahead=True, 
-            meninit=False,
-        )
-        
-        dst_env = lmdb.open(
-            src_path,
-            subdir=False,
-            map_size=map_size,
-            lock=True,
-            readahead=False, 
-            meninit=False,
-        )
-        
-        count = 0 
-        txn = dst_env.begin(write=True)
-        for idx, data in enumerate(loader):
-            
-            velocity = self.path(data, otf_velocity=True, from_noise=False)
-            src_btyes = read_src_item_bytes(idx)
-            sample = pickle.loads(src_btyes)
-            
-            sample["velocity"] = u_mic
-            
-            key = str(idx).encode("ascii")
-            txn.put(key, pickle.dumps(sample, protocol=pickle.HIGHEST_PROTOCOL))
-            count += 1
-            
-            if count % commit_every == 0:
-                txn.commit()
-                txn = dst_env.begin(write=True)
+    # Final commit + close
+    txn.commit()
+    src_env.close()
+    dst_env.close()
 
-        # Final commit + close
-        txn.commit()
-        src_env.close()
-        dst_env.close()
-
-        print(f"Wrote {count} samples with 'velocity' to: {dst_path}")
+    print(f"Wrote {count} samples with 'velocity' to: {dst_path}")
 
 if __name__ == "__main__":
-    precompute_vel()
+    import time
+    
+    start = time.time()
+    precompute_vel(
+        batch_size=1,
+    )
+    end = time.time()
+    
+    print(f"Elapsed time: {end - start}")
+    
+    dict = {"src": "/workspace/datasets/mini/data_refined.lmdb"}
+    dataset = LazyLmdbDataset(dict)
+    loader = DataLoader(
+        dataset=dataset,
+        batch_size=1,
+        pin_memory=True,
+    )
+    
+    
+
