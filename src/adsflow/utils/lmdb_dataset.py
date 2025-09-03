@@ -201,6 +201,8 @@ if __name__ == "__main__":
     from torch_geometric.data import Data
     from torch_geometric.loader import DataLoader
     import itertools
+    from ase import Atoms
+    from ase.io import write
     
     dict = {"src": "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb"}
     dataset = LazyLmdbDataset(dict)

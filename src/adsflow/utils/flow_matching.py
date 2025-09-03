@@ -34,7 +34,7 @@ class OptTransportMixin:
                 pos: Tensor, 
                 pos_relaxed: Tensor, 
                 batch: Tensor, 
-                naive: bool=False,
+                naive: bool=True,
     ) -> Tensor:
           
           A  =  cell[batch]  # (N,3,3)
@@ -54,7 +54,7 @@ class OptTransportMixin:
                       print("FLAGGED")
           else: 
                 # nearest neighbor search algorithm 
-                D = torch.tensor(list(itertools.product([-1, 0, 1], repeat=3)), dtype=torch.int) # (27, 3)
+                D = torch.tensor(list(itertools.product([-1, 0, 1], repeat=3)), dtype=torch.int, device=n0.device) # (27, 3)
                 n = n0.unsqueeze(1) + D.unsqueeze(0) # (N, 1, 3) + (1, 27, 3) = (N, 27, 3) 
                 U_f_n = u_f.unsqueeze(1) - n # (N, 1, 3) - (N, 27, 3) = (N, 27, 3)
                 W = U_f_n @ G # (N, 27, 3)
@@ -67,18 +67,18 @@ class OptTransportMixin:
                 u_min = torch.bmm(u_f_min.unsqueeze(1), A).squeeze(1)
                 
           return u_min
-            
-
+    
+    @staticmethod    
     def path(
-                self, 
                 input_data: Data,
                 from_noise: Optional[bool]=None,
                 otf_velocity: bool=True,
+                naive: bool=True,
     ) -> Tuple[Data, Tensor]:
         
         data = input_data.clone()
 
-        x1 = data.pos_relaxed # sample relaxed positions and discard
+        x1 = data.pos_relaxed.clone() # sample relaxed positions
 
         if from_noise:
                 x0 = torch.randn_like(x1) # sample noise 
@@ -90,11 +90,12 @@ class OptTransportMixin:
         
         
         if otf_velocity:
-            u = self.pbc_aware_disp(
+            u = __class__.pbc_aware_disp(
                   pos=x0, 
                   pos_relaxed=x1,
                   cell=data.cell,
                   batch=data.batch,
+                  naive=naive,
             )
         else: 
               # load from data object
@@ -138,7 +139,7 @@ if __name__ == "__main__":
             input_data=data,
       )
       
-      print(atomic_numbers)
+
       u = OptTransportMixin.pbc_aware_disp(
             cell = cell.unsqueeze(0),
             pos = x0, 
