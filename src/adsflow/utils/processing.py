@@ -13,7 +13,7 @@ def precompute_vel(
     src_path: str = "/workspace/datasets/mini/data.lmdb",
     dst_path: str = "/workspace/datasets/mini/data_refined.lmdb",
     map_size_mult: float = 1.5, 
-    commit_every: int = 10,
+    commit_every: int = 10000,
     batch_size: int = 1,
     num_workers: int = 0,
 ):
@@ -50,6 +50,7 @@ def precompute_vel(
         
     count = 0 
     txn = dst_env.begin(write=True)
+    print(">>> Writing velocity to new data file...")
     for idx, data in enumerate(loader):
        
         _, velocity = OTM.path(
@@ -81,19 +82,14 @@ if __name__ == "__main__":
     
     start = time.time()
     precompute_vel(
+        src_path="/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb",
+        dst_path="/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data_refined.lmdb",
         batch_size=1,
     )
     end = time.time()
     
     print(f"Elapsed time: {end - start}")
-    
-    dict = {"src": "/workspace/datasets/mini/data_refined.lmdb"}
-    dataset = LazyLmdbDataset(dict)
-    loader = DataLoader(
-        dataset=dataset,
-        batch_size=1,
-        pin_memory=True,
-    )
+
     
     
 
