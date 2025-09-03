@@ -64,7 +64,7 @@ class OptTransportMixin:
                 k_min = u_f2.argmin(dim=1) # N
                 u_f_min = U_f_n[torch.arange(N), k_min]
                 
-                u_min = torch.bmm(u_f_min.unsqueeze(1), A).squeeze(1)
+          u_min = torch.bmm(u_f_min.unsqueeze(1), A).squeeze(1)
                 
           return u_min
     
