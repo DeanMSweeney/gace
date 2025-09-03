@@ -34,7 +34,7 @@ class OptTransportMixin:
                 pos: Tensor, 
                 pos_relaxed: Tensor, 
                 batch: Tensor, 
-                naive: bool=True,
+                naive: bool=False,
     ) -> Tensor:
           
           A  =  cell[batch]  # (N,3,3)
@@ -46,7 +46,7 @@ class OptTransportMixin:
           u = x1 - x0 # (N,3)
           u_f = torch.linalg.solve(A.transpose(1,2), u.unsqueeze(-1)).squeeze(-1)  # (N,3)
           n0 = torch.round(u_f)
-      
+          
           if naive:
                 u_f_min = u_f - n0
                 
@@ -64,9 +64,10 @@ class OptTransportMixin:
                 k_min = u_f2.argmin(dim=1) # N
                 u_f_min = U_f_n[torch.arange(N), k_min]
                 
-          u_min = torch.bmm(u_f_min.unsqueeze(1), A).squeeze(1) 
+                u_min = torch.bmm(u_f_min.unsqueeze(1), A).squeeze(1)
+                
           return u_min
-      
+            
 
     def path(
                 self, 
@@ -87,7 +88,6 @@ class OptTransportMixin:
         t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device) # (batch_size, 1)
         t = t_per_graph[data.batch] # (num_atoms, 1)
         
-        print(t[0])
         
         if otf_velocity:
             u = self.pbc_aware_disp(
@@ -97,8 +97,8 @@ class OptTransportMixin:
                   batch=data.batch,
             )
         else: 
-              # load data 
-              u = x1 - x0
+              # load from data object
+              u = data.velocity
 
         xt = x0 + t * u # x1 * t + (1-t) * x0
         data.pos = xt # reassign xt to pos 
