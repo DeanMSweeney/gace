@@ -115,6 +115,7 @@ class Config:
     run_name:                        str                     = "NAME_RUN"
     ckpt_dir:                        str                     = "checkpoints"
     ckpt_path:                       Optional[str]           = None
+    track_grad_norms                 bool                    = False
 
     # Model run mode
     variant:                         Literal["refine", "forge"] = "refine"
@@ -153,6 +154,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
             rtol: float = 1e-7, 
             atol: float = 1e-9,
             ode_method: str = "dopri5",
+            track_grad_norms: bool = False,
         ):
         
         super().__init__()
@@ -165,6 +167,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         self.atol = atol 
         self.ode_method = ode_method
         self._prev_loss = None
+        self.track_grad_norms = track_grad_norms
 
 
     def forward(self, data):
@@ -172,7 +175,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
     
     def _transport_loss(self, input_data: Data) -> torch.Tensor: 
 
-        if self.global_step - 43176 > 0: 
+        if self.global_step > 0: 
             self._prev_loss = self._loss.item()
             
         data, u = self.path(input_data) 
@@ -186,18 +189,16 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         
         self._loss = loss
         
-        if self._prev_loss is not None and loss > 10 * self._prev_loss:
+        if self._prev_loss is not None and loss > 10 * self._prev_loss and self.loss > 100:
             self.print(
-                 f">>> [SPIKE] \n"
+                 f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> [SPIKE] \n"
                  f"Current loss: {loss.item()} \n" 
                  f"Previous loss: {self._prev_loss} \n"
                  f"Predicted u: {torch.tensor(u_hat).abs().max()} \n" 
                  f"Actual u: {u.abs().max()} \n" 
-                 f"x0: {data.pos_init.abs().max()} \n"
-                 f"x1: {data.pos_relaxed.abs().max()} \n"
-                 f"xt: {data.pos.abs().max()} \n"   
-                 f"disp: {(data.pos_init - data.pos).abs().max()} \n" 
+                 f"t: {data.t.max()} \n"
             )
+            
             
             x0 = Atoms(
                     positions=data.pos_init.detach().cpu().numpy(), # initial
@@ -217,10 +218,15 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
                     cell=data.cell.squeeze(0).detach().cpu().numpy(),
                     pbc=True,  # or (True,True,False) for a slab
                 )
-            if (data.pos_init - data.pos).abs().max() > 8:
-                write("POSCAR0",  x0, direct=False)  # Cartesian
-                write("POSCAR1",  x1, direct=False)  # Cartesian
-                write("POSCART",  xt, direct=False)  # Cartesian
+        
+            p = "str"
+            print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> WRITING TO POSCAR')
+            write("POSCAR0",  x0, direct=False)  # Cartesian
+            write("POSCAR1",  x1, direct=False)  # Cartesian
+            write("POSCART",  xt, direct=False)  # Cartesian
+            
+            if self.global_step > 1000:
+                l = p + 1
             
         return loss
     
@@ -342,8 +348,17 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
                 "frequency": 1, 
             }
         }
-            
-
+        
+    def on_before_optimize_step(self, optimizer): 
+        if self.track_grad_norms:
+                # Compute total gradient norm without clipping
+                grad_norm = nn.utils.clip_grad_norm_(
+                    self.model.parameters(), max_norm=float('inf')
+                    )
+                # Log the gradient norm for monitoring
+                self.log("unclipped grad norm", grad_norm)
+        
+        
 # print model/trianing config at rank 0 using decorator
 @rank_zero_only
 def declare(statement) -> None:
@@ -489,6 +504,7 @@ def main(cfg: Config) -> None:
         precision=cfg.precision,
         max_epochs=cfg.max_epochs,
         accumulate_grad_batches=cfg.accumulate_grad_batches,
+        track_grad_norms=cfg.track_grad_norms,
         val_check_interval=cfg.val_check_interval,
         log_every_n_steps=10,
         gradient_clip_val=1.0,
