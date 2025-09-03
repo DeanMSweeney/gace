@@ -70,7 +70,7 @@ def precompute_vel(
         if count % commit_every == 0:
             txn.commit()
             txn = dst_env.begin(write=True)
-            print(">>> Committed 5,000 samples")
+            print(f">>> Committed {count} samples")
 
     # Final commit + close
     txn.commit()
