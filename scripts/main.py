@@ -115,7 +115,7 @@ class Config:
     run_name:                        str                     = "NAME_RUN"
     ckpt_dir:                        str                     = "checkpoints"
     ckpt_path:                       Optional[str]           = None
-    track_grad_norms                 bool                    = False
+    track_grad_norms:                bool                    = False
 
     # Model run mode
     variant:                         Literal["refine", "forge"] = "refine"
@@ -178,7 +178,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         if self.global_step > 0: 
             self._prev_loss = self._loss.item()
             
-        data, u = self.path(input_data) 
+        data, u = self.path(input_data, naive=True) 
         u_hat = self(data) # N, 3
 
         if self.mask_atoms:
