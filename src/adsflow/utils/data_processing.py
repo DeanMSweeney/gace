@@ -87,6 +87,7 @@ if __name__ == "__main__":
         src_path="/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb",
         dst_path="/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data_refined.lmdb",
         batch_size=1,
+        commit_every=5000,
     )
     end = time.time()
     
