@@ -20,7 +20,7 @@ from typing import Optional, Literal, Union, Tuple
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
 from adsflow.utils.flow_matching import OptTransportMixin
 from adsflow.utils.lmdb_dataset import LazyLmdbDataset
-from adsflow.utils.utils import ship_positions
+from adsflow.utils.utils import ship_data
 
 from fairchem.core.datasets.lmdb_dataset import LmdbDataset
 from torchdiffeq import odeint
@@ -178,31 +178,31 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
     def _transport_loss(self, input_data: Data) -> torch.Tensor: 
 
         if self.global_step > 0: 
-            self.prev_loss = self.loss.item()
+            self.prev_loss = self.current_loss.item()
             
         data, u = self.path(input_data=input_data, otf_velocity=False)
-        self.u_hat = self(data) # N, 3
+        u_hat = self(data) # N, 3
 
         if self.mask_atoms:
             free_atoms = (1 - data.fixed).unsqueeze(1) # N
-            loss = self.masked_loss(u_hat=self.u_hat, u=u, w=free_atoms) 
+            loss = self.masked_loss(u_hat=u_hat, u=u, w=free_atoms) 
         else: 
             loss = self.loss_fn(self.u_hat, u)
-            
-        if self.prev_loss is not None and self.prev_loss > 10 * self.loss and self.global_step > 1000: 
+        
+        self.current_loss = loss
+        if self.prev_loss is not None and self.prev_loss > 10 * loss and self.global_step > 1000: 
             self.print( f">>> [SPIKE] \n" 
                        f"Current loss: {loss.item()} \n" 
-                       f"Previous loss: {self._prev_loss} \n" 
+                       f"Previous loss: {self.prev_loss} \n" 
                        f"Predicted u: {torch.tensor(u_hat).abs().max()} \n" 
                        f"Actual u: {u.abs().max()} \n" 
                        f"t: {data.t.max()} \n" ) 
             
             max_per_atom, _ = u_hat.max(dim=1) 
             max_atom = max_per_atom.argmax() 
-            smpl = data.batch[max_atom] 
-            mask = (data.batch == smpl)
+            sample = data.batch[max_atom] 
             
-            ship_data(input_data=data, mask=mask, idx=self.global_step)
+            ship_data(input_data=data, sample=sample, idx=self.global_step)
             
         return loss
     
