@@ -20,6 +20,8 @@ from typing import Optional, Literal, Union, Tuple
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
 from adsflow.utils.flow_matching import OptTransportMixin
 from adsflow.utils.lmdb_dataset import LazyLmdbDataset
+from adsflow.utils.utils import ship_positions
+
 from fairchem.core.datasets.lmdb_dataset import LmdbDataset
 from torchdiffeq import odeint
 
@@ -166,7 +168,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         self.rtol = rtol
         self.atol = atol 
         self.ode_method = ode_method
-        self._prev_loss = None
+        self.prev_loss = None
         self.track_grad_norms = track_grad_norms
 
 
@@ -176,57 +178,31 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
     def _transport_loss(self, input_data: Data) -> torch.Tensor: 
 
         if self.global_step > 0: 
-            self._prev_loss = self._loss.item()
+            self.prev_loss = self.loss.item()
             
-        data, u = self.path(input_data, naive=True) 
-        u_hat = self(data) # N, 3
+        data, u = self.path(input_data=input_data, otf_velocity=False)
+        self.u_hat = self(data) # N, 3
 
         if self.mask_atoms:
             free_atoms = (1 - data.fixed).unsqueeze(1) # N
-            loss = self.masked_loss(u_hat=u_hat, u=u, w=free_atoms) 
+            loss = self.masked_loss(u_hat=self.u_hat, u=u, w=free_atoms) 
         else: 
-            loss = self.loss_fn(u_hat, u)
-        
-        self._loss = loss
-        
-        if self._prev_loss is not None and loss > 10 * self._prev_loss and self.loss > 100:
-            self.print(
-                 f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> [SPIKE] \n"
-                 f"Current loss: {loss.item()} \n" 
-                 f"Previous loss: {self._prev_loss} \n"
-                 f"Predicted u: {torch.tensor(u_hat).abs().max()} \n" 
-                 f"Actual u: {u.abs().max()} \n" 
-                 f"t: {data.t.max()} \n"
-            )
+            loss = self.loss_fn(self.u_hat, u)
             
+        if self.prev_loss is not None and self.prev_loss > 10 * self.loss and self.global_step > 1000: 
+            self.print( f">>> [SPIKE] \n" 
+                       f"Current loss: {loss.item()} \n" 
+                       f"Previous loss: {self._prev_loss} \n" 
+                       f"Predicted u: {torch.tensor(u_hat).abs().max()} \n" 
+                       f"Actual u: {u.abs().max()} \n" 
+                       f"t: {data.t.max()} \n" ) 
             
-            x0 = Atoms(
-                    positions=data.pos_init.detach().cpu().numpy(), # initial
-                    numbers=data.atomic_numbers.detach().cpu().numpy(),
-                    cell=data.cell.squeeze(0).detach().cpu().numpy(),
-                    pbc=True,  # or (True,True,False) for a slab
-                )
-            x1 = Atoms(
-                    positions=data.pos_relaxed.detach().cpu().numpy(), # initial
-                    numbers=data.atomic_numbers.detach().cpu().numpy(),
-                    cell=data.cell.squeeze(0).detach().cpu().numpy(),
-                    pbc=True,  # or (True,True,False) for a slab
-                )
-            xt = Atoms(
-                    positions=data.pos.detach().cpu().numpy(), # initial
-                    numbers=data.atomic_numbers.detach().cpu().numpy(),
-                    cell=data.cell.squeeze(0).detach().cpu().numpy(),
-                    pbc=True,  # or (True,True,False) for a slab
-                )
-        
-            p = "str"
-            print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> WRITING TO POSCAR')
-            write("POSCAR0",  x0, direct=False)  # Cartesian
-            write("POSCAR1",  x1, direct=False)  # Cartesian
-            write("POSCART",  xt, direct=False)  # Cartesian
+            max_per_atom, _ = u_hat.max(dim=1) 
+            max_atom = max_per_atom.argmax() 
+            smpl = data.batch[max_atom] 
+            mask = (data.batch == smpl)
             
-            if self.global_step > 1000:
-                l = p + 1
+            ship_data(input_data=data, mask=mask, idx=self.global_step)
             
         return loss
     
@@ -394,7 +370,6 @@ def main(cfg: Config) -> None:
     model: GemNetFlow = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
     model_banner(model)
 
-
     # print configuration file at rank 0
     declare(f">>> Training and model configurations:\n {OmegaConf.to_yaml(cfg)}")
 
@@ -479,7 +454,8 @@ def main(cfg: Config) -> None:
         mask_atoms=cfg.mask_atoms,
         rtol=cfg.rtol, 
         atol=cfg.atol,
-        ode_method=cfg.ode_method
+        ode_method=cfg.ode_method,
+        track_grad_norms=cfg.track_grad_norms,
     )
 
     # compile W&B logger when logger is activated and generation mode is off 
@@ -504,7 +480,6 @@ def main(cfg: Config) -> None:
         precision=cfg.precision,
         max_epochs=cfg.max_epochs,
         accumulate_grad_batches=cfg.accumulate_grad_batches,
-        track_grad_norms=cfg.track_grad_norms,
         val_check_interval=cfg.val_check_interval,
         log_every_n_steps=10,
         gradient_clip_val=1.0,
