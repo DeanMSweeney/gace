@@ -6,38 +6,46 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.data import Data
 from typing import Optional, Literal, Union, Tuple
-
-
 import ase 
 from ase.io import read, write
 
-
-def export_positions(data: Data):
-    atomic_numbers = data.atomic_numbers
-    pos = data.pos 
-    pos_generated = data.pos_generated
+  
+def ship_data(
+    input_data: Data,
+    mask: torch.Tensor,
+    idx: Optional[int],
+)
+                
+        x0 = data.pos_init[mask]
+        x1 = data.pos_relaxed[mask]
+        xt = data.pos[mask]
+        atomic_numbers = data.atomic_numbers[mask]
+        cell = data.cell[smpl]
+        
+        x0 = Atoms(
+                positions=x0.detach().cpu().numpy(), # initial
+                numbers=atomic_numbers.detach().cpu().numpy(),
+                cell=cell.squeeze(0).detach().cpu().numpy(),
+                pbc=True,  # or (True,True,False) for a slab
+            )
+        x1 = Atoms(
+                positions=x1.detach().cpu().numpy(), # initial
+                numbers=atomic_numbers.detach().cpu().numpy(),
+                cell=cell.squeeze(0).detach().cpu().numpy(),
+                pbc=True,  # or (True,True,False) for a slab
+            )
+        xt = Atoms(
+                positions=xt.detach().cpu().numpy(), # initial
+                numbers=atomic_numbers.detach().cpu().numpy(),
+                cell=cell.squeeze(0).detach().cpu().numpy(),
+                pbc=True,  # or (True,True,False) for a slab
+            )
     
-    if hasattr(data, "pos_realxed"):
-        pos_relaxed = data.pos_relaxed
+        print('>>> Writing POSCARs')
+        write(f"written_strucs/POSCAR0_{idx}",  x0, direct=False)  # Cartesian
+        write(f"written_strucs/POSCAR1_{idx}",  x1, direct=False)  # Cartesian
+        write(f"written_strucs/POSCART_{idx}",  xt, direct=False)  # Cartesian
 
-def pbc_aware_disp(
-            cell: Tensor, 
-            pos: Tensor, 
-            pos_relaxed: Tensor, 
-            batch: Tensor, 
-) -> Tensor:
-        
-        A  =  cell[batch]  # (N,3,3)
-        x0 = pos # (N,3)
-        x1 = pos_relaxed # (N,3)
-        
-        ds = x1 - x0 # (N,3)
-    
-        ds_f = torch.linalg.solve(A.transpose(1,2), ds.unsqueeze(-1)).squeeze(-1)  # (N,3)
-        
-        ds_f -= torch.floor(ds_f + 0.5)
-        d_mic = torch.bmm(ds_f.unsqueeze(1), A).squeeze(1)
-        return d_mic 
       
     
     
