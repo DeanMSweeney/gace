@@ -189,8 +189,10 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         else: 
             loss = self.loss_fn(self.u_hat, u)
         
+        # For loss explosions ↓
         self.current_loss = loss
         if self.prev_loss is not None and self.prev_loss > 10 * loss and self.global_step > 1000: 
+            # print sample information 
             self.print( f">>> [SPIKE] \n" 
                        f"Current loss: {loss.item()} \n" 
                        f"Previous loss: {self.prev_loss} \n" 
@@ -198,10 +200,10 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
                        f"Actual u: {u.abs().max()} \n" 
                        f"t: {data.t.max()} \n" ) 
             
+            # output data through utils  
             max_per_atom, _ = u_hat.max(dim=1) 
             max_atom = max_per_atom.argmax() 
             sample = data.batch[max_atom] 
-            
             ship_data(input_data=data, sample=sample, idx=self.global_step)
             
         return loss
