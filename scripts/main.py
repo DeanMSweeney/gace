@@ -191,7 +191,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         
         # For loss explosions ↓
         self.current_loss = loss
-        if self.prev_loss is not None and self.prev_loss > 1 * loss and self.global_step > 1: 
+        if self.prev_loss is not None and self.prev_loss > 10 * loss and self.global_step > 1000: 
             # print sample information 
             self.print( f">>> [SPIKE] \n" 
                        f"Current loss: {loss.item()} \n" 
