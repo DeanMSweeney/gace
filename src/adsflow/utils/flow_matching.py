@@ -24,7 +24,7 @@ class OptTransportMixin:
     
          per_atom = ((u - u_hat) ** 2).mean(dim=1).unsqueeze(1) # N, 1
          masked_per_atom = per_atom * w # N, 1
-         masked_loss = masked_per_atom.sum() / w.sum().clamp_min(1e-8) # normalization of loss can cause isssues ~ Weichi 
+         masked_loss = masked_per_atom.sum() / w.sum().clamp_min(1e-8)  
          
          return masked_loss
    
