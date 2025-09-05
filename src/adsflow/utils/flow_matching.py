@@ -19,12 +19,12 @@ class OptTransportMixin:
     def masked_loss(
           u_hat: Tensor, # N, 3
           u: Tensor, # N, 3
-          w: Tensor, # N, 1
+          w: Tensor, # N, 1 -> w =[0, 0, 1, 1, ..., 0]
     ):
     
          per_atom = ((u - u_hat) ** 2).mean(dim=1).unsqueeze(1) # N, 1
          masked_per_atom = per_atom * w # N, 1
-         masked_loss = masked_per_atom.sum() / w.sum().clamp_min(1e-8) 
+         masked_loss = masked_per_atom.sum() / w.sum().clamp_min(1e-8) # normalization of loss can cause isssues ~ Weichi 
          
          return masked_loss
    
@@ -74,21 +74,21 @@ class OptTransportMixin:
                 from_noise: Optional[bool]=None,
                 otf_velocity: bool=True,
                 naive: bool=True,
+                variant: Optional[str] = None,
     ) -> Tuple[Data, Tensor]:
         
         data = input_data.clone()
 
-        x1 = data.pos_relaxed.clone() # sample relaxed positions
+        x1 = data.pos_relaxed.clone() # sample relaxed positions x1 ~ p(x) (final)
 
-        if from_noise:
+        if from_noise or variant == "Forge":
                 x0 = torch.randn_like(x1) # sample noise 
         else:
-                x0 = data.pos.clone() # sample initial positions and discard 
+                x0 = data.pos.clone() # sample initial positions and discard x0 ~ q(x) (initial)
 
         t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device) # (batch_size, 1)
         t = t_per_graph[data.batch] # (num_atoms, 1)
-        
-        
+    
         if otf_velocity:
             u = __class__.pbc_aware_disp(
                   pos=x0, 
