@@ -183,7 +183,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         data, u = self.path(input_data=input_data, otf_velocity=False)
         u_hat = self(data) # N, 3
 
-        if self.mask_atoms:
+        if self.mask_atoms and self.variant == "refine":
             free_atoms = (1 - data.fixed).unsqueeze(1) # N
             loss = self.masked_loss(u_hat=u_hat, u=u, w=free_atoms) 
         else: 
