@@ -54,7 +54,7 @@ srun singularity exec --nv \
       mode=train \
       num_nodes=1 \
       devices=8 \
-      batch_size=4 \
+      batch_size=16 \
       num_workers=8 \
       logger=True \
       precision=32 \
