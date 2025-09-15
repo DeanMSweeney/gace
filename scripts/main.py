@@ -23,7 +23,7 @@ from adsflow.utils.lmdb_dataset import LazyLmdbDataset
 from adsflow.utils.utils import ship_data
 
 from fairchem.core.datasets.lmdb_dataset import LmdbDataset
-from torchdiffeq import odeint
+
 
 from ase import Atoms
 from ase.io import write
