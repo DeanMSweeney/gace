@@ -130,7 +130,8 @@ class Config:
 
     # Misc
     seed:                            int            = 42
-    mask_atoms:                      bool           = True 
+    mask_frzn_atoms:                 bool           = True 
+    otf_velocity:                     bool           = True 
     
 
 
@@ -151,7 +152,8 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
             self, 
             model,
             variant: str = "refine",
-            mask_atoms: bool = True,
+            mask_frzn_atoms: bool = True,
+            otf_velocity: bool = False,
             lr: int = 1e-3, 
             rtol: float = 1e-7, 
             atol: float = 1e-9,
@@ -164,7 +166,8 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         self.model = model
         self.loss_fn = nn.MSELoss() # mean squared error loss function 
         self.variant = variant
-        self.mask_atoms = mask_atoms
+        self.otf_velocity = otf_velocity
+        self.mask_frzn_atoms = mask_frzn_atoms
         self.rtol = rtol
         self.atol = atol 
         self.ode_method = ode_method
@@ -172,17 +175,18 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         self.naive = True
 
 
+
     def forward(self, data):
         return self.model(data)
     
     def _transport_loss(self, input_data: Data) -> torch.Tensor: 
 
-        data, u = self.path(input_data=input_data, otf_velocity=False)
+        data, u = self.path(input_data=input_data)
         u_hat = self(data) # N, 3
 
-        if self.mask_atoms and self.variant == "refine":
-            free_atoms = (1 - data.fixed).unsqueeze(1) # N
-            loss = self.masked_loss(u_hat=u_hat, u=u, w=free_atoms) 
+        if self.mask_frzn_atoms and self.variant == "refine":
+            self.free_atoms = (1 - data.fixed).unsqueeze(1) # N
+            loss = self.masked_loss(a=u_hat, b=u, mask=self.free_atoms) 
         else: 
             loss = self.loss_fn(u_hat, u)  
         return loss
@@ -222,7 +226,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         # define time interval for the IVP
         t = torch.linspace(0., 1., 100, 
                         device=data.pos.device, dtype=data.pos.dtype)
-        opt_graph, struc_rmse, null_struc_rmse, base_struc_rmse, velocity_loss = self.sampler(data, t=t)
+        opt_graph, struc_rmse, null_struc_rmse = self.sampler(data, t=t)
 
         self.log(
             "test/loss", 
@@ -398,7 +402,8 @@ def main(cfg: Config) -> None:
     lightning = LightFlowMatch(
         model=model, 
         lr=cfg.lr,
-        mask_atoms=cfg.mask_atoms,
+        mask_frzn_atoms=cfg.mask_frzn_atoms,
+        otf_velocity=cfg.otf_velocity,
         rtol=cfg.rtol, 
         atol=cfg.atol,
         ode_method=cfg.ode_method,
