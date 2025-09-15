@@ -43,4 +43,3 @@ precision: 32
 
 # misc
 mask_frzn_atoms: true
-otf_velocity: false
