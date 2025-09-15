@@ -82,7 +82,7 @@ class OptTransportMixin:
         t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device) # (batch_size, 1)
         t = t_per_graph[data.batch] # (num_atoms, 1)
     
-        if not self.otf_velocity and hasattr(data, "velocity"):
+        if hasattr(data, "velocity"):
               # load from data object
               u = data.velocity
               
