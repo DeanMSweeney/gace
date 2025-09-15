@@ -15,7 +15,7 @@ oc20_test:  "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all
 # training hyperparameters/settings
 batch_size: 16
 num_workers: 8
-lr: 0.0005
+lr: 0.0002
 
 max_epochs: 3000
 accumulate_grad_batches: 2
@@ -26,8 +26,8 @@ logger: false
 project: "adsflow"
 run_name: "gauntlet-smart"
 ckpt_dir: "checkpoints"
-ckpt_path: null
-track_gradient_norms: true
+ckpt_path: "checkpoints/gauntlet-smart-epoch=78.ckpt"
+track_grad_norms: true
 
 # sampler setings
 rtol: 1e-9
