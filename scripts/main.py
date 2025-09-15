@@ -267,7 +267,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
                     mode="min", 
                     factor=0.50,
                     patience=2,
-                    min_lr=1e-6,
+                    min_lr=1e-8,
                 ),
                 "monitor": "val/loss",
                 "frequency": 1, 
@@ -415,7 +415,6 @@ def main(cfg: Config) -> None:
             name=cfg.run_name,
             config=OmegaConf.to_container(cfg, resolve=True),
             log_model=False,
-            id="vvbv96ze",
             resume="allow",
         )
     else: 
