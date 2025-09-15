@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -A chm250007p                      # your project/account
 #SBATCH -p GPU                             # GPU partition
-#SBATCH --nodes=1                          # 1 node
+#SBATCH --nodes=2                          # 1 node
 #SBATCH --ntasks-per-node=8                # one process per node
 #SBATCH --gres=gpu:h100-80:8               # 1 × V100-32 GB GPU
 #SBATCH --cpus-per-task=12                 # cpus per process 
@@ -48,16 +48,14 @@ srun singularity exec --nv \
   	$WANDB_ARTIFACT_DIR \
   	$WANDB_CACHE_DIR
       cd /workspace${SLURM_SUBMIT_DIR#$PROJECT_DIR} && \
+      git checkout dev \
       python main.py \
       --config-path conf \
-      --config-name config \
+      --config-name config-med \
       mode=train \
-      num_nodes=1 \
+      num_nodes=2 \
       devices=8 \
-      batch_size=16 \
-      num_workers=8 \
       logger=True \
       precision=32 \
-      mask_atoms=true \
     "
 
