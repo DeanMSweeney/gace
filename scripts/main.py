@@ -165,7 +165,6 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         self.model = model
         self.loss_fn = nn.MSELoss() # mean squared error loss function 
         self.variant = variant
-        self.otf_velocity = otf_velocity
         self.mask_frzn_atoms = mask_frzn_atoms
         self.rtol = rtol
         self.atol = atol 
