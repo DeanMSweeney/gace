@@ -168,7 +168,6 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         self.rtol = rtol
         self.atol = atol 
         self.ode_method = ode_method
-        self.prev_loss = None
         self.track_grad_norms = track_grad_norms
 
 
@@ -177,9 +176,6 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
     
     def _transport_loss(self, input_data: Data) -> torch.Tensor: 
 
-        if self.global_step > 0: 
-            self.prev_loss = self.current_loss.item()
-            
         data, u = self.path(input_data=input_data, otf_velocity=False)
         u_hat = self(data) # N, 3
 
@@ -187,65 +183,9 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
             free_atoms = (1 - data.fixed).unsqueeze(1) # N
             loss = self.masked_loss(u_hat=u_hat, u=u, w=free_atoms) 
         else: 
-            loss = self.loss_fn(self.u_hat, u)
-        
-        # For loss explosions ↓
-        self.current_loss = loss
-        if self.prev_loss is not None and self.prev_loss > 10 * loss and self.global_step > 1000: 
-            # print sample information 
-            self.print( f">>> [SPIKE] \n" 
-                       f"Current loss: {loss.item()} \n" 
-                       f"Previous loss: {self.prev_loss} \n" 
-                       f"Predicted u: {torch.tensor(u_hat).abs().max()} \n" 
-                       f"Actual u: {u.abs().max()} \n" 
-                       f"t: {data.t.max()} \n" ) 
-            
-            # output data through utils  
-            max_per_atom, _ = u_hat.max(dim=1) 
-            max_atom = max_per_atom.argmax() 
-            sample = data.batch[max_atom] 
-            ship_data(input_data=data, sample=sample, idx=self.global_step)
-            
+            loss = self.loss_fn(u_hat, u)  
         return loss
     
-    def _sampler(
-            self, 
-            input_data: Data,
-            
-    ) -> Union[Data, Tuple[Data, torch.Tensor]]:
-        
-        data = input_data.clone()
-        def dx_dt(t: torch.Tensor, xt: torch.Tensor) -> torch.Tensor:
-            """
-            Wrap Pytorch model in a function with format: f(t, y)
-            """
-            data.pos = xt
-            data.t = t.view(1,1).expand(len(xt), -1)
-            u = self(data)
-            return u 
-        
-        # define time interval for the IVP
-        t = torch.linspace(0., 1., 100, 
-                        device=data.pos.device, dtype=data.pos.dtype)
-        xt = odeint(
-            func=dx_dt, 
-            y0=input_data.pos,
-            t=t,
-            rtol=self.rtol,
-            atol=self.atol,
-            method=self.ode_method,
-        )
-        data.pos_generated = xt[-1] # write generate possitional coordinates to pos_gen attribute 
-
-        data.pos = input_data.pos
-
-        if hasattr(data, "pos_relaxed"):
-            struc_rmse = torch.sqrt(self.loss_fn(data.pos_generated, data.pos_relaxed))
-            null_struc_rmse = torch.sqrt(self.loss_fn(data.pos, data.pos_relaxed))
-            return data, struc_rmse, null_struc_rmse
-        else: 
-            return data
-
     # define training and validation methods 
     def training_step(self, data: Data, batch_idx):
         loss = self._transport_loss(data)
@@ -277,7 +217,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
 
     def test_step(self, data: Data, batch_idx):
         loss = self._transport_loss(data)
-        opt_graph, struc_rmse, null_struc_rmse, base_struc_rmse, velocity_loss = self._sampler(data)
+        opt_graph, struc_rmse, null_struc_rmse, base_struc_rmse, velocity_loss = self.sampler(data)
 
         self.log(
             "test/loss", 
@@ -466,7 +406,9 @@ def main(cfg: Config) -> None:
             project=cfg.project,
             name=cfg.run_name,
             config=OmegaConf.to_container(cfg, resolve=True),
-            log_model="False",
+            log_model=False,
+            id="vvbv96ze",
+            resume="allow",
         )
     else: 
         logger = cfg.logger
