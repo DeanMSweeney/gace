@@ -107,6 +107,47 @@ class OptTransportMixin:
         data.t = t
 
         return data, u 
+  
+  def sampler(
+            self, 
+            input_data: Data,
+            
+    ) -> Union[Data, Tuple[Data, torch.Tensor]]:
+        
+        data = input_data.clone()
+        def dx_dt(t: torch.Tensor, xt: torch.Tensor) -> torch.Tensor:
+            """
+            Wrap Pytorch model in a function with format: f(t, y)
+            """
+            data.pos = xt
+            data.t = t.view(1,1).expand(len(xt), -1)
+            u = self(data)
+            return u 
+        
+        # define time interval for the IVP
+        t = torch.linspace(0., 1., 100, 
+                        device=data.pos.device, dtype=data.pos.dtype)
+        xt = odeint(
+            func=dx_dt, 
+            y0=input_data.pos,
+            t=t,
+            rtol=self.rtol,
+            atol=self.atol,
+            method=self.ode_method,
+        )
+        data.pos_generated = xt[-1] # write generate possitional coordinates to pos_gen attribute 
+        
+        mask = [data.fixed ==1]
+        data.pos_generated[mask] = data.pos[mask]
+
+        data.pos = input_data.pos
+
+        if hasattr(data, "pos_relaxed"):
+            struc_rmse = torch.sqrt(self.loss_fn(data.pos_generated, data.pos_relaxed))
+            null_struc_rmse = torch.sqrt(self.loss_fn(data.pos, data.pos_relaxed))
+            return data, struc_rmse, null_struc_rmse
+        else: 
+            return data
  
 
 if __name__ == "__main__":
@@ -160,7 +201,7 @@ if __name__ == "__main__":
                   pbc=True,  # or (True,True,False) for a slab
             )
       
-      #atoms.wrap()
+      atoms.wrap()
       
       write("POSCART",  atoms, vasp5=True, direct=False)  # Cartesian
             
