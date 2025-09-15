@@ -108,7 +108,7 @@ class OptTransportMixin:
 
         return data, u 
   
-  def sampler(
+    def sampler(
             self, 
             input_data: Data,
             
