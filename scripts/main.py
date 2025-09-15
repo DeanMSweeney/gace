@@ -169,6 +169,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         self.atol = atol 
         self.ode_method = ode_method
         self.track_grad_norms = track_grad_norms
+        self.naive = True
 
 
     def forward(self, data):
@@ -217,7 +218,11 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
 
     def test_step(self, data: Data, batch_idx):
         loss = self._transport_loss(data)
-        opt_graph, struc_rmse, null_struc_rmse, base_struc_rmse, velocity_loss = self.sampler(data)
+        
+        # define time interval for the IVP
+        t = torch.linspace(0., 1., 100, 
+                        device=data.pos.device, dtype=data.pos.dtype)
+        opt_graph, struc_rmse, null_struc_rmse, base_struc_rmse, velocity_loss = self.sampler(data, t=t)
 
         self.log(
             "test/loss", 
