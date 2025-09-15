@@ -4,13 +4,13 @@ defaults:
   - _self_
 
 # Model mode
-mode: "train"
+mode: "eval"
 
 # dataset info
 oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data_refined.lmdb"
 oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data_refined.lmdb"
 oc20_mini:  "/workspace/datasets/mini/data.lmdb"
-oc20_test:  "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_ood_both/data.lmdb"
+oc20_test:  "/workspace/datasets/mini/data_refined.lmdb"
 
 # training hyperparameters/settings
 batch_size: 16
@@ -36,10 +36,11 @@ ode_method: "euler"
 
 # computer arch
 accelerator: "gpu"
-devices: 8
+devices: 1
 num_nodes: 1
 strategy: "ddp_find_unused_parameters_false"
 precision: 32
 
 # misc
-mask_atoms: true
+mask_frzn_atoms: true
+otf_velocity: false
