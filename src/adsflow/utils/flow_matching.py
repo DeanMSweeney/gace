@@ -30,21 +30,18 @@ class OptTransportMixin:
          return masked_loss
    
     @staticmethod # define as normal function within class's namespace
-    def pbc_aware_disp(
+    def pbc_aware_pos(
                 cell: Tensor, 
-                pos: Tensor, 
-                pos_relaxed: Tensor, 
+                positions: Tensor, 
                 batch: Tensor, 
                 naive: bool=True,
     ) -> Tensor:
           
           A  =  cell[batch]  # (N,3,3)
           G = A @ A.transpose(1,2) # (N, 3, 3)
-          x0 = pos # (N,3)
-          x1 = pos_relaxed # (N,3)
           N = len(batch)
           
-          u = x1 - x0 # (N,3)
+          u = positions # (N,3)
           u_f = torch.linalg.solve(A.transpose(1,2), u.unsqueeze(-1)).squeeze(-1)  # (N,3)
           n0 = torch.round(u_f)
           
@@ -68,13 +65,12 @@ class OptTransportMixin:
           u_min = torch.bmm(u_f_min.unsqueeze(1), A).squeeze(1)
                 
           return u_min
-    
-    @staticmethod    
+     
     def path(
+                self,
                 input_data: Data,
                 from_noise: Optional[bool]=None,
                 otf_velocity: bool=True,
-                naive: bool=True,
                 variant: Optional[str] = None,
     ) -> Tuple[Data, Tensor]:
         
@@ -91,12 +87,12 @@ class OptTransportMixin:
         t = t_per_graph[data.batch] # (num_atoms, 1)
     
         if otf_velocity:
-            u = __class__.pbc_aware_disp(
-                  pos=x0, 
-                  pos_relaxed=x1,
+            u_var = x1 - x0
+            u = __class__.pbc_aware_pos(
+                  positions=u_var,
                   cell=data.cell,
                   batch=data.batch,
-                  naive=naive,
+                  naive=self.naive,
             )
         else: 
               # load from data object
@@ -112,6 +108,7 @@ class OptTransportMixin:
     def sampler(
             self, 
             input_data: Data,
+            t: torch.Tensor,
             
     ) -> Union[Data, Tuple[Data, torch.Tensor]]:
         
@@ -125,9 +122,6 @@ class OptTransportMixin:
             u = self(data)
             return u 
         
-        # define time interval for the IVP
-        t = torch.linspace(0., 1., 100, 
-                        device=data.pos.device, dtype=data.pos.dtype)
         xt = odeint(
             func=dx_dt, 
             y0=input_data.pos,
@@ -136,7 +130,12 @@ class OptTransportMixin:
             atol=self.atol,
             method=self.ode_method,
         )
-        data.pos_generated = xt[-1] # write generate possitional coordinates to pos_gen attribute 
+        data.pos_generated = u = __class__.pbc_aware_pos(
+                  positions=xt[-1], # write generate possitional coordinates to pos_gen attribute 
+                  cell=data.cell,
+                  batch=data.batch,
+                  naive=self.naive,
+            )
         
         mask = [data.fixed ==1]
         data.pos_generated[mask] = data.pos[mask]
