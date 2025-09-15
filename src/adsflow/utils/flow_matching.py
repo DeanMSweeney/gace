@@ -18,17 +18,17 @@ class OptTransportMixin:
     
     @staticmethod
     def masked_loss(
-          u_hat: Tensor, # N, 3
-          u: Tensor, # N, 3
-          w: Tensor, # N, 1 -> w =[0, 0, 1, 1, ..., 0]
+          a: Tensor, # N, 3
+          b: Tensor, # N, 3
+          mask: Tensor, # N, 1 -> w =[0, 0, 1, 1, ..., 0]
     ):
-    
-         per_atom = ((u - u_hat) ** 2).mean(dim=1).unsqueeze(1) # N, 1
-         masked_per_atom = per_atom * w # N, 1
-         masked_loss = masked_per_atom.sum() / w.sum().clamp_min(1e-8)  
-         
-         return masked_loss
-   
+          per_atom = ((a - b) ** 2).mean(dim=1).unsqueeze(1) # N, 1
+          masked_per_atom = per_atom * mask # N, 1
+          masked_loss = masked_per_atom.sum() / mask.sum().clamp_min(1e-8)
+          
+          return masked_loss
+               
+            
     @staticmethod # define as normal function within class's namespace
     def pbc_aware_pos(
                 cell: Tensor, 
@@ -47,9 +47,6 @@ class OptTransportMixin:
           
           if naive:
                 u_f_min = u_f - n0
-                
-                if u_f_min.abs().max() > 0.50: 
-                      print("FLAGGED")
           else: 
                 # nearest neighbor search algorithm 
                 D = torch.tensor(list(itertools.product([-1, 0, 1], repeat=3)), dtype=torch.int, device=n0.device) # (27, 3)
@@ -70,7 +67,6 @@ class OptTransportMixin:
                 self,
                 input_data: Data,
                 from_noise: Optional[bool]=None,
-                otf_velocity: bool=True,
                 variant: Optional[str] = None,
     ) -> Tuple[Data, Tensor]:
         
@@ -86,17 +82,18 @@ class OptTransportMixin:
         t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device) # (batch_size, 1)
         t = t_per_graph[data.batch] # (num_atoms, 1)
     
-        if otf_velocity:
-            u_var = x1 - x0
-            u = __class__.pbc_aware_pos(
+        if not self.otf_velocity and hasattr(data, "velocity"):
+              # load from data object
+              u = data.velocity
+              
+        else: 
+               u_var = x1 - x0
+               u = __class__.pbc_aware_pos(
                   positions=u_var,
                   cell=data.cell,
                   batch=data.batch,
                   naive=self.naive,
             )
-        else: 
-              # load from data object
-              u = data.velocity
 
         xt = x0 + t * u # x1 * t + (1-t) * x0
         data.pos = xt # reassign xt to pos 
@@ -130,78 +127,31 @@ class OptTransportMixin:
             atol=self.atol,
             method=self.ode_method,
         )
-        data.pos_generated = u = __class__.pbc_aware_pos(
-                  positions=xt[-1], # write generate possitional coordinates to pos_gen attribute 
-                  cell=data.cell,
-                  batch=data.batch,
-                  naive=self.naive,
-            )
+        
+        data.pos_generated = xt[-1]
         
         mask = [data.fixed ==1]
         data.pos_generated[mask] = data.pos[mask]
 
         data.pos = input_data.pos
-
+        
         if hasattr(data, "pos_relaxed"):
-            struc_rmse = torch.sqrt(self.loss_fn(data.pos_generated, data.pos_relaxed))
-            null_struc_rmse = torch.sqrt(self.loss_fn(data.pos, data.pos_relaxed))
+              e_gen = __class__.pbc_aware_pos(
+                  positions=data.pos_generated - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
+                  cell=data.cell,
+                  batch=data.batch,
+                  naive=self.naive,
+            )
+              e_null = __class__.pbc_aware_pos(
+                  positions=data.pos - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
+                  cell=data.cell,
+                  batch=data.batch,
+                  naive=self.naive,
+            )
+
+            struc_rmse = torch.sqrt(__class__.masked_loss(a=e_gen, b=torch.zeros_like(e_gen), mask=self.free_atoms))
+            null_struc_rmse = torch.sqrt(__class__.masked_loss(a=e_null, b=torch.zeros_like(e_null), mask=self.free_atoms))
             return data, struc_rmse, null_struc_rmse
+      
         else: 
             return data
- 
-
-if __name__ == "__main__":
-      from ase import Atoms
-      from ase.io import read, write
-      import os
-      import numpy as np
-      import torch
-      
-            
-      pos = read("POSCAR", format='vasp')
-      con = read("CONTCAR", format='vasp')
-      
-      x0 = torch.tensor(pos.get_positions())
-      x1 = torch.tensor(con.get_positions())
-      cell = torch.tensor(pos.cell.array)
-      atomic_numbers = torch.tensor(pos.get_atomic_numbers())
-      natoms = torch.ones(len(atomic_numbers))
-      
-      data = Data(
-            pos=x0, 
-            pos_relaxed=x1, 
-            cell=cell.unsqueeze(0), 
-            atomic_numbers=atomic_numbers,
-            batch = torch.zeros(len(x0), dtype=torch.long),
-            natoms=natoms,
-      )
-      
-      mixin = OptTransportMixin()
-      data, u = mixin.path(
-            input_data=data,
-      )
-      
-
-      u = OptTransportMixin.pbc_aware_disp(
-            cell = cell.unsqueeze(0),
-            pos = x0, 
-            pos_relaxed = x1, 
-            batch = torch.zeros(len(x0), dtype=torch.long),
-            naive=True,
-      )
-      
-      xt = x0 + 0.3575 * u
-      
-      xt = data.pos
-
-      atoms = Atoms(
-                  positions=xt.detach().cpu().numpy(), # initial
-                  numbers=pos.get_atomic_numbers(),
-                  cell=cell.detach().cpu().numpy(),
-                  pbc=True,  # or (True,True,False) for a slab
-            )
-      
-      atoms.wrap()
-      
-      write("POSCART",  atoms, vasp5=True, direct=False)  # Cartesian
-            
