@@ -149,9 +149,10 @@ class OptTransportMixin:
                   naive=self.naive,
             )
 
-            struc_rmse = torch.sqrt(__class__.masked_loss(a=e_gen, b=torch.zeros_like(e_gen), mask=self.free_atoms))
-            null_struc_rmse = torch.sqrt(__class__.masked_loss(a=e_null, b=torch.zeros_like(e_null), mask=self.free_atoms))
-            return data, struc_rmse, null_struc_rmse
+              struc_rmse = torch.sqrt(__class__.masked_loss(a=e_gen, b=torch.zeros_like(e_gen), mask=self.free_atoms))
+              null_struc_rmse = torch.sqrt(__class__.masked_loss(a=e_null, b=torch.zeros_like(e_null), mask=self.free_atoms))
+            
+              return data, struc_rmse, null_struc_rmse
       
         else: 
             return data
