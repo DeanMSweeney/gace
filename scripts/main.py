@@ -118,6 +118,7 @@ class Config:
     ckpt_dir:                        str                     = "checkpoints"
     ckpt_path:                       Optional[str]           = None
     track_grad_norms:                bool                    = False
+    run_id                           str                     = None
 
     # Model run mode
     variant:                         Literal["refine", "forge"] = "refine"
@@ -152,7 +153,6 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
             model,
             variant: str = "refine",
             mask_frzn_atoms: bool = True,
-            otf_velocity: bool = False,
             lr: int = 1e-3, 
             rtol: float = 1e-7, 
             atol: float = 1e-9,
@@ -401,7 +401,6 @@ def main(cfg: Config) -> None:
         model=model, 
         lr=cfg.lr,
         mask_frzn_atoms=cfg.mask_frzn_atoms,
-        otf_velocity=cfg.otf_velocity,
         rtol=cfg.rtol, 
         atol=cfg.atol,
         ode_method=cfg.ode_method,
@@ -416,6 +415,7 @@ def main(cfg: Config) -> None:
             config=OmegaConf.to_container(cfg, resolve=True),
             log_model=False,
             resume="allow",
+            id=cfg.run_id,
         )
     else: 
         logger = cfg.logger
