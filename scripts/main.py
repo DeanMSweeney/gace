@@ -19,6 +19,7 @@ from typing import Optional, Literal, Union, Tuple
 
 from adsflow.helm import LightFlowMatch
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
+from adsflow.models.equiformer_v2.equiformerv2_flow import EquiformerV2_Flow
 from adsflow.utils.lmdb_dataset import LazyLmdbDataset
 from adsflow.utils.utils import ship_data
 
@@ -97,15 +98,15 @@ class Config:
     # Training hyperparameters/settings
     lr:                              float = 1e-3
     max_epochs:                      int   = 3000
-    accumulate_grad_batches:         int   = 4
-    val_check_interval:              int   = 1000
+    accumulate_grad_batches:         int   = 1
+    val_check_interval:              int   = 1
 
     # Compute architecture
     accelerator:                     str = "gpu"
     devices:                         int = 1
     num_nodes:                       int = 1
     strategy:                        str = "auto"
-    precision:                       Literal[16, "16-mixed", 32] = 32
+    precision:                       Literal[16, "16-mixed", "bf16-mixed", 32] = 32
 
     # Checkpointing & logging
     logger:                          bool                    = False
@@ -119,6 +120,7 @@ class Config:
     # Model run mode
     variant:                         Literal["refine", "forge"] = "refine"
     mode:                            Literal["debug", "train", "eval", "generate"] = "train"
+    regressor:                       Literal["GemNet-OC", "EquiformerV2"] = "EquiformerV2"
 
     # Sampler settings (ODEINT)
     rtol:                            float           = 1e-7
@@ -133,12 +135,6 @@ class Config:
 @rank_zero_only
 def declare(statement) -> None:
     print(statement)
-    return 
-
-@rank_zero_only
-def model_banner(model) -> None:
-    print(">>> Model Banner \n")
-    model.print_banner() # print model banner
     return 
 
 @hydra.main(version_base=None)
@@ -160,11 +156,14 @@ def main(cfg: Config) -> None:
     torch.set_float32_matmul_precision("high")
     pin_memory = True if cfg.accelerator == "gpu" else False # configured for GPU
 
-    # build model with  provided configuration file
-    model: GemNetFlow = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
-    model_banner(model)
+    # build model with provided configuration file
+    if cfg.regressor == "EquiformerV2":
+        model: EquiformerV2_Flow = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
+    elif cfg.regressor == "GemNet-OC":
+        model: GemNetFlow = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
 
     # print configuration file at rank 0
+    declare(f"Initated {cfg.regressor} architecutre as the velocity field regressor")
     declare(f">>> Training and model configurations:\n {OmegaConf.to_yaml(cfg)}")
 
     # configure model checkpoint callbacks
@@ -278,7 +277,6 @@ def main(cfg: Config) -> None:
         accumulate_grad_batches=cfg.accumulate_grad_batches,
         val_check_interval=cfg.val_check_interval,
         log_every_n_steps=10,
-        gradient_clip_val=1.0,
     )
 
     # fit the model 
