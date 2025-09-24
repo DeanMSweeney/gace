@@ -22,11 +22,12 @@ class OptTransportMixin:
           b: Tensor, # N, 3
           mask: Tensor, # N, 1 -> w =[0, 0, 1, 1, ..., 0]
     ):
-          per_atom = ((a - b) ** 2).mean(dim=1).unsqueeze(1) # N, 1
-          masked_per_atom = per_atom * mask # N, 1
-          masked_loss = masked_per_atom.sum() / mask.sum().clamp_min(1e-8)
+          L_per_atom = ((a - b) ** 2).mean(dim=1).unsqueeze(1) # N, 1
+          masked_L_per_atom = L_per_atom * mask # N, 1
+          masked_L = masked_L_per_atom.sum() / mask.sum().clamp_min(1e-8)
+          max_L = masked_L_per_atom.abs().max()
           
-          return masked_loss
+          return masked_L, max_L
                
             
     @staticmethod # define as normal function within class's namespace

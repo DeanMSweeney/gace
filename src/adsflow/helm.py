@@ -30,6 +30,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
             variant: str = "refine",
             mask_frzn_atoms: bool = True,
             lr: int = 1e-3, 
+            weight_decay: int = 0.001,
             rtol: float = 1e-7, 
             atol: float = 1e-9,
             ode_method: str = "dopri5",
@@ -60,14 +61,14 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
 
         if self.mask_frzn_atoms and self.variant == "refine":
             self.free_atoms = (1 - data.fixed).unsqueeze(1) # N
-            loss = self.masked_loss(a=u_hat, b=u, mask=self.free_atoms) 
+            loss, max_loss = self.masked_loss(a=u_hat, b=u, mask=self.free_atoms) 
         else: 
             loss = self.loss_fn(u_hat, u)  
-        return loss
+        return loss, max_loss
     
     # define training and validation methods 
     def training_step(self, data: Data, batch_idx):
-        loss = self._transport_loss(data)
+        loss, max_loss = self._transport_loss(data)
 
         self.log( # log train loss per epoch 
             "train/loss",
@@ -78,11 +79,22 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
             batch_size=len(data.natoms),
             sync_dist=True,
         )
+        
+        self.log( # log train loss per epoch 
+            "train/max_loss",
+            loss, 
+            on_step=True, 
+            on_epoch=True,
+            prog_bar=True, 
+            batch_size=len(data.natoms),
+            sync_dist=True,
+        )
 
         return loss
+        
     
     def validation_step(self, data: Data, batch_idx):
-        loss = self._transport_loss(data)
+        loss, max_loss = self._transport_loss(data)
 
         self.log(
             "val/loss", 
@@ -92,10 +104,18 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
             sync_dist=True,
         )
         
+        self.log(
+            "val/max_loss", 
+            loss, 
+            prog_bar=True, 
+            batch_size=len(data.natoms),
+            sync_dist=True,
+        )
+
         return loss
 
     def test_step(self, data: Data, batch_idx):
-        loss = self._transport_loss(data)
+        loss, max_loss = self._transport_loss(data)
         
         # define time interval for the IVP
         t = torch.linspace(0., 1., 100, 
@@ -133,7 +153,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         return opt_graph
     
     def configure_optimizers(self):
-        optimizer = optim.AdamW(self.parameters(), lr=self.hparams.lr)
+        optimizer = optim.AdamW(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
 
         return {
             "optimizer": optimizer,
