@@ -175,7 +175,6 @@ class EquiformerV2_Flow(BaseModel):
 
         self.use_pbc = use_pbc
         self.flow_matching = flow_matching
-        self.regress_forces = self.flow_matching
         self.otf_graph = otf_graph
         self.max_neighbors = max_neighbors
         self.max_radius = max_radius
@@ -229,6 +228,9 @@ class EquiformerV2_Flow(BaseModel):
         self.grad_velocity = False
         self.num_resolutions = len(self.lmax_list)
         self.sphere_channels_all = self.num_resolutions * self.sphere_channels
+        
+        self.regress_forces=True
+        self.direct_forces=True
 
         # Precompute the frequency as multipliers as a buffer, register time_freq as an attribute
         self.register_buffer(
@@ -291,16 +293,7 @@ class EquiformerV2_Flow(BaseModel):
                     )
                 )
             self.SO3_grid.append(SO3_m_grid)
-    
-        def process_time_embeds(self, t:torch.Tensor):
-            """
-            Convert t of shape [batch_size, 1] (or [batch_size]) into
-            a [batch_size, 2*time_n_freqs] vector of [cos, sin] features.
-            """
-            t = self.time_freqs * t                     # (bz, self.time_n_freqs)
-            t = torch.cat((t.cos(), t.sin()), dim=-1)   # (bz, 2*self.time_n_freqs)
-            return t
-    
+        
         # Edge-degree embedding
         self.edge_degree_embedding = EdgeDegreeEmbedding(
             self.sphere_channels,
@@ -380,7 +373,15 @@ class EquiformerV2_Flow(BaseModel):
         self.apply(self._init_weights)
         self.apply(self._uniform_init_rad_func_linear_weights)
     
-
+    def process_time_embeds(self, t:torch.Tensor):
+        """
+        Convert t of shape [batch_size, 1] (or [batch_size]) into
+        a [batch_size, 2*time_n_freqs] vector of [cos, sin] features.
+        """
+        t = self.time_freqs * t                     # (bz, self.time_n_freqs)
+        t = torch.cat((t.cos(), t.sin()), dim=-1)   # (bz, 2*self.time_n_freqs)
+        return t
+    
     @conditional_grad(torch.enable_grad())
     def forward(self, data):
         self.batch_size = len(data.natoms)
@@ -461,10 +462,7 @@ class EquiformerV2_Flow(BaseModel):
             edge_distance,
             edge_index)
         x.embedding = x.embedding + edge_degree.embedding 
-        
-        print(x.embedding.size())
-        
-        x.embedding = x.embedding + time_embeds
+        x.embedding = x.embedding + time_embeds.unsqueeze(1)
 
         ###############################################################
         # Update spherical node embeddings
