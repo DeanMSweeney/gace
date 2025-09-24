@@ -8,10 +8,10 @@ mode: "train"
 regressor: "GemNet-OC"
 
 # dataset info
-oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb"
-oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data.lmdb"
+oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data_refined.lmdb"
+oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data_refined.lmdb"
 oc20_mini:  "/workspace/datasets/mini/data.lmdb"
-oc20_test:  "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_ood_both/data.lmdb"
+oc20_test:  "/workspace/datasets/mini/data_refined.lmdb"
 
 # training hyperparameters/settings
 batch_size: 16
@@ -25,9 +25,10 @@ val_check_interval: 1.0
 # checkpointing/logging
 logger: false
 project: "adsflow"
-run_name: "smart-med"
+run_name: "gemnet-model"
 ckpt_dir: "checkpoints"
 ckpt_path: null
+track_grad_norms: true
 run_id: null
 
 # sampler setings
@@ -43,4 +44,4 @@ strategy: "ddp_find_unused_parameters_false"
 precision: "bf16-mixed"
 
 # misc
-mask_atoms: true
+mask_frzn_atoms: true

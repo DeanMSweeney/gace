@@ -25,7 +25,7 @@ val_check_interval: 1.0
 # checkpointing/logging
 logger: false
 project: "adsflow"
-run_name: "EquiformerV2"
+run_name: "equiformer-model"
 ckpt_dir: "checkpoints"
 ckpt_path: null
 track_grad_norms: true
