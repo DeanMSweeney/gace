@@ -1,23 +1,23 @@
 # model configuration
 defaults:
-  - model_cfg: EquiV2-flow_cfg # direcotry in conf: file name
+  - model_cfg: gemnet-flow-med_cfg # direcotry in conf: file name
   - _self_
 
 # Model mode
 mode: "train"
-regressor: "EquiformerV2"
+regressor: "GemNet-OC"
 
 # dataset info
-oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data_refined.lmdb"
-oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data_refined.lmdb"
+oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb"
+oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data.lmdb"
 oc20_mini:  "/workspace/datasets/mini/data.lmdb"
-oc20_test:  "/workspace/datasets/mini/data_refined.lmdb"
+oc20_test:  "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_ood_both/data.lmdb"
 
 # training hyperparameters/settings
 batch_size: 16
-num_workers: 0
+num_workers: 8
 lr: 0.0002
-
+weight_decay: 0.001
 max_epochs: 3000
 accumulate_grad_batches: 2
 val_check_interval: 1.0
@@ -25,10 +25,10 @@ val_check_interval: 1.0
 # checkpointing/logging
 logger: false
 project: "adsflow"
-run_name: "EquiformerV2"
+run_name: "smart-med"
 ckpt_dir: "checkpoints"
 ckpt_path: null
-track_grad_norms: true
+run_id: null
 
 # sampler setings
 rtol: 1e-9
@@ -37,10 +37,10 @@ ode_method: "euler"
 
 # computer arch
 accelerator: "gpu"
-devices: 1
+devices: 8
 num_nodes: 1
 strategy: "ddp_find_unused_parameters_false"
 precision: "bf16-mixed"
 
 # misc
-mask_frzn_atoms: true
+mask_atoms: true
