@@ -1,10 +1,11 @@
 # model configuration
 defaults:
-  - model_cfg: gemnet-flow_cfg # direcotry in conf: file name
+  - model_cfg: EquiV2-flow_cfg # direcotry in conf: file name
   - _self_
 
 # Model mode
-mode: "eval"
+mode: "train"
+regressor: "EquiformerV2"
 
 # dataset info
 oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data_refined.lmdb"
@@ -14,7 +15,7 @@ oc20_test:  "/workspace/datasets/mini/data_refined.lmdb"
 
 # training hyperparameters/settings
 batch_size: 16
-num_workers: 8
+num_workers: 0
 lr: 0.0002
 
 max_epochs: 3000
@@ -24,9 +25,9 @@ val_check_interval: 1.0
 # checkpointing/logging
 logger: false
 project: "adsflow"
-run_name: "gauntlet-smart"
+run_name: "EquiformerV2"
 ckpt_dir: "checkpoints"
-ckpt_path: "checkpoints/gauntlet-smart-epoch=78.ckpt"
+ckpt_path: null
 track_grad_norms: true
 
 # sampler setings
@@ -39,7 +40,7 @@ accelerator: "gpu"
 devices: 1
 num_nodes: 1
 strategy: "ddp_find_unused_parameters_false"
-precision: 32
+precision: "bf16-mixed"
 
 # misc
 mask_frzn_atoms: true
