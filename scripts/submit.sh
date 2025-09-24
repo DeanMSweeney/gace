@@ -50,11 +50,10 @@ srun singularity exec --nv \
       cd /workspace${SLURM_SUBMIT_DIR#$PROJECT_DIR} && \
       python main.py \
       --config-path conf \
-      --config-name config-med \
+      --config-name equ_config \
       mode=train \
       num_nodes=1 \
       devices=8 \
       logger=True \
-      precision=32 \
     "
 
