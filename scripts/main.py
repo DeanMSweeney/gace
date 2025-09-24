@@ -97,6 +97,7 @@ class Config:
 
     # Training hyperparameters/settings
     lr:                              float = 1e-3
+    weight_decay:                    int   = 0.01
     max_epochs:                      int   = 3000
     accumulate_grad_batches:         int   = 1
     val_check_interval:              int   = 1
@@ -106,7 +107,7 @@ class Config:
     devices:                         int = 1
     num_nodes:                       int = 1
     strategy:                        str = "auto"
-    precision:                       Literal[16, "16-mixed", "bf16-mixed", 32] = 32
+    precision:                       Literal[16, "16-mixed", "bf16-mixed", 32] = "bf16-mixed"
 
     # Checkpointing & logging
     logger:                          bool                    = False
@@ -163,7 +164,6 @@ def main(cfg: Config) -> None:
         model: GemNetFlow = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
 
     # print configuration file at rank 0
-    declare(f"Initated {cfg.regressor} architecutre as the velocity field regressor")
     declare(f">>> Training and model configurations:\n {OmegaConf.to_yaml(cfg)}")
 
     # configure model checkpoint callbacks
@@ -244,6 +244,7 @@ def main(cfg: Config) -> None:
     lightning = LightFlowMatch(
         model=model, 
         lr=cfg.lr,
+        weight_decay=cfg.weight_decay,
         mask_frzn_atoms=cfg.mask_frzn_atoms,
         rtol=cfg.rtol, 
         atol=cfg.atol,
