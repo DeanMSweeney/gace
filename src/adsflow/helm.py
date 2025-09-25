@@ -82,7 +82,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         
         self.log( # log train loss per epoch 
             "train/max_loss",
-            loss, 
+            max_loss, 
             on_step=True, 
             on_epoch=True,
             prog_bar=True, 
@@ -106,7 +106,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         
         self.log(
             "val/max_loss", 
-            loss, 
+            max_loss, 
             prog_bar=True, 
             batch_size=len(data.natoms),
             sync_dist=True,
