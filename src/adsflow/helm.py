@@ -69,7 +69,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
     # define training and validation methods 
     def training_step(self, data: Data, batch_idx):
         loss, max_loss = self._transport_loss(data)
-
+        
         self.log( # log train loss per epoch 
             "train/loss",
             loss, 
@@ -79,7 +79,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
             batch_size=len(data.natoms),
             sync_dist=True,
         )
-        
+    
         self.log( # log train loss per epoch 
             "train/max_loss",
             max_loss, 
@@ -89,13 +89,13 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
             batch_size=len(data.natoms),
             sync_dist=True,
         )
-
+        
         return loss
         
     
     def validation_step(self, data: Data, batch_idx):
         loss, max_loss = self._transport_loss(data)
-
+        
         self.log(
             "val/loss", 
             loss, 
