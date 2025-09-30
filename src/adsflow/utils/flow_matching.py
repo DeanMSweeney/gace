@@ -2,6 +2,8 @@
 import numpy as np 
 import itertools
 import ase
+import ase.io
+from ase import Atoms
 import torch
 from torch import Tensor
 import torch.nn as nn
@@ -130,11 +132,24 @@ class OptTransportMixin:
         )
         
         data.pos_generated = xt[-1]
-        
         mask = [data.fixed ==1]
         data.pos_generated[mask] = data.pos[mask]
-
         data.pos = input_data.pos
+        
+        if self.output_file: 
+              z_np = data.atomic_numbers.detach().cpu().numpy()
+              cell_np = data.cell.detach().cpu().numpy()
+              x1_np = data.pos_generated.detach().cpu().numpy()
+              
+              # Save to current directory
+              atoms = Atoms(
+                  positions=x1_np, # initial
+                  numbers=z_np,
+                  cell=cell_np,
+                  pbc=True,  # or (True,True,False) for a slab
+                )
+              ase.io.write(self.output_file, atoms)  # Cartesian
+              
         
         if hasattr(data, "pos_relaxed"):
               e_gen = __class__.pbc_aware_pos(
@@ -154,6 +169,5 @@ class OptTransportMixin:
               null_struc_rmse = torch.sqrt(__class__.masked_loss(a=e_null, b=torch.zeros_like(e_null), mask=self.free_atoms))
             
               return data, struc_rmse, null_struc_rmse
-      
         else: 
             return data
