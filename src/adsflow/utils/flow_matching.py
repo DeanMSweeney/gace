@@ -132,7 +132,7 @@ class OptTransportMixin:
         )
         
         data.pos_generated = xt[-1]
-        mask = [data.fixed ==1]
+        mask = (data.fixed ==1)
         data.pos_generated[mask] = data.pos[mask]
         data.pos = input_data.pos
         
