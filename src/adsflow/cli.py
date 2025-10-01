@@ -17,137 +17,32 @@ from omegaconf import OmegaConf, DictConfig, MISSING
 from dataclasses import dataclass, asdict
 from typing import Optional, Literal, Union, Tuple
 
-from adsflow.helm import LightFlowMatch
+from adsflow.lightning import LightFlowMatch
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
 from adsflow.models.equiformer_v2.equiformerv2_flow import EquiformerV2_Flow
 from adsflow.utils.lmdb_dataset import LazyLmdbDataset
 from adsflow.utils.utils import ship_data
+from adsflow.configs import Config
 
 from fairchem.core.datasets.lmdb_dataset import LmdbDataset
+from fairchem.core.preprocessing.atoms_to_graphs import AtomsToGraphs
 
+import ase 
+import ase.io
 
-
-@dataclass
-class Config:
-    """
-    This class integrates Hydra to build a dynamic hierarchical configruation 
-    for the model 
-
-    Args
-    _________
-
-    model_cfg: DictConfig 
-        Configuration file (.yaml) for the run,
-        including model selection and hyperparameters 
-    oc20_train: str 
-        File path to the training set 
-    oc20_val: str
-        File path to the validation set 
-    oc20_mini: str
-        Path to the oc20 100 dataset 
-    batch_size: int
-        Batch size for training 
-    num_workers: int
-        Cpu cores used for the DataLoader 
-    lr: float
-        Learning rate
-    max_epochs: int 
-        Max numner of trianing iterations
-    accumulate_grad_batches: int 
-        Number of gradients to accumulate before updating the weights 
-    accelerator: str
-        Device (cpu, gpu)
-    num_nodes: int
-        Number of nodes 
-    strategy: str 
-        Parallelization strategy => Default: "auto" 
-    precision: str 
-        Digit precision 
-    logger: bool
-        Whether to use WandB logger => Default: False
-    project: str 
-        Project name (for logging)
-    run_name: str
-        Iteration name (for logging/checkpointing)
-    ckpt_dir: str
-        File path for storing model checkpoints 
-    ckpt_path: str
-        Filepath to restart from trained model
-    mode: str
-        Run mode: Debug, train, eval, or prod => Default: "train"
-    seed: int
-        Seed for random number generators for reproducibility => Default: 42
-    flow_matching: bool 
-        Whether to perform force regression or velcoity field predictions => Default: True
-    from_noise: bool
-        Whether to sample x0 from noise or use initial geometries => Default: False
-    """
-    # Hydra composition entry for model hyperparameters
-    model_cfg: DictConfig = MISSING
-
-    # Dataset paths
-    oc20_train:                      Optional[str] = None
-    oc20_val:                        Optional[str] = None
-    oc20_test:                       Optional[str] = None
-    oc20_mini:                       Optional[str] = None
-
-    # DataLoader settings
-    batch_size:                      int = 8
-    num_workers:                     Optional[int] = None
-
-    # Training hyperparameters/settings
-    lr:                              float = 1e-3
-    weight_decay:                    int   = 0.01
-    max_epochs:                      int   = 3000
-    accumulate_grad_batches:         int   = 1
-    val_check_interval:              int   = 1
-
-    # Compute architecture
-    accelerator:                     str = "gpu"
-    devices:                         int = 1
-    num_nodes:                       int = 1
-    strategy:                        str = "auto"
-    precision:                       Literal[16, "16-mixed", "bf16-mixed", 32] = "bf16-mixed"
-
-    # Checkpointing & logging
-    logger:                          bool                    = False
-    project:                         str                     = "NAME_PROJ"
-    run_name:                        str                     = "NAME_RUN"
-    ckpt_dir:                        str                     = "checkpoints"
-    ckpt_path:                       Optional[str]           = None
-    track_grad_norms:                bool                    = False
-    run_id:                          str                     = None
-
-    # Model run mode
-    variant:                         Literal["refine", "forge"] = "refine"
-    mode:                            Literal["debug", "train", "eval", "generate"] = "train"
-    regressor:                       Literal["GemNet-OC", "EquiformerV2"] = "EquiformerV2"
-
-    # Sampler settings (ODEINT)
-    rtol:                            float           = 1e-7
-    atol:                            float           = 1e-9
-    ode_method:                      str             = "dopri5"
-
-    # Misc
-    seed:                            int            = 42
-    mask_frzn_atoms:                 bool           = True 
-    
 # print model/trianing config at rank 0 using decorator
 @rank_zero_only
 def declare(statement) -> None:
     print(statement)
     return 
 
-@hydra.main(version_base=None)
+@hydra.main(version_base=None, config_path=None, config_name=None)
 def main(cfg: Config) -> None:
-    # 1) instantiate Python defaults
+    # instantiate Python defaults
     defaults = Config()
+    defaults_cfg  = OmegaConf.create(asdict(defaults))
 
-    # 2) convert dataclass to dict, then to DictConfig
-    defaults_dict = asdict(defaults)
-    defaults_cfg  = OmegaConf.create(defaults_dict)
-
-    # 3) merge YAML-loaded cfg on top of defaults
+    # merge YAML-loaded cfg on top of defaults
     cfg = OmegaConf.merge(defaults_cfg, cfg)
 
     # seed for reproducibility & multi-gpu weight updates
@@ -211,7 +106,7 @@ def main(cfg: Config) -> None:
         pt = {"src": cfg.oc20_train}
         train_set = LazyLmdbDataset(pt)
         train_loader = DataLoader(
-            train_set, 
+            dataset=train_set, 
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
@@ -221,7 +116,7 @@ def main(cfg: Config) -> None:
         pv = {"src": cfg.oc20_val}
         val_set = LazyLmdbDataset(pv)
         val_loader = DataLoader(
-            val_set, 
+            dataset=val_set, 
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
@@ -232,14 +127,22 @@ def main(cfg: Config) -> None:
         ptst = {"src": cfg.oc20_test}
         test_set = LazyLmdbDataset(ptst)
         test_loader = DataLoader(
-            test_set, 
+            dataset=test_set, 
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
         )
-    elif cfg.mode == "generate": 
-        declare(">>> Activated Generation mode with user input 🧚‍♀️")
-
+    elif cfg.mode == "generate" and cfg.input_file: 
+        declare(">>> Activated Generation mode with single user input 🧚‍♀️")
+        atomic_struc = ase.io.read(cfg.input_file)
+        poscar_to_data = AtomsToGraphs(radius=12).convert(atoms=atomic_struc)
+        gen_loader = DataLoader(
+            dataset=poscar_to_data, 
+            batch_size=1,
+            num_workers=cfg.num_workers,
+            pin_memory=pin_memory,
+        )
+        
     # compile lightning module 
     lightning = LightFlowMatch(
         model=model, 
@@ -250,6 +153,7 @@ def main(cfg: Config) -> None:
         atol=cfg.atol,
         ode_method=cfg.ode_method,
         track_grad_norms=cfg.track_grad_norms,
+        output_file = cfg.output_file,
     )
 
     # compile W&B logger when logger is activated and generation mode is off 
@@ -296,9 +200,8 @@ def main(cfg: Config) -> None:
             ckpt_path=cfg.ckpt_path, # use for model training restart and evaluation
         )
     elif cfg.mode == "generate":
-        trainer.predict(model=lightning)
-    
-if __name__ == "__main__":
-    main()
-    
-   
+        trainer.predict(
+            model=lightning,
+            dataloaders=gen_loader,
+            ckpt_path=cfg.ckpt.path
+        )
