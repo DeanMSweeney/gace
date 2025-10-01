@@ -17,12 +17,12 @@ from omegaconf import OmegaConf, DictConfig, MISSING
 from dataclasses import dataclass, asdict
 from typing import Optional, Literal, Union, Tuple
 
-from adsflow.lightning import LightFlowMatch
+from adsflow.helm.lightning import LightFlowMatch
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
 from adsflow.models.equiformer_v2.equiformerv2_flow import EquiformerV2_Flow
 from adsflow.utils.lmdb_dataset import LazyLmdbDataset
 from adsflow.utils.utils import ship_data
-from adsflow.configs import Config
+from adsflow.helm.configure import Config
 
 from fairchem.core.datasets.lmdb_dataset import LmdbDataset
 from fairchem.core.preprocessing.atoms_to_graphs import AtomsToGraphs
@@ -36,7 +36,6 @@ def declare(statement) -> None:
     print(statement)
     return 
 
-@hydra.main(version_base=None, config_path=None, config_name=None)
 def main(cfg: Config) -> None:
     # instantiate Python defaults
     defaults = Config()
