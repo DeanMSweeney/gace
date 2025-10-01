@@ -67,7 +67,7 @@ class Config:
     oc20_mini:                       Optional[str] = None
 
     # DataLoader settings
-    batch_size:                      int = 8
+    batch_size:                      int = 1
     num_workers:                     Optional[int] = None
 
     # Training hyperparameters/settings
@@ -82,21 +82,23 @@ class Config:
     devices:                         int = 1
     num_nodes:                       int = 1
     strategy:                        str = "auto"
-    precision:                       Literal[16, "16-mixed", "bf16-mixed", 32] = "bf16-mixed"
+    precision:                       Literal[16, "16-mixed", "bf16-mixed", 32] = "32"
 
-    # Checkpointing & logging
+    # Logging
     logger:                          bool                    = False
     project:                         str                     = "NAME_PROJ"
     run_name:                        str                     = "NAME_RUN"
+    run_id:                          str                     = None
+    
+    # Model Checkpointing
     ckpt_dir:                        str                     = "checkpoints"
     ckpt_path:                       Optional[str]           = None
     track_grad_norms:                bool                    = False
-    run_id:                          str                     = None
 
     # Model run mode
     variant:                         Literal["refine", "forge"] = "refine"
-    mode:                            Literal["debug", "train", "eval", "generate"] = "train"
-    regressor:                       Literal["GemNet-OC", "EquiformerV2"] = "EquiformerV2"
+    mode:                            Literal["debug", "train", "eval", "generate"] = "generate"
+    regressor:                       Literal["GemNet-OC", "EquiformerV2"] = "GemNet-OC"
 
     # Sampler settings (ODEINT)
     rtol:                            float           = 1e-7

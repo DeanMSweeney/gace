@@ -136,7 +136,7 @@ def main(cfg: Config) -> None:
         atomic_struc = ase.io.read(cfg.input_file)
         poscar_to_data = AtomsToGraphs(radius=12).convert(atoms=atomic_struc)
         gen_loader = DataLoader(
-            dataset=poscar_to_data, 
+            dataset=[poscar_to_data], 
             batch_size=1,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
@@ -147,11 +147,12 @@ def main(cfg: Config) -> None:
         model=model, 
         lr=cfg.lr,
         weight_decay=cfg.weight_decay,
+        track_grad_norms=cfg.track_grad_norms,
         mask_frzn_atoms=cfg.mask_frzn_atoms,
         rtol=cfg.rtol, 
         atol=cfg.atol,
         ode_method=cfg.ode_method,
-        track_grad_norms=cfg.track_grad_norms,
+        input_file = cfg.input_file,
         output_file = cfg.output_file,
     )
 
@@ -202,5 +203,8 @@ def main(cfg: Config) -> None:
         trainer.predict(
             model=lightning,
             dataloaders=gen_loader,
-            ckpt_path=cfg.ckpt.path
+            ckpt_path=cfg.ckpt_path
         )
+        
+    elif dean == "dead":
+        trainer.predict("error")
