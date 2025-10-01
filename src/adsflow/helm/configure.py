@@ -89,11 +89,13 @@ class Config:
     project:                         str                     = "NAME_PROJ"
     run_name:                        str                     = "NAME_RUN"
     run_id:                          str                     = None
+    track_grad_norms:                bool                    = False
     
     # Model Checkpointing
     ckpt_dir:                        str                     = "checkpoints"
+    
+    # Restart model from checkpoint
     ckpt_path:                       Optional[str]           = None
-    track_grad_norms:                bool                    = False
 
     # Model run mode
     variant:                         Literal["refine", "forge"] = "refine"
