@@ -35,6 +35,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
             atol: float = 1e-9,
             ode_method: str = "dopri5",
             track_grad_norms: bool = False,
+            input_file=None,
             output_file=None,
         ):
         
@@ -49,6 +50,7 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         self.ode_method = ode_method
         self.track_grad_norms = track_grad_norms
         self.naive = True
+        self.input_file = input_file
         self.output_file = output_file
 
     def forward(self, data):
@@ -149,7 +151,9 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         return loss    
     
     def predict_step(self, data: Data): 
-        opt_graph = self.sampler(data)
+        t = torch.linspace(0., 1., 100, 
+                        device=data.pos.device, dtype=data.pos.dtype)
+        opt_graph = self.sampler(data, t=t)
         return opt_graph
     
     def configure_optimizers(self):
