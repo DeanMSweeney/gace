@@ -96,7 +96,7 @@ def main(cfg: Config) -> None:
             pin_memory=pin_memory,
         )
 
-        checkpoint_cb = [] # deactivate call backs fo debugging 
+        checkpoint_cb = [] # deactivate call backs for debugging 
 
     elif cfg.mode == "train" and cfg.oc20_train:
         declare(f">>> Activated Train mode with OC20: {cfg.oc20_train} 🦛")
