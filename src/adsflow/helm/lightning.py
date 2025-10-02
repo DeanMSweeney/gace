@@ -1,4 +1,5 @@
 import os
+import numpy as np
 import torch
 from torch import optim 
 from torch.cuda.amp import autocast
@@ -52,6 +53,11 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         self.naive = True
         self.input_file = input_file
         self.output_file = output_file
+        
+        self.test_rmse = []
+        self.test_null_rmse = []
+        self.test_loss = []
+        self.test_max_loss = []
 
     def forward(self, data):
         return self.model(data)
@@ -123,10 +129,23 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
         t = torch.linspace(0., 1., 100, 
                         device=data.pos.device, dtype=data.pos.dtype)
         opt_graph, struc_rmse, null_struc_rmse = self.sampler(data, t=t)
+        
+        self.test_rmse.append(struc_rmse.item())
+        self.test_null_rmse.append(null_struc_rmse.item())
+        self.test_loss.append(loss.item())
+        self.test_max_loss.append(max_loss.item())
 
         self.log(
             "test/loss", 
             loss, 
+            prog_bar=True, 
+            batch_size=len(data.natoms),
+            sync_dist=True,
+        )
+        
+        self.log(
+            "test/max_loss", 
+            max_loss, 
             prog_bar=True, 
             batch_size=len(data.natoms),
             sync_dist=True,
@@ -147,8 +166,30 @@ class LightFlowMatch(pl.LightningModule, OptTransportMixin):
             batch_size=len(data.natoms),
             sync_dist=True,
         )
-
+        
+        out_dir = self.trainer.default_root_dir
+        os.makedirs(out_dir, exist_ok=True)
+        
         return loss    
+    
+    
+    def on_test_epoch_end(self):
+        
+        # convert to numpy arrays
+        rmse = np.array(self.test_rmse)
+        null_rmse = np.array(self.test_null_rmse)
+        loss = np.array(self.test_loss)
+        max_loss = np.array(self.test_max_loss)
+        
+        out_dir = self.trainer.default_root_dir
+        os.makedirs(out_dir, exist_ok=True)
+        
+        # save individually
+        np.save(os.path.join(out_dir, "test_rmse.npy"), rmse)
+        np.save(os.path.join(out_dir, "test_null_rmse.npy"), null_rmse)
+        np.save(os.path.join(out_dir, "test_loss.npy"), loss)
+        np.save(os.path.join(out_dir, "test_max_loss.npy"), max_loss)
+        
     
     def predict_step(self, data: Data): 
         t = torch.linspace(0., 1., 100, 
