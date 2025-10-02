@@ -4,6 +4,7 @@ import itertools
 import ase
 import ase.io
 from ase import Atoms
+from ase.constraints import FixAtoms
 import torch
 from torch import Tensor
 import torch.nn as nn
@@ -11,6 +12,7 @@ import torch.nn.functional as F
 from torch_geometric.data import Data
 from torchdiffeq import odeint
 from typing import Optional, Literal, Union, Tuple
+
 
 
 class OptTransportMixin: 
@@ -130,27 +132,50 @@ class OptTransportMixin:
             atol=self.atol,
             method=self.ode_method,
         )
-        
-        data.pos_generated = xt[-1]
-        mask = (data.fixed ==1)
-        data.pos_generated[mask] = data.pos[mask]
+      
         data.pos = input_data.pos
+        data.pos_generated = xt[-1]
+        mask = (data.fixed == 1)
+        data.pos_generated[mask] = data.pos[mask]
         
         if self.output_file: 
               z_np = data.atomic_numbers.detach().cpu().numpy()
-              cell_np = data.cell.detach().cpu().numpy()
+              cell_np = data.cell.squeeze(0).detach().cpu().numpy()
               x1_np = data.pos_generated.detach().cpu().numpy()
+              x0_np = data.pos.detach().cpu().numpy()
+              xdft_np = data.pos_relaxed.detach().cpu().numpy()
+              f_np = data.fixed.detach().cpu().numpy()
               
               # Save to current directory
               atoms = Atoms(
                   positions=x1_np, # initial
                   numbers=z_np,
                   cell=cell_np,
-                  pbc=True,  # or (True,True,False) for a slab
+                  pbc=True,  # or (True, True, False) for a slab
                 )
+              atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
               ase.io.write(self.output_file, atoms)  # Cartesian
               
-        
+              # Save to current directory
+              atoms = Atoms(
+                  positions=x0_np, # initial
+                  numbers=z_np,
+                  cell=cell_np,
+                  pbc=True,  # or (True, True, False) for a slab
+                )
+              atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
+              ase.io.write(self.input_file, atoms)  # Cartesian
+              
+              # Save to current directory
+              atoms = Atoms(
+                  positions=xdft_np, # initial
+                  numbers=z_np,
+                  cell=cell_np,
+                  pbc=True,  # or (True, True, False) for a slab
+                )
+              atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
+              ase.io.write("relaxed.vasp", atoms)  # Cartesian
+              
         if hasattr(data, "pos_relaxed"):
               e_gen = __class__.pbc_aware_pos(
                   positions=data.pos_generated - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
@@ -158,15 +183,19 @@ class OptTransportMixin:
                   batch=data.batch,
                   naive=self.naive,
             )
+              
               e_null = __class__.pbc_aware_pos(
                   positions=data.pos - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
                   cell=data.cell,
                   batch=data.batch,
                   naive=self.naive,
             )
-
-              struc_rmse = torch.sqrt(__class__.masked_loss(a=e_gen, b=torch.zeros_like(e_gen), mask=self.free_atoms))
-              null_struc_rmse = torch.sqrt(__class__.masked_loss(a=e_null, b=torch.zeros_like(e_null), mask=self.free_atoms))
+              
+              struc_mse, _ = __class__.masked_loss(a=e_gen, b=torch.zeros_like(e_gen), mask=self.free_atoms)
+              struc_rmse = torch.sqrt(struc_mse)
+              
+              null_struc_mse, _ = __class__.masked_loss(a=e_null, b=torch.zeros_like(e_null), mask=self.free_atoms)
+              null_struc_rmse = torch.sqrt(null_struc_mse)
             
               return data, struc_rmse, null_struc_rmse
         else: 

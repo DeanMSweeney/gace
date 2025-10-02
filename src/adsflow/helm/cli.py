@@ -75,7 +75,7 @@ def main(cfg: Config) -> None:
         cfg.num_workers = max(1, os.cpu_count() - 2) # leave 2 cores free 
 
     if cfg.mode == "debug" and cfg.oc20_mini: 
-        declare(f">>> Activated Debug mode with OC20-mini: {cfg.oc20_mini} 🕷️")
+        declare(f">>> Activated Debug mode with OC20-mini: {cfg.oc20_mini} 🕷️") 
 
         # build trianing set 
         p = {"src": cfg.oc20_mini}
@@ -205,6 +205,3 @@ def main(cfg: Config) -> None:
             dataloaders=gen_loader,
             ckpt_path=cfg.ckpt_path
         )
-        
-    elif dean == "dead":
-        trainer.predict("error")
