@@ -14,7 +14,6 @@ POSCAR*
 *.sif
 *.ckpt*
 *.swp
-*.sh
 
 # Folders
 '$HOME'/
