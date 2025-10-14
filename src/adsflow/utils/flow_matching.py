@@ -164,8 +164,11 @@ class OptTransportMixin:
                   pbc=True,  # or (True, True, False) for a slab
                 )
               atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
-              ase.io.write(self.input_file, atoms)  # Cartesian
-              
+              if self.input_file:
+                  ase.io.write(self.input_file, atoms)  # Cartesian
+              else: 
+                  ase.io.write("struc_x0.vasp", atoms)
+                  
               # Save to current directory
               atoms = Atoms(
                   positions=xdft_np, # initial
