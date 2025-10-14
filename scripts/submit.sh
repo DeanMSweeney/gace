@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -A chm250007p                      # your project/account
+#SBATCH -A chm250015p                      # your project/account
 #SBATCH -p GPU                             # GPU partition
 #SBATCH --nodes=1                          # 1 node
 #SBATCH --ntasks-per-node=8                # one process per node
@@ -37,6 +37,9 @@ export WANDB_ARTIFACT_DIR=$MY_WANDB_ROOT/artifacts
 # (optional) where wandb caches things like artifact definitions
 export WANDB_CACHE_DIR=$MY_WANDB_ROOT/cache
 
+# disable active logging 
+export WANDB_MODE=offline
+
 # Run command
 srun singularity exec --nv \
     --bind "${PROJECT_DIR}":/workspace \
@@ -48,10 +51,9 @@ srun singularity exec --nv \
   	$WANDB_ARTIFACT_DIR \
   	$WANDB_CACHE_DIR
       cd /workspace${SLURM_SUBMIT_DIR#$PROJECT_DIR} && \
-      python main.py \
+      python train.py \
       --config-path conf \
       --config-name equ_config \
-      mode=train \
       num_nodes=1 \
       devices=8 \
       logger=True \
