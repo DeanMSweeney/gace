@@ -31,8 +31,14 @@ ckpt_path: "checkpoints/equiformer-model-epoch=22.ckpt"
 track_grad_norms: true
 run_id: null
 
+# sampler setings
+rtol: 1e-9
+atol: 1e-12
+ode_method: "euler"
+
 # computer arch
 accelerator: "gpu"
 devices: 8
 num_nodes: 1
+strategy: "ddp_find_unused_parameters_false"
 precision: "bf16-mixed"

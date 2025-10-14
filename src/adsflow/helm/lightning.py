@@ -5,14 +5,14 @@ from torch import optim
 from torch.cuda.amp import autocast
 from torch.optim.lr_scheduler import LinearLR, ExponentialLR, ReduceLROnPlateau, SequentialLR
 import torch.nn as nn
-import pytorch_lightning as pl
+from lightning.pytorch import LightningModule
 from torch_geometric.data import Data
 
 from adsflow.utils.flow_matching import OptTransportMixin
 from adsflow.utils.utils import ship_data
 
 
-class LightFlowMatch(pl.LightningModule, OptTransportMixin):
+class LightFlowMatch(LightningModule, OptTransportMixin):
     """
     This class defines the training algorithm for the conditional flow matching model using optimal transport 
     
