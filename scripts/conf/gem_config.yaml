@@ -16,20 +16,18 @@ oc20_test:  "/workspace/datasets/mini/data_refined.lmdb"
 # training hyperparameters/settings
 batch_size: 16
 num_workers: 8
-lr: 6e-4
+lr: 0.0002
 weight_decay: 1e-3
 max_epochs: 3000
 accumulate_grad_batches: 2
-val_check_interval: 1.0
 
 # checkpointing/logging
 logger: false
 project: "adsflow"
-run_name: "gemnet-model"
-ckpt_dir: "checkpoints"
+run_name: "gemnet-oc"
 ckpt_path: "checkpoints/gemnet-model-epoch=115.ckpt"
 track_grad_norms: true
-run_id: "14vps70f"
+run_id: null
 
 # sampler setings
 rtol: 1e-9
@@ -40,9 +38,4 @@ ode_method: "euler"
 accelerator: "gpu"
 devices: 8
 num_nodes: 1
-strategy: "ddp_find_unused_parameters_false"
 precision: "bf16-mixed"
-
-# misc
-mask_frzn_atoms: true
-output_file: null
