@@ -16,8 +16,8 @@ oc20_test:  "/workspace/datasets/mini/data_refined.lmdb"
 # training hyperparameters/settings
 batch_size: 16
 num_workers: 8
-lr: 0.0002
-weight_decay: 0.10
+lr: 6e-4
+weight_decay: 1e-3
 max_epochs: 3000
 accumulate_grad_batches: 2
 val_check_interval: 1.0
@@ -27,9 +27,9 @@ logger: false
 project: "adsflow"
 run_name: "gemnet-model"
 ckpt_dir: "checkpoints"
-ckpt_path: null
+ckpt_path: "checkpoints/gemnet-model-epoch=115.ckpt"
 track_grad_norms: true
-run_id: null
+run_id: "14vps70f"
 
 # sampler setings
 rtol: 1e-9
@@ -45,3 +45,4 @@ precision: "bf16-mixed"
 
 # misc
 mask_frzn_atoms: true
+output_file: null
