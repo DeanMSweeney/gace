@@ -145,17 +145,16 @@ def main(cfg: Config) -> None:
     # compile lightning module 
     lightning = LightFlowMatch(
         model=model, 
-        lr=cfg.lr,
-        weight_decay=cfg.weight_decay,
         track_grad_norms=cfg.track_grad_norms,
         mask_frzn_atoms=cfg.mask_frzn_atoms,
         rtol=cfg.rtol, 
         atol=cfg.atol,
         ode_method=cfg.ode_method,
-        input_file = cfg.input_file,
-        output_file = cfg.output_file,
+        input_file=cfg.input_file,
+        output_file=cfg.output_file,
+        **cfg.optimizer_hparams,
     )
-
+    
     # compile W&B logger when logger is activated and generation mode is off 
     if cfg.logger and cfg.mode != "generate": 
         logger = WandbLogger(
