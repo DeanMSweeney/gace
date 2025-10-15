@@ -99,7 +99,7 @@ class Config:
     project:                         str                     = "NAME_PROJ"
     run_name:                        str                     = "NAME_RUN"
     run_id:                          str                     = None
-    track_grad_norms:                bool                    = False
+    track_grad_norms:                bool                    = True
     
     # Model Checkpointing
     ckpt_dir:                        str                     = "checkpoints"
