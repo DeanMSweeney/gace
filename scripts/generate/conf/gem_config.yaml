@@ -13,7 +13,7 @@ input_file: "input_struc.vasp"
 #output_file: "gen_struc.vasp"
 
 # restart from model ckpt
-ckpt_path: "gauntlet-smart-epoch=78.ckpt"
+ckpt_path: "gemnet-model-epoch=115.ckpt"
 
 # sampler setings
 rtol: 1e-9
