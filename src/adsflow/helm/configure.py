@@ -84,7 +84,7 @@ class Config:
     batch_size:                      int = 1
     num_workers:                     Optional[int] = None
     accumulate_grad_batches:         int   = 1
-    val_check_interval:              int   = 1
+    val_check_interval:              int   = 1.0
     max_epochs:                      int   = 3000
 
     # Compute architecture
