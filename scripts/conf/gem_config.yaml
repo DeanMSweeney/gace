@@ -7,7 +7,7 @@ defaults:
 mode: "train"
 regressor: "GemNet-OC"
 
-# dataset info
+# datasets
 oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data_refined.lmdb"
 oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data_refined.lmdb"
 oc20_mini:  "/workspace/datasets/mini/data.lmdb"
@@ -29,7 +29,10 @@ optimizer_hparams:
 logger: false
 project: "adsflow"
 run_name: "gemnet-oc"
-ckpt_path: "checkpoints/gemnet-model-epoch=115.ckpt"
+
+# restart run 
+ckpt_path: null
+run_id: null # log id from wandb
 
 # computer arch
 accelerator: "gpu"
