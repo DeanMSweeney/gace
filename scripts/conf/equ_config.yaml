@@ -7,7 +7,7 @@ defaults:
 mode: "train"
 regressor: "EquiformerV2"
 
-# dataset infota_refin
+# datasets
 oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data_refined.lmdb"
 oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data_refined.lmdb"
 oc20_mini:  "/workspace/datasets/mini/data.lmdb"
@@ -16,15 +16,19 @@ oc20_test:  "/workspace/datasets/mini/data_refined.lmdb"
 # training hyperparameters/settings
 batch_size: 8
 num_workers: 8
-lr: 0.0002
-weight_decay: 0.001
+max_epochs: 3000
 accumulate_grad_batches: 4
+
+optimizer_hparams:
+  weight_decay: 0.10
+  lr: 0.0002
+  lr_scheduler: "cosine_w_warmup"
+  num_cycles: 0.50
 
 # checkpointing/logging
 logger: false
 project: "adsflow"
 run_name: "equiformer-model"
-track_grad_norms: true
 
 # restart run 
 ckpt_path: "checkpoints/equiformer-model-epoch=22.ckpt"

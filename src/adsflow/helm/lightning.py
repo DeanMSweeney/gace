@@ -3,13 +3,16 @@ import numpy as np
 import torch
 from torch import optim 
 from torch.cuda.amp import autocast
-from torch.optim.lr_scheduler import LinearLR, ExponentialLR, ReduceLROnPlateau, SequentialLR
+from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingLR, PolynomialLR
 import torch.nn as nn
 from lightning.pytorch import LightningModule
 from torch_geometric.data import Data
+from transformers import get_cosine_schedule_with_warmup, get_polynomial_decay_schedule_with_warmup
 
 from adsflow.utils.flow_matching import OptTransportMixin
 from adsflow.utils.utils import ship_data
+
+from typing import Optional, Literal, Union, Tuple
 
 
 class LightFlowMatch(LightningModule, OptTransportMixin):
@@ -28,20 +31,19 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
     def __init__(
             self, 
             model,
-            variant: str = "refine",
-            mask_frzn_atoms: bool = True,
-            lr: int = 1e-3, 
-            weight_decay: int = 0.001,
+            variant: str="refine",
+            mask_frzn_atoms: bool=True,
             rtol: float = 1e-7, 
             atol: float = 1e-9,
             ode_method: str = "dopri5",
-            track_grad_norms: bool = False,
+            track_grad_norms: bool=False,
             input_file=None,
             output_file=None,
+            **hparams,
         ):
         
         super().__init__()
-        self.save_hyperparameters(ignore="model")  # all __init__ args saved as hyperparameters
+        self.save_hyperparameters(ignore="model", "mask_frzn_atoms", "rtol", "atol", "ode_method", "track_grad_norms")  # all __init__ args saved as hyperparameters
         self.model = model
         self.loss_fn = nn.MSELoss() # mean squared error loss function 
         self.variant = variant
@@ -53,11 +55,6 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
         self.naive = True
         self.input_file = input_file
         self.output_file = output_file
-        
-        self.test_rmse = []
-        self.test_null_rmse = []
-        self.test_loss = []
-        self.test_max_loss = []
 
     def forward(self, data):
         return self.model(data)
@@ -130,11 +127,6 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
                         device=data.pos.device, dtype=data.pos.dtype)
         opt_graph, struc_rmse, null_struc_rmse = self.sampler(data, t=t)
         
-        self.test_rmse.append(struc_rmse.item())
-        self.test_null_rmse.append(null_struc_rmse.item())
-        self.test_loss.append(loss.item())
-        self.test_max_loss.append(max_loss.item())
-
         self.log(
             "test/loss", 
             loss, 
@@ -173,44 +165,61 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
         return loss    
     
     
-    def on_test_epoch_end(self):
-        
-        # convert to numpy arrays
-        rmse = np.array(self.test_rmse)
-        null_rmse = np.array(self.test_null_rmse)
-        loss = np.array(self.test_loss)
-        max_loss = np.array(self.test_max_loss)
-        
-        out_dir = self.trainer.default_root_dir
-        os.makedirs(out_dir, exist_ok=True)
-        
-        # save individually
-        np.save(os.path.join(out_dir, "test_rmse.npy"), rmse)
-        np.save(os.path.join(out_dir, "test_null_rmse.npy"), null_rmse)
-        np.save(os.path.join(out_dir, "test_loss.npy"), loss)
-        np.save(os.path.join(out_dir, "test_max_loss.npy"), max_loss)
-        
-    
-    def predict_step(self, data: Data): 
-        t = torch.linspace(0., 1., 100, 
-                        device=data.pos.device, dtype=data.pos.dtype)
-        opt_graph = self.sampler(data, t=t)
-        return opt_graph
-    
     def configure_optimizers(self):
-        optimizer = optim.AdamW(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
+        optimizer = optim.AdamW(
+            self.parameters(), 
+            lr=self.hparams.lr, 
+            betas=self.hparams.betas, 
+            weight_decay=self.hparams.weight_decay,
+            eps=self.hparams.eps,
+        )
+        
+        interval = "step"
+        num_training_steps = int(self.trainer.estimated_stepping_batches) # estimated number of trainig steps 
+        num_warmup_steps = int(self.hparams.warmup_proportion * num_training_steps)
+        
+        if self.hparams.lr_scheduler == "cosine_w_warmup":
+            scheduler = get_cosine_schedule_with_warmup(
+                optimizer, 
+                num_warmup_steps=num_warmup_steps,
+                num_training_steps=num_training_steps,
+                num_cycles=self.hparams.num_cycles
+            )
+        
+        if self.hparams.lr_scheduler == "cosine_annealing":
+            scheduler = CosineAnnealingLR(
+                optimizer, 
+                T_max=num_training_steps,
+                eta_min=1e-3*self.hparams.lr,
+            )
+        
+        elif self.hparams.lr_scheduler == "polynomial_w_warmup":
+            if self.hparams.num_decay_steps > 0:
+                anneal_total_steps = self.hparams.num_decay_steps + num_warmup_steps
+            else:
+                anneal_total_steps = num_training_steps
+            scheduler = get_polynomial_decay_schedule_with_warmup(
+                optimizer, 
+                num_warmup_steps=num_warmup_steps, 
+                num_training_steps=anneal_total_steps,
+                lr_end=1e-3*self.hparams.lr,
+                power=self.hparams.power
+            )
 
+        elif  self.hparams.lr_scheduler == "polynomial_decay":
+            scheduler = PolynomialLR(
+                optimizer=optimizer, 
+                total_iters=num_training_steps, 
+                power=self.hparams.power,
+            )
+        else:
+            raise ValueError(f"Scheduler not specified")
+ 
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
-                "scheduler": ReduceLROnPlateau(
-                    optimizer=optimizer, 
-                    mode="min", 
-                    factor=0.50,
-                    patience=2,
-                    min_lr=1e-8,
-                ),
-                "monitor": "val/loss",
+                "scheduler": scheduler,
+                "interval": interval,
                 "frequency": 1, 
             }
         }
