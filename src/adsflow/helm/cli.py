@@ -6,9 +6,11 @@ from torch.cuda.amp import autocast
 from torch.optim.lr_scheduler import LinearLR, ExponentialLR, ReduceLROnPlateau, SequentialLR
 import torch.nn as nn
 import pytorch_lightning as pl
-from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.utilities import rank_zero_only
+import lightning.pytorch as pl
+from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
+from lightning.pytorch.utilities import rank_zero_only
+from lightning.pytorch.callbacks import LearningRateMonitor
 from torch_geometric.loader import DataLoader
 from torch_geometric.data import Data
 
@@ -61,7 +63,7 @@ def main(cfg: Config) -> None:
     declare(f">>> Training and model configurations:\n {OmegaConf.to_yaml(cfg)}")
 
     # configure model checkpoint callbacks
-    checkpoint_cb = [(ModelCheckpoint(
+    callbacks = [(ModelCheckpoint(
         dirpath=cfg.ckpt_dir,
         filename=f"{cfg.run_name}-{{epoch:02d}}",
         monitor="val/loss",
@@ -69,6 +71,7 @@ def main(cfg: Config) -> None:
         save_top_k=3,
         save_last=True,
     ))]
+    callbacks.append(LearningRateMonitor(logging_interval="epoch"))
 
     # load datasets
     if cfg.num_workers is None: 
@@ -96,7 +99,7 @@ def main(cfg: Config) -> None:
             pin_memory=pin_memory,
         )
 
-        checkpoint_cb = [] # deactivate call backs for debugging 
+        #callbacks = [] # deactivate call backs for debugging 
 
     elif cfg.mode == "train" and cfg.oc20_train:
         declare(f">>> Activated Train mode with OC20: {cfg.oc20_train} 🦛")
@@ -171,7 +174,7 @@ def main(cfg: Config) -> None:
     # define trainer 
     trainer = pl.Trainer(
         logger=logger,
-        callbacks=checkpoint_cb,
+        callbacks=callbacks,
         accelerator=cfg.accelerator,
         devices=cfg.devices,
         num_nodes=cfg.num_nodes,
