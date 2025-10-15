@@ -43,7 +43,7 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
         ):
         
         super().__init__()
-        self.save_hyperparameters(ignore="model", "mask_frzn_atoms", "rtol", "atol", "ode_method", "track_grad_norms")  # all __init__ args saved as hyperparameters
+        self.save_hyperparameters(ignore=["model", "mask_frzn_atoms", "rtol", "atol", "ode_method", "track_grad_norms"])  # all __init__ args saved as hyperparameters
         self.model = model
         self.loss_fn = nn.MSELoss() # mean squared error loss function 
         self.variant = variant
@@ -178,7 +178,8 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
         num_training_steps = int(self.trainer.estimated_stepping_batches) # estimated number of trainig steps 
         num_warmup_steps = int(self.hparams.warmup_proportion * num_training_steps)
         
-        if self.hparams.lr_scheduler == "cosine_w_warmup":
+        lr_scheduler = str(self.hparams.lr_scheduler)
+        if lr_scheduler == "cosine_w_warmup":
             scheduler = get_cosine_schedule_with_warmup(
                 optimizer, 
                 num_warmup_steps=num_warmup_steps,
@@ -186,14 +187,14 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
                 num_cycles=self.hparams.num_cycles
             )
         
-        if self.hparams.lr_scheduler == "cosine_annealing":
+        elif lr_scheduler == "cosine_annealing":
             scheduler = CosineAnnealingLR(
                 optimizer, 
                 T_max=num_training_steps,
                 eta_min=1e-3*self.hparams.lr,
             )
         
-        elif self.hparams.lr_scheduler == "polynomial_w_warmup":
+        elif lr_scheduler == "polynomial_w_warmup":
             if self.hparams.num_decay_steps > 0:
                 anneal_total_steps = self.hparams.num_decay_steps + num_warmup_steps
             else:
@@ -206,7 +207,7 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
                 power=self.hparams.power
             )
 
-        elif  self.hparams.lr_scheduler == "polynomial_decay":
+        elif lr_scheduler == "polynomial_decay":
             scheduler = PolynomialLR(
                 optimizer=optimizer, 
                 total_iters=num_training_steps, 

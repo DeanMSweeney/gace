@@ -4,17 +4,17 @@ from typing import Optional, Literal, Union, Tuple
 
 
 @dataclass 
-class OptHyperparameters:
+class OptimizerConfig:
     
     # Training hyperparameters/settings
     lr:                              float = 1e-3
-    weight_decay:                    int   = 0.0001
+    weight_decay:                    float   = 0.0001
     betas:                           Tuple[float, float]=(0.9, 0.99)
     eps:                             float=1e-8
     lr_scheduler:                    Literal["polynomial_decay", "cosine_w_warmup", "cosine_annealing", "polynomial_w_warmup", "polynomial_decay"] = "cosine_w_warmup"
     num_cycles:                      float=0.50
     warmup_proportion:               float=0.01
-    eta_min:                         int=0.0
+    eta_min:                         float=0.0
     power:                           float=1.0
     
 @dataclass
@@ -72,7 +72,7 @@ class Config:
     """
     # Hydra composition entry for model hyperparameters
     model_cfg: DictConfig = MISSING
-    optimizer_hparams: OptHyperparameters = field(default_factory=OptimizerConfig)
+    optimizer_hparams: OptimizerConfig = field(default_factory=OptimizerConfig)
 
     # Dataset paths
     oc20_train:                      Optional[str] = None
