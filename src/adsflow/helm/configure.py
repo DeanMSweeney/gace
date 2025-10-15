@@ -1,7 +1,22 @@
 from omegaconf import OmegaConf, DictConfig, MISSING
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Optional, Literal, Union, Tuple
 
+
+@dataclass 
+class OptHyperparameters:
+    
+    # Training hyperparameters/settings
+    lr:                              float = 1e-3
+    weight_decay:                    int   = 0.0001
+    betas:                           Tuple[float, float]=(0.9, 0.99)
+    eps:                             float=1e-8
+    lr_scheduler:                    Literal["polynomial_decay", "cosine_w_warmup", "cosine_annealing", "polynomial_w_warmup", "polynomial_decay"] = "cosine_w_warmup"
+    num_cycles:                      float=0.50
+    warmup_proportion:               float=0.01
+    eta_min:                         int=0.0
+    power:                           float=1.0
+    
 @dataclass
 class Config:
     """
@@ -24,8 +39,6 @@ class Config:
         Batch size for training 
     num_workers: int
         Cpu cores used for the DataLoader 
-    lr: float
-        Learning rate
     max_epochs: int 
         Max numner of trianing iterations
     accumulate_grad_batches: int 
@@ -59,6 +72,7 @@ class Config:
     """
     # Hydra composition entry for model hyperparameters
     model_cfg: DictConfig = MISSING
+    optimizer_hparams: OptHyperparameters = field(default_factory=OptimizerConfig)
 
     # Dataset paths
     oc20_train:                      Optional[str] = None
@@ -69,20 +83,16 @@ class Config:
     # DataLoader settings
     batch_size:                      int = 1
     num_workers:                     Optional[int] = None
-
-    # Training hyperparameters/settings
-    lr:                              float = 1e-3
-    weight_decay:                    int   = 0.01
-    max_epochs:                      int   = 3000
     accumulate_grad_batches:         int   = 1
     val_check_interval:              int   = 1
+    max_epochs:                      int   = 3000
 
     # Compute architecture
     accelerator:                     str = "gpu"
     devices:                         int = 1
     num_nodes:                       int = 1
     strategy:                        str = "auto"
-    precision:                       Literal[16, "16-mixed", "bf16-mixed", 32] = "32"
+    precision:                       Literal[16, "16-mixed", "bf16-mixed", 32] = "bf16-mixed"
 
     # Logging
     logger:                          bool                    = False
