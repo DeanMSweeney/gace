@@ -16,6 +16,7 @@ class OptimizerConfig:
     warmup_proportion:               float=0.01
     eta_min:                         float=0.0
     power:                           float=1.0
+    l_weight:                        float=0.50 
     
 @dataclass
 class Config:

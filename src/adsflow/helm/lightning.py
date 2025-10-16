@@ -60,15 +60,20 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
         return self.model(data)
     
     def _transport_loss(self, input_data: Data) -> torch.Tensor: 
-
-        data, u = self.path(input_data=input_data)
-        u_hat = self(data) # N, 3
-
+        
         if self.mask_frzn_atoms and self.variant == "refine":
+            data, u = self.path(input_data=input_data)
+            u_hat = self(data) # N, 3
             self.free_atoms = (1 - data.fixed).unsqueeze(1) # N
             loss, max_loss = self.masked_loss(a=u_hat, b=u, mask=self.free_atoms) 
-        else: 
-            loss = self.loss_fn(u_hat, u)  
+        
+        elif self.variant == "forge":
+            data, u1, u2 = self.path(input_data=input_data)
+            u1_hat, u2_hat = self(data)
+            u1_loss = self.loss_fn(u1_hat, u1) 
+            u2_loss = self.loss_fn(u2_hat, u2)
+            loss = u1_loss * self.hparams.l_weight + u2_loss * (1 - self.hparams.l_weight)
+            
         return loss, max_loss
     
     # define training and validation methods 

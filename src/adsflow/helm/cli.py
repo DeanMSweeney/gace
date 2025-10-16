@@ -54,6 +54,7 @@ def main(cfg: Config) -> None:
     pin_memory = True if cfg.accelerator == "gpu" else False # configured for GPU
 
     # build model with provided configuration file
+    cfg.model_cfg.variant = cfg.variant
     if cfg.regressor == "EquiformerV2":
         model: EquiformerV2_Flow = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
     elif cfg.regressor == "GemNet-OC":
@@ -148,6 +149,7 @@ def main(cfg: Config) -> None:
     # compile lightning module 
     lightning = LightFlowMatch(
         model=model, 
+        variant=cfg.variant,
         track_grad_norms=cfg.track_grad_norms,
         mask_frzn_atoms=cfg.mask_frzn_atoms,
         rtol=cfg.rtol, 
