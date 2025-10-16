@@ -79,7 +79,7 @@ class OptTransportMixin:
 
         x1 = data.pos_relaxed.clone() # sample relaxed positions x1 ~ p(x) (final)
 
-        if from_noise or variant == "Forge":
+        if from_noise or variant == "forge":
                 x0 = torch.randn_like(x1) # sample noise 
         else:
                 x0 = data.pos.clone() # sample initial positions and discard x0 ~ q(x) (initial)
