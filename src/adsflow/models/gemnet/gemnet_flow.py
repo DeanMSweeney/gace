@@ -204,6 +204,7 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         num_after_skip: int,
         num_concat: int,
         num_atom: int,
+        variant: str="refine",
         num_targets: int = 1,
         num_atom_emb_layers: int = 0,
         num_global_out_layers: int = 2,
@@ -280,6 +281,7 @@ class GemNetFlow(nn.Module, GraphModelMixin):
         self.flow_matching = flow_matching
         self.regress_forces=True
         self.direct_forces=True
+        self.varian = variant 
         
         # initialize basis function with input parameters
         self.init_basis_functions(

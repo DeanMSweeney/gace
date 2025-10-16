@@ -67,26 +67,21 @@ from .layers.transformer_block import (
     TransBlockV2, 
 )
 from .layers.input_block import EdgeDegreeEmbedding
-
-# Statistics of IS2RE 100K 
-_AVG_NUM_NODES  = 77.81317
-_AVG_DEGREE     = 23.395238876342773    # IS2RE: 100k, max_radius = 5, max_neighbors = 100
-
 @registry.register_model("equiformer_v2")
-class EquiformerV2_Flow(BaseModel):
+class EquiformerV2_OC20(BaseModel):
     """
     Equiformer with graph attention built upon SO(2) convolution and feedforward network built upon S2 activation
 
     Args:
         use_pbc (bool):         Use periodic boundary conditions
-        flow_matching (bool):   Compute velocity
+        regress_forces (bool):  Compute forces
         otf_graph (bool):       Compute graph On The Fly (OTF)
         max_neighbors (int):    Maximum number of neighbors per atom
         max_radius (float):     Maximum distance between nieghboring atoms in Angstroms
         max_num_elements (int): Maximum atomic number
 
-        num_layers (int):           Number of layers in the GNN
-        sphere_channels (int):      Number of spherical channels (one set per resolution)
+        num_layers (int):             Number of layers in the GNN
+        sphere_channels (int):        Number of spherical channels (one set per resolution)
         attn_hidden_channels (int): Number of hidden channels used during SO(2) graph attention
         num_heads (int):            Number of attention heads
         attn_alpha_head (int):      Number of channels for alpha vector in each attention head
@@ -122,11 +117,11 @@ class EquiformerV2_Flow(BaseModel):
     """
     def __init__(
         self,
-        num_atoms=1,      # not used
-        bond_feat_dim=1,  # not used
-        num_targets=1,    # not used
+        num_atoms,      # not used
+        bond_feat_dim,  # not used
+        num_targets,    # not used
         use_pbc=True,
-        flow_matching=True,
+        regress_forces=True,
         otf_graph=True,
         max_neighbors=500,
         max_radius=5.0,
@@ -167,15 +162,12 @@ class EquiformerV2_Flow(BaseModel):
         drop_path_rate=0.05, 
         proj_drop=0.0, 
 
-        weight_init='normal', 
-        
-        time_n_freqs: int=16,
+        weight_init='normal'
     ):
         super().__init__()
 
         self.use_pbc = use_pbc
-        self.flow_matching = flow_matching
-        self.regress_forces = self.flow_matching
+        self.regress_forces = regress_forces
         self.otf_graph = otf_graph
         self.max_neighbors = max_neighbors
         self.max_radius = max_radius
@@ -226,23 +218,13 @@ class EquiformerV2_Flow(BaseModel):
 
         self.device = 'cpu' #torch.cuda.current_device()
 
-        self.grad_velocity = False
+        self.grad_forces = False
         self.num_resolutions = len(self.lmax_list)
         self.sphere_channels_all = self.num_resolutions * self.sphere_channels
-
-        # Precompute the frequency as multipliers as a buffer, register time_freq as an attribute
-        self.register_buffer(
-            'time_freqs', 
-            torch.arange(1, time_n_freqs + 1) * torch.pi,
-            persistent=False 
-        ) 
         
         # Weights for message initialization
         self.sphere_embedding = nn.Embedding(self.max_num_elements, self.sphere_channels_all)
         
-        # Initialize time embedding 
-        self.time_emb = nn.Linear(2 * time_n_freqs, self.sphere_channels)
-
         # Initialize the function used to measure the distances between atoms
         assert self.distance_function in [
             'gaussian',
@@ -291,7 +273,7 @@ class EquiformerV2_Flow(BaseModel):
                     )
                 )
             self.SO3_grid.append(SO3_m_grid)
-    
+
         # Edge-degree embedding
         self.edge_degree_embedding = EdgeDegreeEmbedding(
             self.sphere_channels,
@@ -340,10 +322,8 @@ class EquiformerV2_Flow(BaseModel):
             self.blocks.append(block)
 
         
-        # Output blocks for energy and velocity
+        # Output blocks for energy and forces
         self.norm = get_normalization_layer(self.norm_type, lmax=max(self.lmax_list), num_channels=self.sphere_channels)
-        
-        # Energy prediciton head
         self.energy_block = FeedForwardNetwork(
             self.sphere_channels,
             self.ffn_hidden_channels, 
@@ -356,9 +336,8 @@ class EquiformerV2_Flow(BaseModel):
             self.use_grid_mlp,
             self.use_sep_s2_act
         )
-        if self.flow_matching:
-            # Force predicition head
-            self.velocity_block = SO2EquivariantGraphAttention(
+        if self.regress_forces:
+            self.force_block = SO2EquivariantGraphAttention(
                 self.sphere_channels,
                 self.attn_hidden_channels,
                 self.num_heads, 
@@ -384,15 +363,6 @@ class EquiformerV2_Flow(BaseModel):
             
         self.apply(self._init_weights)
         self.apply(self._uniform_init_rad_func_linear_weights)
-    
-    def process_time_embeds(self, t:torch.Tensor):
-        """
-        Convert t of shape [batch_size, 1] (or [batch_size]) into
-        a [batch_size, 2*time_n_freqs] vector of [cos, sin] features.
-        """
-        t = self.time_freqs * t                     # (bz, self.time_n_freqs)
-        t = torch.cat((t.cos(), t.sin()), dim=-1)   # (bz, 2*self.time_n_freqs)
-        return t
 
 
     @conditional_grad(torch.enable_grad())
@@ -404,9 +374,7 @@ class EquiformerV2_Flow(BaseModel):
         atomic_numbers = data.atomic_numbers.long()
         num_atoms = len(atomic_numbers)
         pos = data.pos
-        t = data.t # extract time 
 
-        # Build graph 
         (
             edge_index,
             edge_distance,
@@ -443,19 +411,16 @@ class EquiformerV2_Flow(BaseModel):
             self.dtype,
         )
 
-        # Time embedding 
-        time_embeds = self.time_emb(self.process_time_embeds(t))
         offset_res = 0
         offset = 0
         # Initialize the l = 0, m = 0 coefficients for each resolution
         for i in range(self.num_resolutions):
             if self.num_resolutions == 1:
-                x.embedding[:, offset_res, :] = self.sphere_embedding(atomic_numbers) + time_embeds
-                
+                x.embedding[:, offset_res, :] = self.sphere_embedding(atomic_numbers)
             else:
                 x.embedding[:, offset_res, :] = self.sphere_embedding(
                     atomic_numbers
-                    )[:, offset : offset + self.sphere_channels] + time_embeds 
+                    )[:, offset : offset + self.sphere_channels]
             offset = offset + self.sphere_channels
             offset_res = offset_res + int((self.lmax_list[i] + 1) ** 2)
 
@@ -473,7 +438,7 @@ class EquiformerV2_Flow(BaseModel):
             atomic_numbers,
             edge_distance,
             edge_index)
-        x.embedding = x.embedding + edge_degree.embedding 
+        x.embedding = x.embedding + edge_degree.embedding
 
         ###############################################################
         # Update spherical node embeddings
@@ -492,7 +457,7 @@ class EquiformerV2_Flow(BaseModel):
         x.embedding = self.norm(x.embedding)
 
         ###############################################################
-        # Energy head (unused)
+        # Energy estimation
         ###############################################################
         node_energy = self.energy_block(x) 
         node_energy = node_energy.embedding.narrow(1, 0, 1)
@@ -501,27 +466,27 @@ class EquiformerV2_Flow(BaseModel):
         energy = energy / _AVG_NUM_NODES
 
         ###############################################################
-        # Velocity head
+        # Force estimation
         ###############################################################
-        if self.flow_matching:
-            velocity = self.velocity_block(x,
+        if self.regress_forces:
+            forces = self.force_block(x,
                 atomic_numbers,
                 edge_distance,
-                edge_index, 
-                )
-            velocity = velocity.embedding.narrow(1, 1, 3)
-            velocity = velocity.view(-1, 3)            
+                edge_index)
+            forces = forces.embedding.narrow(1, 1, 3)
+            forces = forces.view(-1, 3)            
             
-        if not self.flow_matching: # self.flow_matching=True
+        if not self.regress_forces:
             return energy
         else:
-            return velocity # return velocity 
+            return energy, forces
 
 
     # Initialize the edge rotation matrics
     def _init_edge_rot_mat(self, data, edge_index, edge_distance_vec):
         return init_edge_rot_mat(edge_distance_vec)
         
+
     @property
     def num_params(self):
         return sum(p.numel() for p in self.parameters())
@@ -578,9 +543,3 @@ class EquiformerV2_Flow(BaseModel):
                     assert global_parameter_name in named_parameters_list
                     no_wd_list.append(global_parameter_name)
         return set(no_wd_list)
-    
- 
-
-if __name__ == "__main__":
-    megatron = EquiformerV2_Flow()
-    print("Compiled EquiformerV2 for flow matching")

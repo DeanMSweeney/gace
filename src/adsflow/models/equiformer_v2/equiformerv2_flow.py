@@ -79,7 +79,7 @@ class EquiformerV2_Flow(BaseModel):
 
     Args:
         use_pbc (bool):         Use periodic boundary conditions
-        flow_matching (bool):   Compute velocity
+        flow_matching (bool):   Compute velocity field
         otf_graph (bool):       Compute graph On The Fly (OTF)
         max_neighbors (int):    Maximum number of neighbors per atom
         max_radius (float):     Maximum distance between nieghboring atoms in Angstroms
@@ -122,6 +122,7 @@ class EquiformerV2_Flow(BaseModel):
     """
     def __init__(
         self,
+        variant: str="refine",
         num_atoms=1,      # not used
         bond_feat_dim=1,  # not used
         num_targets=1,    # not used
@@ -170,6 +171,7 @@ class EquiformerV2_Flow(BaseModel):
         weight_init='normal', 
         
         time_n_freqs: int=16,
+        energy_n_freqs: int=16, 
     ):
         super().__init__()
 
@@ -225,12 +227,12 @@ class EquiformerV2_Flow(BaseModel):
 
         self.device = 'cpu' #torch.cuda.current_device()
 
-        self.grad_velocity = False
         self.num_resolutions = len(self.lmax_list)
         self.sphere_channels_all = self.num_resolutions * self.sphere_channels
         
-        self.regress_forces=True
-        self.direct_forces=True
+        self.regress_forces = True
+        self.direct_forces = True
+        self.variant = variant
 
         # Precompute the frequency as multipliers as a buffer, register time_freq as an attribute
         self.register_buffer(
@@ -239,12 +241,21 @@ class EquiformerV2_Flow(BaseModel):
             persistent=False 
         ) 
         
-        # Weights for message initialization
-        self.sphere_embedding = nn.Embedding(self.max_num_elements, self.sphere_channels_all)
-        
         # Initialize time embedding 
         self.time_emb = nn.Linear(2 * time_n_freqs, self.sphere_channels)
+        
+        # Intialize adsorption energy emebedding 
+        if self.variant =="forge":
+            self.register_buffer(
+                'energy_freqs',
+                torch.arange(1, energy_n_freqs + 1) * torch.pi,
+                persistent=False,
+            )
+            self.energy_emb = nn.Linear(2 * energy_n_freqs, self.sphere_channels)
 
+        # Weights for message initialization
+        self.sphere_embedding = nn.Embedding(self.max_num_elements, self.sphere_channels_all)
+      
         # Initialize the function used to measure the distances between atoms
         assert self.distance_function in [
             'gaussian',
@@ -342,11 +353,24 @@ class EquiformerV2_Flow(BaseModel):
             self.blocks.append(block)
 
         
-        # Output blocks for energy and velocity
+        # Output blocks for dzdt and dxdt velcoities
         self.norm = get_normalization_layer(self.norm_type, lmax=max(self.lmax_list), num_channels=self.sphere_channels)
+        if self.variant == "forge": 
+            self.dzdt = FeedForwardNetwork(
+                self.sphere_channels,
+                self.ffn_hidden_channels, 
+                1,
+                self.lmax_list,
+                self.mmax_list,
+                self.SO3_grid,  
+                self.ffn_activation,
+                self.use_gate_act,
+                self.use_grid_mlp,
+                self.use_sep_s2_act
+            )
         
         # Velocity predicition head
-        self.velocity_block = SO2EquivariantGraphAttention(
+        self.dxdt_block = SO2EquivariantGraphAttention(
             self.sphere_channels,
             self.attn_hidden_channels,
             self.num_heads, 
@@ -373,13 +397,13 @@ class EquiformerV2_Flow(BaseModel):
         self.apply(self._init_weights)
         self.apply(self._uniform_init_rad_func_linear_weights)
     
-    def process_time_embeds(self, t:torch.Tensor):
+    def process_val_embeds(self, val:torch.Tensor, val_freqs:torch.Tensor):
         """
         Convert t of shape [batch_size, 1] (or [batch_size]) into
         a [batch_size, 2*time_n_freqs] vector of [cos, sin] features.
         """
-        t = self.time_freqs * t                     # (bz, self.time_n_freqs)
-        t = torch.cat((t.cos(), t.sin()), dim=-1)   # (bz, 2*self.time_n_freqs)
+        t = val_freqs * val                    # (bz, self.time_n_freqs)
+        t = torch.cat((val.cos(), val.sin()), dim=-1)   # (bz, 2*self.time_n_freqs)
         return t
     
     @conditional_grad(torch.enable_grad())
@@ -392,6 +416,9 @@ class EquiformerV2_Flow(BaseModel):
         num_atoms = len(atomic_numbers)
         pos = data.pos
         t = data.t # extract time 
+        
+        if self.variant == "forge":
+            energy = data.energy
 
         # Build graph 
         (
@@ -429,10 +456,7 @@ class EquiformerV2_Flow(BaseModel):
             self.device,
             self.dtype,
         )
-
-        # Time embedding 
-        time_embeds = self.time_emb(self.process_time_embeds(t))
-        
+       
         offset_res = 0
         offset = 0
         # Initialize the l = 0, m = 0 coefficients for each resolution
@@ -462,7 +486,15 @@ class EquiformerV2_Flow(BaseModel):
             edge_distance,
             edge_index)
         x.embedding = x.embedding + edge_degree.embedding 
+        
+        # Time embedding 
+        time_embeds = self.time_emb(self.process_val_embeds(val=t, val_freqs=self.time_freqs))
         x.embedding = x.embedding + time_embeds.unsqueeze(1)
+        
+        if self.variant == "forge":
+            energy_embeds = self.time_emb(self.process_val_embeds(val=energy, val_freqs=self.energy_freqs))
+            x.embedding = x.emdedding + energy_embeds.unsqueeze(1)
+            
 
         ###############################################################
         # Update spherical node embeddings
@@ -481,18 +513,26 @@ class EquiformerV2_Flow(BaseModel):
         x.embedding = self.norm(x.embedding)
 
         ###############################################################
-        # Velocity head
+        # Velocity head for position (and) atom types 
         ###############################################################
-
-        velocity = self.velocity_block(x,
+        dxdt = self.dxdt_block(x,
             atomic_numbers,
             edge_distance,
             edge_index, 
             )
-        velocity = velocity.embedding.narrow(1, 1, 3)
-        velocity = velocity.view(-1, 3)            
+        dxdt = dxdt.embedding.narrow(1, 1, 3)
+        dxdt = dxdt.view(-1, 3)   
         
-        return velocity # return velocity 
+        if self.variant == "forge":
+            dzdt = self.dzdt_block(x)  # regress atom type velocity field 
+            dzdt = dzdt.embedding.narrow(1, 0, 1)  # Extract l=0 scalar components
+            dzdt = dzdt.view(-1)  # Shape: (num_atoms,)  
+            
+            print(dzdt.size())
+            return dxdt, dzdt     
+        
+        else: 
+            return dxdt # return dxdt 
 
 
     # Initialize the edge rotation matrics
