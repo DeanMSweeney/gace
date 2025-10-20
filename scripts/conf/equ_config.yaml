@@ -31,7 +31,7 @@ project: "adsflow"
 run_name: "equiformer-model"
 
 # restart run 
-ckpt_path: null
+ckpt_path: "checkpoints/equiformer-model-epoch=22-v1.ckpt"
 run_id: null # log id from wandb
 
 # computer arch
