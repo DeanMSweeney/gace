@@ -16,7 +16,7 @@ oc20_test:  "/workspace/datasets/mini/data_refined.lmdb"
 # training hyperparameters/settings
 batch_size: 16
 num_workers: 8
-max_epochs: 100
+max_epochs: 200
 accumulate_grad_batches: 2
 
 optimizer_hparams:
