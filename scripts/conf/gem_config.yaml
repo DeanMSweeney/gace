@@ -31,8 +31,8 @@ project: "adsflow"
 run_name: "gemnet-oc"
 
 # restart run 
-ckpt_path: null
-run_id: null # log id from wandb
+ckpt_path: "checkpoints/gemnet-oc-epoch=64.ckpt"
+run_id: "sye1t7b8" # log id from wandb
 
 # computer arch
 accelerator: "gpu"
