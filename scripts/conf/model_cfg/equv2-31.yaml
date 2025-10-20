@@ -2,7 +2,6 @@ _target_: adsflow.models.equiformer_v2.equiformerv2_flow.EquiformerV2_Flow
 
 flow_matching: true
 use_pbc:                  True
-regress_forces:           True
 otf_graph:                True
 max_neighbors:            20
 max_radius:               12.0
@@ -42,8 +41,3 @@ drop_path_rate:           0.1         # [0.0, 0.05]
 proj_drop:                0.0
 
 weight_init:              'uniform'    # ['uniform', 'normal']
-
-
-
-
-
