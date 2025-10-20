@@ -1,6 +1,6 @@
 # model configuration
 defaults:
-  - model_cfg: gemnet-flow-med_cfg # direcotry in conf: file name
+  - model_cfg: gemnet-89 # direcotry in conf: file name
   - _self_
 
 # Model mode
@@ -24,6 +24,7 @@ optimizer_hparams:
   lr: 0.0002
   lr_scheduler: "cosine_w_warmup"
   num_cycles: 0.50
+  warmup_proportion: 0.02
 
 # checkpointing/logging
 logger: false
@@ -31,11 +32,13 @@ project: "adsflow"
 run_name: "gemnet-oc"
 
 # restart run 
-ckpt_path: "checkpoints/gemnet-oc-epoch=64.ckpt"
-run_id: "sye1t7b8" # log id from wandb
+ckpt_path: null
+run_id: null  # log id from wandb
 
 # computer arch
 accelerator: "gpu"
 devices: 8
 num_nodes: 1
 precision: "bf16-mixed"
+
+ode_method: "euler"
