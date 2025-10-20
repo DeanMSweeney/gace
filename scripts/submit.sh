@@ -53,7 +53,7 @@ srun singularity exec --nv \
       cd /workspace${SLURM_SUBMIT_DIR#$PROJECT_DIR} && \
       python train.py \
       --config-path conf \
-      --config-name equ_config \
+      --config-name gem_config-32 \
       num_nodes=1 \
       devices=8 \
       logger=True \
