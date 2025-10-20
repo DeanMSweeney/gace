@@ -1,6 +1,6 @@
 # model configuration
 defaults:
-  - model_cfg: EquiV2-flow_cfg # direcotry in conf: file name
+  - model_cfg: equv2-53 # direcotry in conf: file name
   - _self_
 
 # Model mode
@@ -24,7 +24,7 @@ optimizer_hparams:
   lr: 0.0002
   lr_scheduler: "cosine_w_warmup"
   num_cycles: 0.50
-  warmup_proportion: 0.10
+  warmup_proportion: 0.02
 
 # checkpointing/logging
 logger: false
@@ -32,7 +32,7 @@ project: "adsflow"
 run_name: "equiformer-model"
 
 # restart run 
-ckpt_path: "checkpoints/equiformer-model-epoch=22-v1.ckpt"
+ckpt_path: null
 run_id: null # log id from wandb
 
 # computer arch
