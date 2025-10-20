@@ -124,4 +124,3 @@ class Config:
 
     # Misc
     seed:                            int            = 42
-    mask_frzn_atoms:                 bool           = True 

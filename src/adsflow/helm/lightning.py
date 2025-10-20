@@ -9,7 +9,7 @@ from lightning.pytorch import LightningModule
 from torch_geometric.data import Data
 from transformers import get_cosine_schedule_with_warmup, get_polynomial_decay_schedule_with_warmup
 
-from adsflow.utils.flow_matching import OptTransportMixin
+from adsflow.utils.optimal_transport import OptTransportMixin
 from adsflow.utils.utils import ship_data
 
 from typing import Optional, Literal, Union, Tuple
@@ -32,7 +32,6 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
             self, 
             model,
             variant: str="refine",
-            mask_frzn_atoms: bool=True,
             rtol: float = 1e-7, 
             atol: float = 1e-9,
             ode_method: str = "dopri5",
@@ -43,11 +42,10 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
         ):
         
         super().__init__()
-        self.save_hyperparameters(ignore=["model", "mask_frzn_atoms", "rtol", "atol", "ode_method", "track_grad_norms"])  # all __init__ args saved as hyperparameters
+        self.save_hyperparameters(ignore=["model", "rtol", "atol", "ode_method", "track_grad_norms"])  # all __init__ args saved as hyperparameters
         self.model = model
         self.loss_fn = nn.MSELoss() # mean squared error loss function 
         self.variant = variant
-        self.mask_frzn_atoms = mask_frzn_atoms
         self.rtol = rtol
         self.atol = atol 
         self.ode_method = ode_method
@@ -61,18 +59,18 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
     
     def _transport_loss(self, input_data: Data) -> torch.Tensor: 
         
-        if self.mask_frzn_atoms and self.variant == "refine":
+        if self.variant == "refine":
             data, u = self.path(input_data=input_data)
             u_hat = self(data) # N, 3
             self.free_atoms = (1 - data.fixed).unsqueeze(1) # N
             loss, max_loss = self.masked_loss(a=u_hat, b=u, mask=self.free_atoms) 
         
         elif self.variant == "forge":
-            data, u1, u2 = self.path(input_data=input_data)
-            u1_hat, u2_hat = self(data)
-            u1_loss = self.loss_fn(u1_hat, u1) 
-            u2_loss = self.loss_fn(u2_hat, u2)
-            loss = u1_loss * self.hparams.l_weight + u2_loss * (1 - self.hparams.l_weight)
+            data, ux, uz = self.path(input_data=input_data)
+            ux_hat, u2_hat = self(data)
+            ux_loss = self.loss_fn(ux_hat, ux) 
+            uz_loss = self.loss_fn(uz_hat, uz)
+            loss = ux_loss * self.hparams.l_weight + uz_loss * (1 - self.hparams.l_weight)
             
         return loss, max_loss
     

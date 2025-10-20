@@ -13,8 +13,6 @@ from torch_geometric.data import Data
 from torchdiffeq import odeint
 from typing import Optional, Literal, Union, Tuple
 
-
-
 class OptTransportMixin: 
     """
     This Mixin supports image invariant interpolation paths and masked loss for frozen atoms 
@@ -71,27 +69,38 @@ class OptTransportMixin:
     def path(
                 self,
                 input_data: Data,
-                from_noise: Optional[bool]=None,
                 variant: Optional[str] = None,
     ) -> Tuple[Data, Tensor]:
         
         data = input_data.clone()
-
-        x1 = data.pos_relaxed.clone() # sample relaxed positions x1 ~ p(x) (final)
-
-        if from_noise or variant == "forge":
-                x0 = torch.randn_like(x1) # sample noise 
-        else:
-                x0 = data.pos.clone() # sample initial positions and discard x0 ~ q(x) (initial)
-
         t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device) # (batch_size, 1)
         t = t_per_graph[data.batch] # (num_atoms, 1)
+
+        if variant == "forge":
+                # sample target postions, atom types
+                x1 = data.pos_relaxed.clone() # x1 ~ p(x) (final)
+                z1 = data.atomic_number.clone() # z1 ~ p(z) (final)
+                
+                # sample initial positions and atom types 
+                x0 = torch.randn_like(x1) # x0 ~ q(x)
+                z0 = torch.randn_like(z1) # z0 ~ q(z)
+                
+                # assign adsorbate atoms to correct positions and atom types 
+                ads_mask = (data.tags == 2)
+                x0[ads_mask] = data.pos[ads_mask]
+                z0[ads_mask] = data.atomic_number[ads_mask]
+                
+                
+                
+        elif variant == "refine":
+                x1 = data.pos_relaxed.clone() # sample relaxed positions x1 ~ p(x) (final)
+                x0 = data.pos.clone() # sample initial positions and discard x0 ~ q(x) (initial)
     
-        if hasattr(data, "velocity"):
-              # load from data object
-              u = data.velocity
-              
-        else: 
+            if hasattr(data, "velocity"):
+                # load from data object
+                u = data.velocity
+    
+            else: 
                u_var = x1 - x0
                u = __class__.pbc_aware_pos(
                   positions=u_var,
@@ -100,13 +109,13 @@ class OptTransportMixin:
                   naive=self.naive,
             )
 
-        xt = x0 + t * u # x1 * t + (1-t) * x0
-        data.pos = xt # reassign xt to pos 
-        data.pos_init = x0
-        data.t = t
+            xt = x0 + t * u # x1 * t + (1-t) * x0
+            data.pos = xt # reassign xt to pos 
+            data.pos_init = x0
+            data.t = t
 
-        return data, u 
-  
+            return data, u 
+    
     def sampler(
             self, 
             input_data: Data,

@@ -418,7 +418,7 @@ class EquiformerV2_Flow(BaseModel):
         t = data.t # extract time 
         
         if self.variant == "forge":
-            energy = data.energy
+            energy = data.y_relaxed
 
         # Build graph 
         (
