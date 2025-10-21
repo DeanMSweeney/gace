@@ -67,7 +67,7 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
         
         elif self.variant == "forge":
             data, ux, uz = self.path(input_data=input_data)
-            ux_hat, u2_hat = self(data)
+            ux_hat, uz_hat = self(data)
             ux_loss = self.loss_fn(ux_hat, ux) 
             uz_loss = self.loss_fn(uz_hat, uz)
             loss = ux_loss * self.hparams.l_weight + uz_loss * (1 - self.hparams.l_weight)
