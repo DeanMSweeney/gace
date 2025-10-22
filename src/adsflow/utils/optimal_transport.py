@@ -50,14 +50,14 @@ class OptTransportMixin:
                 x0 = torch.randn_like(x1) # x0 ~ q(x)
                 z0 = torch.randn_like(z1) # z0 ~ q(z)
                 
-                data.pos = x0 
-                data.atom_types = z0 
-                
                 # assign adsorbate atoms to correct positions and atom types 
                 ads_mask = (data.tags == 2)
                 x0[ads_mask] = data.pos[ads_mask]
                 z0[ads_mask] = data.atomic_number[ads_mask]
                 
+                data.pos = x0 
+                data.true_atomic_numbers = z1
+                data.atomic_numbers = z0
                 
         elif variant == "refine":
             x1 = data.pos_relaxed.clone() # sample relaxed positions x1 ~ p(x) 
@@ -70,7 +70,7 @@ class OptTransportMixin:
             else: 
                u_var = x1 - x0
                u = minimum_image_distance(
-                  cost=u_var,
+                  distance=u_var,
                   cell=data.cell,
                   batch=data.batch,
                   naive=self.naive,
@@ -157,14 +157,14 @@ class OptTransportMixin:
               
         if hasattr(data, "pos_relaxed"):
               e_gen = minimum_image_distance(
-                  cost=data.pos_generated - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
+                  distance=data.pos_generated - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
                   cell=data.cell,
                   batch=data.batch,
                   naive=self.naive,
             )
               
               e_null = minimum_image_distance(
-                  cost=data.pos - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
+                  distance=data.pos - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
                   cell=data.cell,
                   batch=data.batch,
                   naive=self.naive,

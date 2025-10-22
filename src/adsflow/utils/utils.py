@@ -19,40 +19,58 @@ def hungarian_horntail(
     data: torch.Tensor,
     naive: bool=True,
 ): 
-    x0 = data.pos
-    x1 = data.pos_relaxed
+    catalyst = (data.tags != 2) # mask adsorbate atoms
+    num_samples = int(data.num_graphs)
+    for idx in range(num_samples):
+        
+        sample = data.batch == idx
+        mask = sample & catalyst
+        
+        x0 = data.pos[mask]
+        z0 = data.z[mask]
     
-    # cocmpute initial cost between x0 and x1 atomic positions 
-    C = minimum_image_distance(
-            cell=data.cell, 
-            cost=(x1-x0), 
-            batch=data.batch, 
+        x1 = data.pos_relaxed[mask]
+        z1 = data.atomic_numbers[mask]
+        
+        # compute cost matrix for atomic positions with minimum image convention 
+        Cx_raw = x1[None, :, :] - x0[:,  None, :]
+        Cx = minimum_image_distance(
+            cell=data.cell[idx], 
+            cost=Cx_raw, 
             naive=naive,
         )
-
-    for idx in range(data.num_graphs):
+        Cx = Cx**2
         
-        sample = data.batch == idx 
-        x0 = data.pos[sample].detach().cpu().numpy() # N, 3
-        c = C[sample].detach().cpu().numpy() # N,3
+        # compute cost matrix for atomic numbers 
+        Cz = torch.cdist(z1, z0, p=2)**2
+        Cz = Cz**2
         
-        # run Hungarian algorithm to solve the assignment problem
-        _, col_ind = linear_sum_assignment(cost=c, maximize=False)
+        # Hyngarian algorithm for atomic postion assignment problem 
+        x0 = data.pos[mask].detach().cpu().numpy() # N, 3
+        _, col_ind = linear_sum_assignment(cost=Cx.detach().cpu().numpy() , maximize=False)
+        data.pos[mask] = torch.tensor(x0[col_ind], dtype=Cx.dtype, device=Cx.device)
         
-        x0 = x0 
-        
+        # Hungarian algorithm for atom types assignment problem 
+        z0 = data.z.detach().cpu().numpy() # N, 3
+        c_z = Cz.detach().cpu().numpy() # N, 3
+        _, col_ind = linear_sum_assignment(cost=c_z, maximize=False)
+        data.z[mask] = torch.tensor(z0[col_ind], dtype=Cz.dtype, device=Cz.device)
+           
 def minimum_image_distance(
             cell: Tensor, 
-            cost: Tensor, 
-            batch: Tensor, 
+            distance: Tensor, 
+            batch: Optional[Tensor]=None, 
             naive: bool=True,
 ) -> Tensor:
         
+        if batch is None: 
+            batch = torch.ones(distance.size(0))
+            
         A  =  cell[batch]  # (N,3,3)
         G = A @ A.transpose(1,2) # (N, 3, 3)
         N = len(batch)
         
-        u = cost # (N,3)
+        u = distance # (N,3)
         u_f = torch.linalg.solve(A.transpose(1,2), u.unsqueeze(-1)).squeeze(-1)  # (N,3)
         n0 = torch.round(u_f)
         
