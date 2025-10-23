@@ -70,7 +70,7 @@ class OptTransportMixin:
             else: 
                u_var = x1 - x0
                u = minimum_image_distance(
-                  distance=u_var,
+                  delta=u_var,
                   cell=data.cell,
                   batch=data.batch,
                   naive=self.naive,
@@ -157,14 +157,14 @@ class OptTransportMixin:
               
         if hasattr(data, "pos_relaxed"):
               e_gen = minimum_image_distance(
-                  distance=data.pos_generated - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
+                  delta=data.pos_generated - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
                   cell=data.cell,
                   batch=data.batch,
                   naive=self.naive,
             )
               
               e_null = minimum_image_distance(
-                  distance=data.pos - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
+                  delta=data.pos - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
                   cell=data.cell,
                   batch=data.batch,
                   naive=self.naive,
