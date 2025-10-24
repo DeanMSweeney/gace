@@ -16,67 +16,77 @@ from scipy import linear_sum_assignment
 
 
 def hungarian_horntail(
-    data: torch.Tensor,
+    x0: Tensor,
+    x1: Tensor,
+    mask: Tensor,
+    cell: Tensor,
     naive: bool=True,
-): 
-    catalyst = (data.tags != 2) # mask adsorbate atoms
-    num_samples = int(data.num_graphs)
-    for idx in range(num_samples):
-        
-        sample = data.batch == idx
-        mask = sample & catalyst
-        
-        x0 = data.pos[mask]
-        x1 = data.pos_relaxed[mask]
-        
-        # compute pairwise cost matrix for atomic positions with minimum image convention 
-        Cx_raw = x1.unsqueeze(0) - x0.unsqueeze(1) # (N, N, 3)
-        Cx = minimum_image_distance(
-            cell=data.cell[idx], 
-            cost=Cx_raw, 
-            naive=naive,
-        )
-        Cx = Cx**2
+) -> Tensor: 
+ 
+    # compute pairwise cost matrix for atomic positions with minimum image convention 
+    x0 = x0[mask]
+    x1 = x1[mask]
+    Cx = x1.unsqueeze(0) - x0.unsqueeze(1) # (N, N, 3)
+    Cx = minimum_image_distance(
+        cell=cell, 
+        delta=Cx.reshape(-1, 3), #(N*N, 3)
+        naive=naive,
+    )
+    Cx = (Cx.reshape(x1.size(0), x1.size(0), 3))**2 # N, N, 3
+    Cx_l2 = Cx.sum(dim=-1) # N, N
 
-        # Hyngarian algorithm for atomic postion assignment problem 
-        x0 = data.pos[mask].detach().cpu().numpy() # N, 3
-        _, col_ind = linear_sum_assignment(cost=Cx.detach().cpu().numpy() , maximize=False)
-        data.pos[mask] = torch.tensor(x0[col_ind], dtype=Cx.dtype, device=Cx.device)
+    # Hungarian algorithm for atomic postion assignment problem 
+    x0 = x0.detach().cpu().numpy() # N, 3
+    _, col_ind = linear_sum_assignment(cost=Cx_l2.detach().cpu().numpy() , maximize=False)
+    x0_aligned = torch.tensor(x0[col_ind], dtype=Cx.dtype, device=Cx.device)
+    
+    return x0_aligned
         
+    """
+    # compute pairwise cost matrix for atom types 
+    z0 = data.atomic_numbers[mask]
+    z1 = data.true_atomic_numbers[mask]
+    Cz = torch.cdist(z1, z0, p=2)
+    
+    # Hyngarian algorithm for atomic postion assignment problem 
+    z0 = z0.detach().cpu().numpy() 
+    _, col_ind = linear_sum_assignment(cost=Cz.detach().cpu().numpy() , maximize=False)
+    data.atomic_numbers[mask] = torch.tensor(z0[col_ind], dtype=Cz.dtype, device=Cz.device)
+    """   
 def minimum_image_distance(
             cell: Tensor, 
-            delta: Tensor, 
+            delta: Tensor, # N, 3
             batch: Optional[Tensor]=None, 
             naive: bool=True,
 ) -> Tensor:
         
-        if batch is None: 
-            batch = torch.ones(delta.size(0))
+        if batch is not None: 
+            A  =  cell[batch]  # (N,3,3) - repeate unit cell for all atoms in a graph
+        else: 
+            A = cell.expand(delta.size(0), 3, 3) # (3,3) -> (N, 3, 3)
             
-        A  =  cell[batch]  # (N,3,3)
-        u = delta # (N,3)
-        u_f = torch.linalg.solve(A.transpose(1,2), u.unsqueeze(-1)).squeeze(-1)  # (N,3)
-        n0 = torch.round(u_f)
+        delta_f = torch.linalg.solve(A.transpose(1,2), delta.unsqueeze(-1)).squeeze(-1)  # (N,3)
+        n0 = torch.round(delta_f)
         
         if naive:
-            u_f_min = u_f - n0
+            delta_f_min = delta_f - n0
         else: 
             # nearest neighbor search algorithm 
             G = A @ A.transpose(1,2) # (N, 3, 3)
-            N = len(batch)
+            N = delta.size(0)
             D = torch.tensor(list(itertools.product([-1, 0, 1], repeat=3)), dtype=torch.int, device=n0.device) # (27, 3)
             n = n0.unsqueeze(1) + D.unsqueeze(0) # (N, 1, 3) + (1, 27, 3) = (N, 27, 3) 
-            U_f_n = u_f.unsqueeze(1) - n # (N, 1, 3) - (N, 27, 3) = (N, 27, 3)
-            W = U_f_n @ G # (N, 27, 3)
-            u_f2 = (W * U_f_n).sum(dim=-1) # (N, 27)
+            delta_f_n = delta_f.unsqueeze(1) - n # (N, 1, 3) - (N, 27, 3) = (N, 27, 3)
+            W = delta_f_n @ G # (N, 27, 3)
+            delta_f2 = (W * delta_f_n).sum(dim=-1) # (N, 27)
                 
             # output 
-            k_min = u_f2.argmin(dim=1) # N
-            u_f_min = U_f_n[torch.arange(N), k_min]
+            k_min = delta_f2.argmin(dim=1) # N
+            delta_f_min = delta_f_n[torch.arange(N), k_min]
             
-        u_min = torch.bmm(u_f_min.unsqueeze(1), A).squeeze(1)
+        delta_min = torch.bmm(delta_f_min.unsqueeze(1), A).squeeze(1)
             
-        return u_min
+        return delta_min
     
     
 def ship_data(

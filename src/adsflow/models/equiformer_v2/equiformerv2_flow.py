@@ -528,7 +528,6 @@ class EquiformerV2_Flow(BaseModel):
             dzdt = dzdt.embedding.narrow(1, 0, 1)  # Extract l=0 scalar components
             dzdt = dzdt.view(-1)  # Shape: (num_atoms,)  
             
-            print(dzdt.size())
             return dxdt, dzdt     
         
         else: 

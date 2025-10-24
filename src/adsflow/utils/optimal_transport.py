@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from torch_geometric.data import Data
 from torchdiffeq import odeint
 from typing import Optional, Literal, Union, Tuple
-from adsflow.utils.utils import minimum_image_distance
+from adsflow.utils.utils import minimum_image_distance, hungarian_horntail
 
 class OptTransportMixin: 
     """
@@ -42,22 +42,50 @@ class OptTransportMixin:
         t = t_per_graph[data.batch] # (num_atoms, 1)
 
         if variant == "forge":
-                # sample target postions, atom types
-                x1 = data.pos_relaxed.clone() # x1 ~ p(x) 
-                z1 = data.atomic_number.clone() # z1 ~ p(z) 
+            # define adsorbate and catalyst labels
+            adsorbate = (data.tags == 2)
+            catalyst = (data.tags != 2) # mask adsorbate atoms
+            
+            # sample intiial and target postions
+            x1 = data.pos_relaxed.clone() # x1 ~ p(x) 
+            x0 = torch.randn_like(x1) # x0 ~ q(x)
+            x0[adsorbate] = data.pos[adsorbate]
+            
+            # iterate through x0 tensor for all graphs and find optimal alignement for each 
+            num_samples = int(data.num_graphs)
+            for idx in range(num_samples):
+                sample = data.batch == idx
+                mask = sample & catalyst
+                cell = data.cell[idx]
+                x0[mask] = hungarian_horntail(
+                    x0=x0, 
+                    x1=x1, 
+                    cell=cell,
+                    mask=mask,
+                )
+            # build path for atomic positions 
+            u_var = x1 - x0
+            u = minimum_image_distance(
+                  delta=u_var,
+                  cell=data.cell,
+                  batch=data.batch,
+                  naive=self.naive,
+            )
+            xt = x0 + t * u # x1 * t + (1-t) * x0
+            data.pos = xt # reassign xt to pos 
+            data.pos_init = x0
+            data.t = t
                 
-                # sample initial positions and atom types 
-                x0 = torch.randn_like(x1) # x0 ~ q(x)
-                z0 = torch.randn_like(z1) # z0 ~ q(z)
-                
-                # assign adsorbate atoms to correct positions and atom types 
-                ads_mask = (data.tags == 2)
-                x0[ads_mask] = data.pos[ads_mask]
-                z0[ads_mask] = data.atomic_number[ads_mask]
-                
-                data.pos = x0 
-                data.true_atomic_numbers = z1
-                data.atomic_numbers = z0
+            # sample intiial and target atom types (one-hot encoded)
+            z1 = data.atomic_number.clone() # z1 ~ p(z) 
+            z1_hot = F.one_hot(z1, num_classes=55)
+            z0 = torch.randn_like(z1) # z0 ~ q(z)
+            
+            # assign adsorbate atoms to correct positions and atom types 
+            z0[adsorbate] = data.atomic_number[adsorbate]
+        
+            data.true_atomic_numbers = z1
+            data.atomic_numbers = z0
                 
         elif variant == "refine":
             x1 = data.pos_relaxed.clone() # sample relaxed positions x1 ~ p(x) 
