@@ -1,0 +1,26 @@
+FROM nvcr.io/nvidia/pytorch:24.07-py3-igpu
+
+WORKDIR /workspace
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git build-essential libopenblas-dev ninja-build && \
+    rm -rf /var/lib/apt/lists/*
+
+# Include sm_70 for V100 AND sm_90 for GH200
+ENV TORCH_CUDA_ARCH_LIST="9.0"
+ENV FORCE_CUDA=1
+
+# Build PyG extensions with support for both V100 and GH200
+RUN pip install --no-cache-dir --no-deps --verbose \
+    torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric
+
+RUN python3 -c "import torch; from torch_cluster import radius_graph; print('PyG loaded successfully')"
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --no-deps fairchem-core==1.10.0
+
+COPY . .
+RUN pip install -e .
+
+CMD ["bash"]
