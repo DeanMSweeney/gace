@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH -A chm250015p                      # your project/account
-#SBATCH -p GPU                             # GPU partition
-#SBATCH --nodes=1                          # 1 node
-#SBATCH --ntasks-per-node=8                # one process per node
-#SBATCH --gres=gpu:h100-80:8               # 1 × V100-32 GB GPU
-#SBATCH --cpus-per-task=12                 # cpus per process 
-#SBATCH -t 47:30:00                        # walltime
-#SBATCH -J adsflow_train-0                 # job name
+#SBATCH --account=bfqy-dtai-gh
+#SBATCH --job-name=equiformerv2
+#SBATCH --partition=ghx4
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=1
+#SBATCH --gpus-per-node=4
+#SBATCH --cpus-per-task=16
+#SBATCH --time=23:00:00
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=dmsween@umich.edu
 #SBATCH --output=logs/%x-%j.out
@@ -15,6 +15,9 @@
 # Clear environment and load CUDA
 module purge
 module load cuda/12.4
+
+# Define work path 
+WORK="/projects/bfqy/dsweeney1"
 
 # Memory management (good to keep)
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -37,13 +40,10 @@ export WANDB_ARTIFACT_DIR=$MY_WANDB_ROOT/artifacts
 # (optional) where wandb caches things like artifact definitions
 export WANDB_CACHE_DIR=$MY_WANDB_ROOT/cache
 
-# disable active logging 
-export WANDB_MODE=offline
-
 # Run command
 srun singularity exec --nv \
     --bind "${PROJECT_DIR}":/workspace \
-    "$SCRATCH/.imgs/adsflow.sif" \
+    "$WORK/.containers/adsflow.sif" \
     bash -c "\
       mkdir -p \
   	$WANDB_DIR \
@@ -53,8 +53,8 @@ srun singularity exec --nv \
       cd /workspace${SLURM_SUBMIT_DIR#$PROJECT_DIR} && \
       python train.py \
       --config-path conf \
-      --config-name equ_config-53 \
-      num_nodes=1 \
-      devices=8 \
+      --config-name gem_config-32 \
+      num_nodes=2 \
+      devices=4 \
       logger=True \
     "
