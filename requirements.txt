@@ -8,6 +8,19 @@ hydra-core
 e3nn
 lightning
 wandb
-deepspeed
 torchdiffeq
-fairchem-core==1.10.0
+transformers
+scipy
+
+# Other required dependecies for fairchem 
+huggingface-hub>=0.27.1
+lmdb
+numba
+orjson
+pydantic>=2.10.0
+pymatgen>=2023.10.3
+requests
+submitit
+tensorboard
+torchtnt
+pyyaml
