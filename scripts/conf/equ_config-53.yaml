@@ -1,11 +1,11 @@
 # model configuration
 defaults:
-  - model_cfg: gemnet-89 # direcotry in conf: file name
+  - model_cfg: equv2-53 # direcotry in conf: file name
   - _self_
 
 # Model mode
 mode: "train"
-regressor: "GemNet-OC"
+regressor: "EquiformerV2"
 
 # datasets
 oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data_refined.lmdb"
@@ -14,13 +14,13 @@ oc20_mini:  "/workspace/datasets/mini/data.lmdb"
 oc20_test:  "/workspace/datasets/mini/data_refined.lmdb"
 
 # training hyperparameters/settings
-batch_size: 16
+batch_size: 8
 num_workers: 8
 max_epochs: 200
-accumulate_grad_batches: 2
+accumulate_grad_batches: 4
 
 optimizer_hparams:
-  weight_decay: 0.01
+  weight_decay: 0.001
   lr: 0.0002
   lr_scheduler: "cosine_w_warmup"
   num_cycles: 0.50
@@ -29,16 +29,14 @@ optimizer_hparams:
 # checkpointing/logging
 logger: false
 project: "adsflow"
-run_name: "gemnet-oc"
+run_name: "equiformer-model"
 
 # restart run 
-ckpt_path: null
-run_id: null  # log id from wandb
+ckpt_path: "checkpoints/equiformer-model-epoch=68.ckpt"
+run_id: null # log id from wandb
 
 # computer arch
 accelerator: "gpu"
 devices: 8
 num_nodes: 1
 precision: "bf16-mixed"
-
-ode_method: "euler"
