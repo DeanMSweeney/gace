@@ -5,7 +5,7 @@
 #SBATCH --ntasks-per-node=8                # one process per node
 #SBATCH --gres=gpu:h100-80:8               # 1 × V100-32 GB GPU
 #SBATCH --cpus-per-task=12                 # cpus per process 
-#SBATCH -t 22:00:00                        # walltime
+#SBATCH -t 47:30:00                        # walltime
 #SBATCH -J adsflow_train-0                 # job name
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=dmsween@umich.edu
@@ -53,7 +53,7 @@ srun singularity exec --nv \
       cd /workspace${SLURM_SUBMIT_DIR#$PROJECT_DIR} && \
       python train.py \
       --config-path conf \
-      --config-name gem_config-32 \
+      --config-name equ_config-53 \
       num_nodes=1 \
       devices=8 \
       logger=True \
