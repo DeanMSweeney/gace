@@ -1,25 +1,25 @@
-FROM nvcr.io/nvidia/pytorch:24.07-py3-igpu
+FROM nvcr.io/nvidia/pyg:24.07-py3
 
 WORKDIR /workspace
 
+# Build tools needed to compile PyG extensions from source
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git build-essential libopenblas-dev ninja-build && \
     rm -rf /var/lib/apt/lists/*
 
-# Include sm_70 for V100 AND sm_90 for GH200
-ENV TORCH_CUDA_ARCH_LIST="9.0"
-ENV FORCE_CUDA=1
+# Upgrade pip (safe)
+RUN pip install --no-cache-dir --upgrade pip
 
-# Build PyG extensions with support for both V100 and GH200
-RUN pip install --no-cache-dir --no-deps --verbose \
-    torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric
+# Install torch geometric dependecies 
+RUN pip install --no-cache-dir --no-build-isolation \
+    torch-scatter torch-sparse torch-cluster torch-spline-conv
 
-RUN python3 -c "import torch; from torch_cluster import radius_graph; print('PyG loaded successfully')"
-
+# Install requriements and dependecies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir --no-deps fairchem-core==1.10.0
 
+# Install local package 
 COPY . .
 RUN pip install -e .
 
