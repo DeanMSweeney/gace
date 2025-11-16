@@ -52,7 +52,6 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
         self.atol = atol 
         self.ode_method = ode_method
         self.track_grad_norms = track_grad_norms
-        self.naive = True
         self.input_file = input_file
         self.output_file = output_file
 
@@ -66,10 +65,10 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
 
         if self.mask_frzn_atoms and self.variant == "refine":
             self.free_atoms = (1 - data.fixed).unsqueeze(1) # N
-            loss, max_loss = self.masked_loss(a=u_hat, b=u, mask=self.free_atoms) 
+            loss, median_loss, max_loss = self.masked_loss(a=u_hat, b=u, mask=self.free_atoms) 
         else: 
             loss = self.loss_fn(u_hat, u)  
-        return loss, max_loss
+        return loss, median_loss, max_loss
     
     # define training and validation methods 
     def training_step(self, data: Data, batch_idx):
@@ -120,16 +119,24 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
         return loss
 
     def test_step(self, data: Data, batch_idx):
-        loss, max_loss = self._transport_loss(data)
+        loss, median_loss, max_loss = self._transport_loss(data)
         
         # define time interval for the IVP
         t = torch.linspace(0., 1., 100, 
                         device=data.pos.device, dtype=data.pos.dtype)
-        opt_graph, struc_rmse, null_struc_rmse = self.sampler(data, t=t)
+        opt_graph, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = self.sampler(data, t=t)
         
         self.log(
             "test/loss", 
             loss, 
+            prog_bar=True, 
+            batch_size=len(data.natoms),
+            sync_dist=True,
+        )
+        
+        self.log(
+            "median/test/loss", 
+            median_loss, 
             prog_bar=True, 
             batch_size=len(data.natoms),
             sync_dist=True,
@@ -150,10 +157,26 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
             batch_size=len(data.natoms),
             sync_dist=True,
         )
+        
+        self.log(
+            "test/struc_rmdse", 
+            struc_rmdse, 
+            prog_bar=True, 
+            batch_size=len(data.natoms),
+            sync_dist=True,
+        )
 
         self.log(
             "test/null_struc_rmse", 
             null_struc_rmse, 
+            prog_bar=True, 
+            batch_size=len(data.natoms),
+            sync_dist=True,
+        )
+        
+        self.log(
+            "test/null_struc_rmdse", 
+            null_struc_rmdse, 
             prog_bar=True, 
             batch_size=len(data.natoms),
             sync_dist=True,
