@@ -22,17 +22,25 @@ class OptTransportMixin:
     
     @staticmethod
     def masked_loss(
-          a: Tensor, # N, 3
-          b: Tensor, # N, 3
-          mask: Tensor, # N, 1 -> w =[0, 0, 1, 1, ..., 0]
+        a: Tensor,  # N, 3
+        b: Tensor,  # N, 3
+        mask: Tensor,  # N, 1 -> e.g., [0, 0, 1, 1, ..., 0]
+        median: bool=False,
     ):
-          L_per_atom = ((a - b) ** 2).mean(dim=1).unsqueeze(1) # N, 1
-          masked_L_per_atom = L_per_atom * mask # N, 1
-          masked_L = masked_L_per_atom.sum() / mask.sum().clamp_min(1e-8)
-          max_L = masked_L_per_atom.abs().max()
-          
-          return masked_L, max_L
-               
+        L_per_atom = ((a - b) ** 2).mean(dim=1, keepdim=True)  # N, 1
+        masked_L_per_atom = L_per_atom * mask  # N, 1
+
+        # Compute masked mean loss
+        masked_avg_L = masked_L_per_atom.sum() / mask.sum().clamp_min(1e-8)
+        
+        # Compute max (absolute) loss for stability monitoring
+        max_L = masked_L_per_atom.abs().max()
+
+        # Compute masked median loss (only over nonzero mask elements)
+        masked_values = L_per_atom[mask.bool()].flatten()
+        masked_med_L = masked_values.median()
+            
+        return masked_avg_L, masked_med_L, max_L
             
     @staticmethod # define as normal function within class's namespace
     def pbc_aware_pos(
@@ -69,17 +77,18 @@ class OptTransportMixin:
           return u_min
      
     def path(
-                self,
-                input_data: Data,
-                from_noise: Optional[bool]=None,
-                variant: Optional[str] = None,
+        self,
+        input_data: Data,
+        from_noise: Optional[bool]=None,
+        variant: Optional[str] = None,
+        naive: str=True,
     ) -> Tuple[Data, Tensor]:
         
         data = input_data.clone()
 
         x1 = data.pos_relaxed.clone() # sample relaxed positions x1 ~ p(x) (final)
 
-        if from_noise or variant == "Forge":
+        if variant == "Forge":
                 x0 = torch.randn_like(x1) # sample noise 
         else:
                 x0 = data.pos.clone() # sample initial positions and discard x0 ~ q(x) (initial)
@@ -97,7 +106,7 @@ class OptTransportMixin:
                   positions=u_var,
                   cell=data.cell,
                   batch=data.batch,
-                  naive=self.naive,
+                  naive=naive,
             )
 
         xt = x0 + t * u # x1 * t + (1-t) * x0
@@ -184,22 +193,20 @@ class OptTransportMixin:
                   positions=data.pos_generated - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
                   cell=data.cell,
                   batch=data.batch,
-                  naive=self.naive,
             )
               
               e_null = __class__.pbc_aware_pos(
                   positions=data.pos - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
                   cell=data.cell,
                   batch=data.batch,
-                  naive=self.naive,
             )
               
-              struc_mse, _ = __class__.masked_loss(a=e_gen, b=torch.zeros_like(e_gen), mask=self.free_atoms)
-              struc_rmse = torch.sqrt(struc_mse)
+              struc_mse, struc_mdse, _ = __class__.masked_loss(a=e_gen, b=torch.zeros_like(e_gen), mask=self.free_atoms)
+              struc_rmse, struc_rmdse = torch.sqrt(struc_mse), torch.sqrt(struc_mdse)
               
-              null_struc_mse, _ = __class__.masked_loss(a=e_null, b=torch.zeros_like(e_null), mask=self.free_atoms)
-              null_struc_rmse = torch.sqrt(null_struc_mse)
+              null_struc_mse, null_struc_mdse, _ = __class__.masked_loss(a=e_null, b=torch.zeros_like(e_null), mask=self.free_atoms)
+              null_struc_rmse, null_struc_rmdse = torch.sqrt(null_struc_mse), torch.sqrt(null_struc_mdse)
             
-              return data, struc_rmse, null_struc_rmse
+              return data, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse
         else: 
             return data
