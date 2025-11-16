@@ -53,12 +53,10 @@ def precompute_vel(
     
     print(">>> Writing velocity to new data file...")
     for idx, data in enumerate(loader):
-       
-        _, velocity = OTM.path(
+        
+        compute_vel = OTM()
+        _, velocity = compute_vel.path(
             input_data=data,
-            from_noise=False,
-            otf_velocity=True,
-            naive=True,
         )
         
         data.velocity = velocity.detach().cpu()
