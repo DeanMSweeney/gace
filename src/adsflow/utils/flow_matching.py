@@ -34,13 +34,14 @@ class OptTransportMixin:
         masked_avg_L = masked_L_per_atom.sum() / mask.sum().clamp_min(1e-8)
         
         # Compute max (absolute) loss for stability monitoring
-        max_L = masked_L_per_atom.abs().max()
+        max_L = masked_L_per_atom.max()
+        max_L_idx = torch.argmax(masked_L_per_atom)
 
         # Compute masked median loss (only over nonzero mask elements)
         masked_values = L_per_atom[mask.bool()].flatten()
         masked_med_L = masked_values.median()
-            
-        return masked_avg_L, masked_med_L, max_L
+       
+        return masked_avg_L, masked_med_L, max_L, max_L_idx
             
     @staticmethod # define as normal function within class's namespace
     def pbc_aware_pos(
@@ -175,38 +176,38 @@ class OptTransportMixin:
               atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
               if self.input_file:
                   ase.io.write(self.input_file, atoms)  # Cartesian
-              else: 
-                  ase.io.write("struc_x0.vasp", atoms)
-                  
-              # Save to current directory
-              atoms = Atoms(
-                  positions=xdft_np, # initial
-                  numbers=z_np,
-                  cell=cell_np,
-                  pbc=True,  # or (True, True, False) for a slab
-                )
-              atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
-              ase.io.write("relaxed.vasp", atoms)  # Cartesian
-              
+             
+        # Save to current directory
         if hasattr(data, "pos_relaxed"):
-              e_gen = __class__.pbc_aware_pos(
-                  positions=data.pos_generated - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
-                  cell=data.cell,
-                  batch=data.batch,
-            )
-              
-              e_null = __class__.pbc_aware_pos(
-                  positions=data.pos - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
-                  cell=data.cell,
-                  batch=data.batch,
-            )
-              
-              struc_mse, struc_mdse, _ = __class__.masked_loss(a=e_gen, b=torch.zeros_like(e_gen), mask=self.free_atoms)
-              struc_rmse, struc_rmdse = torch.sqrt(struc_mse), torch.sqrt(struc_mdse)
-              
-              null_struc_mse, null_struc_mdse, _ = __class__.masked_loss(a=e_null, b=torch.zeros_like(e_null), mask=self.free_atoms)
-              null_struc_rmse, null_struc_rmdse = torch.sqrt(null_struc_mse), torch.sqrt(null_struc_mdse)
             
-              return data, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse
+            if self.relaxed_file:
+                atoms = Atoms(
+                    positions=xdft_np, # initial
+                    numbers=z_np,
+                    cell=cell_np,
+                    pbc=True,  # or (True, True, False) for a slab
+                    )
+                atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
+                ase.io.write(self.relaxed_file, atoms)  # Cartesian
+ 
+            e_gen = __class__.pbc_aware_pos(
+                positions=data.pos_generated - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
+                cell=data.cell,
+                batch=data.batch,
+        )
+            
+            e_null = __class__.pbc_aware_pos(
+                positions=data.pos - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
+                cell=data.cell,
+                batch=data.batch,
+        )
+            
+            struc_mse, struc_mdse, _, _ = __class__.masked_loss(a=e_gen, b=torch.zeros_like(e_gen), mask=self.free_atoms)
+            struc_rmse, struc_rmdse = torch.sqrt(struc_mse), torch.sqrt(struc_mdse)
+            
+            null_struc_mse, null_struc_mdse, _, _ = __class__.masked_loss(a=e_null, b=torch.zeros_like(e_null), mask=self.free_atoms)
+            null_struc_rmse, null_struc_rmdse = torch.sqrt(null_struc_mse), torch.sqrt(null_struc_mdse)
+        
+            return data, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse
         else: 
             return data

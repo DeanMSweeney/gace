@@ -54,6 +54,8 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
         self.track_grad_norms = track_grad_norms
         self.input_file = input_file
         self.output_file = output_file
+        self.relaxed_file = None
+        self.idx_bad, self.idx_good, self.idx = 0, 0, 0
 
     def forward(self, data):
         return self.model(data)
@@ -65,14 +67,14 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
 
         if self.mask_frzn_atoms and self.variant == "refine":
             self.free_atoms = (1 - data.fixed).unsqueeze(1) # N
-            loss, median_loss, max_loss = self.masked_loss(a=u_hat, b=u, mask=self.free_atoms) 
+            loss, median_loss, max_loss, max_loss_idx = self.masked_loss(a=u_hat, b=u, mask=self.free_atoms) 
         else: 
             loss = self.loss_fn(u_hat, u)  
-        return loss, median_loss, max_loss
+        return loss, median_loss, max_loss, max_loss_idx
     
     # define training and validation methods 
     def training_step(self, data: Data, batch_idx):
-        loss, median_loss, max_loss = self._transport_loss(data)
+        loss, median_loss, max_loss, _ = self._transport_loss(data)
         
         self.log( # log train loss per epoch 
             "train/loss",
@@ -108,7 +110,7 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
         
     
     def validation_step(self, data: Data, batch_idx):
-        loss, median_loss, max_loss = self._transport_loss(data)
+        loss, median_loss, max_loss, _ = self._transport_loss(data)
         
         self.log(
             "val/loss", 
@@ -135,14 +137,41 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
         )
 
         return loss
-
+    
     def test_step(self, data: Data, batch_idx):
-        loss, median_loss, max_loss = self._transport_loss(data)
+        # compute performance metrics/diagnostics
+        loss, median_loss, max_loss, max_loss_idx = self._transport_loss(data)
+        max_z = data.atomic_numbers[int(max_loss_idx)]
+        print(data.atomic_numbers)
+        print(max_loss_idx)
+        print(max_z)
+        max_tag = data.tags[max_loss_idx]
+        self.idx += 1
         
         # define time interval for the IVP
         t = torch.linspace(0., 1., 100, 
                         device=data.pos.device, dtype=data.pos.dtype)
-        opt_graph, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = self.sampler(data, t=t)
+        if loss > 0.0010: 
+            self.idx_bad += 1
+            opt_graph, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = self.sampler(data, t=t)
+            self.output_file = f"strucs/BAD-output{self.idx_bad}_{loss}_{struc_rmse}_{struc_rmdse}_{null_struc_rmse}_{max_loss}_{max_z}_{max_tag}.vasp"
+            self.input_file = f"strucs/BAD-input{self.idx_bad}.vasp"
+            self.relaxed_file = f"strucs/BAD-relaxed{self.idx_bad}.vasp"
+            print(f"High velocity field loss: {loss} ❌ || total count: {self.idx_bad}/{self.idx}")
+            
+        elif loss < 0.00070: 
+            self.idx_good += 1 
+            opt_graph, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = self.sampler(data, t=t)
+            self.output_file = f"strucs/GOOD-output{self.idx_good}.vasp"
+            self.input_file = f"strucs/GOOD-input{self.idx_good}.vasp"
+            self.relaxed_file = f"strucs/GOOD-relaxed{self.idx_good}.vasp"
+            print(f"Small velocity field loss: {loss} ✅ || total count: {self.idx_good}/{self.idx}")
+        else: 
+            print(f"Velocity field loss: {loss} 🟡")
+            self.output_file = None
+            self.input_file = None
+            self.relaxed_file = None
+            opt_graph, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = self.sampler(data, t=t)
         
         self.log(
             "test/loss", 
