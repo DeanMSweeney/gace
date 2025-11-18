@@ -3,10 +3,10 @@
 #SBATCH --job-name=equiformerv2
 #SBATCH --partition=ghx4
 #SBATCH --nodes=2
-#SBATCH --ntasks-per-node=1
+#SBATCH --ntasks-per-node=4
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=16
-#SBATCH --time=23:00:00
+#SBATCH --time=47:00:00
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=dmsween@umich.edu
 #SBATCH --output=logs/%x-%j.out
@@ -53,7 +53,7 @@ srun singularity exec --nv \
       cd /workspace${SLURM_SUBMIT_DIR#$PROJECT_DIR} && \
       python train.py \
       --config-path conf \
-      --config-name gem_config-32 \
+      --config-name equ_config-53 \
       num_nodes=2 \
       devices=4 \
       logger=True \
