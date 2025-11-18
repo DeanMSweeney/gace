@@ -16,8 +16,8 @@ oc20_test:  "/workspace/datasets/mini/data_refined.lmdb"
 # training hyperparameters/settings
 batch_size: 16
 num_workers: 8
-max_epochs: 200
-accumulate_grad_batches: 16
+max_epochs: 500
+accumulate_grad_batches: 2
 
 optimizer_hparams:
   weight_decay: 0.001
@@ -32,8 +32,8 @@ project: "adsflow"
 run_name: "equiformer-model"
 
 # restart run 
-ckpt_path: "checkpoints/equiformer-model-epoch=68.ckpt"
-run_id: null # log id from wandb
+ckpt_path: "checkpoints/last.ckpt"
+run_id: "ujq06kx3" # log id from wandb
 
 # computer arch
 accelerator: "gpu"
