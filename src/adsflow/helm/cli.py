@@ -13,6 +13,7 @@ from lightning.pytorch.utilities import rank_zero_only
 from lightning.pytorch.callbacks import LearningRateMonitor
 from torch_geometric.loader import DataLoader
 from torch_geometric.data import Data
+from torch.utils.data import Subset
 
 import hydra
 from omegaconf import OmegaConf, DictConfig, MISSING
@@ -128,6 +129,7 @@ def main(cfg: Config) -> None:
         declare(f">>> Activated Evaluation mode with OC20-test: {cfg.oc20_test} 🦉")
         ptst = {"src": cfg.oc20_test}
         test_set = LazyLmdbDataset(ptst)
+        test_set = Subset(test_set, indices=range(20))
         test_loader = DataLoader(
             dataset=test_set, 
             batch_size=cfg.batch_size,

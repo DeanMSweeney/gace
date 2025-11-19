@@ -55,7 +55,14 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
         self.input_file = input_file
         self.output_file = output_file
         self.relaxed_file = None
+        
+        # Diagnostic studies on output structures
+        self.diagnostics = True
         self.idx_bad, self.idx_good, self.idx = 0, 0, 0
+        self.DS1 = []
+        self.DS2 = []
+        self.DS3 = []
+        self.DS4 = []
 
     def forward(self, data):
         return self.model(data)
@@ -140,39 +147,78 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
     
     def test_step(self, data: Data, batch_idx):
         # compute performance metrics/diagnostics
-        loss, median_loss, max_loss, max_loss_idx = self._transport_loss(data)
-        max_z = data.atomic_numbers[int(max_loss_idx)]
-        print(data.atomic_numbers)
-        print(max_loss_idx)
-        print(max_z)
-        max_tag = data.tags[max_loss_idx]
-        self.idx += 1
-        
+        self.iter += 1
+        loss, median_loss, max_loss, max_loss_idx = self._transport_loss(data) # avergae, median, argmax
+    
         # define time interval for the IVP
         t = torch.linspace(0., 1., 100, 
                         device=data.pos.device, dtype=data.pos.dtype)
-        if loss > 0.0010: 
-            self.idx_bad += 1
-            opt_graph, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = self.sampler(data, t=t)
-            self.output_file = f"strucs/BAD-output{self.idx_bad}_{loss}_{struc_rmse}_{struc_rmdse}_{null_struc_rmse}_{max_loss}_{max_z}_{max_tag}.vasp"
-            self.input_file = f"strucs/BAD-input{self.idx_bad}.vasp"
-            self.relaxed_file = f"strucs/BAD-relaxed{self.idx_bad}.vasp"
-            print(f"High velocity field loss: {loss} ❌ || total count: {self.idx_bad}/{self.idx}")
+
+        if self.diagnostics:
+            # activate loop if loss is greater than threshold 
+            if loss > 0.0010: 
+                self.bad_iter += 1
+                
+                """ 
+                Compute statistics for max velocity field loss 
+                """
+                max_loss_z = data.atomic_numbers[max_loss_idx] # atomic number of atom with max loss
+                max_loss_tag = data.tags[max_loss_idx] # tag of atom with max loss 
+                
+                if float(max_loss_tag) != 2:
+                    atom_pos = data.pos[max_loss_idx]
+                    ads_pos = 
+                
+                # collect  and save diagnostics to .npy
+                self.DS1.append(int(max_loss_z))
+                self.DS2.append(int(max_loss_tag))
+                
+                if self.idx > 5000 and not os.path.exists("loss-tags.npy"):
+                    np.save("loss-atomic_numbers", np.array(self.DS1))
+                    np.save("loss-tags", np.array(self.DS2))
+                
+                """
+                Compute statistics for max distance moved during relaxation 
+                """
+                # pbc aware displacement matrix N, 1
+                delta_xyz = __class__.pbc_aware_pos(
+                    positions=data.pos - data.pos_relaxed,
+                    cell=data.cell,
+                    batch=data.batch,
+                    naive=True,
+                ) 
+                # average across dimensions and atoms 
+                distance_per_atom = delta_xyz.abs().mean(dim=1, keepdim=True) * self.free_atoms  # N,3 -> N,1
+                avg_distance = distance_per_atom.sum() / self.free_atoms.sum().clamp_min(1e-8)
+                max_distance = distance_per_atom.max()
+                max_distance_idx = torch.argmax(distance_per_atom)
+                max_distance_z = data.atomic_numbers[max_distance_idx] # atomic number of atom with max distance moved 
+                max_distance_tag = data.tags[max_distance_idx] # tag of atom with max distance moved 
+                distance_of_max_loss = distance_per_atom[max_loss_idx]
+
+                 # collect diagnostics 
+                self.DS3.append(int(max_distance_z))
+                self.DS3.append(int(max_distance_tag))
+                
+                """
+                Generate structures and write files for problematic losses
+                
+                self.output_file = f"strucs/BAD-output{self.bad_iter}_{loss}_{max_loss}_{max_loss_idx}_{max_loss_z}_{max_loss_tag}.vasp"
+                self.input_file = f"strucs/BAD-input{self.bad_iter}.vasp"
+                self.relaxed_file = f"strucs/BAD-relaxed{self.bad_iter}.vasp"
+                opt_graph, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = self.sampler(data, t=t)
+                """
+                #struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = 0, 0, 0, 0
             
-        elif loss < 0.00070: 
-            self.idx_good += 1 
-            opt_graph, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = self.sampler(data, t=t)
-            self.output_file = f"strucs/GOOD-output{self.idx_good}.vasp"
-            self.input_file = f"strucs/GOOD-input{self.idx_good}.vasp"
-            self.relaxed_file = f"strucs/GOOD-relaxed{self.idx_good}.vasp"
-            print(f"Small velocity field loss: {loss} ✅ || total count: {self.idx_good}/{self.idx}")
+                # print statements 
+                print(f"Average distance: {avg_distance} || relative distances moved by max loss, max distance: {distance_per_atom[max_loss_idx], distance_per_atom[max_distance_idx]}")
+                print(f"High velocity field loss {loss} ❌ || total count: {self.idx_bad}/{self.idx}")
+                
+            else: 
+                struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = 0, 0, 0, 0
         else: 
-            print(f"Velocity field loss: {loss} 🟡")
-            self.output_file = None
-            self.input_file = None
-            self.relaxed_file = None
             opt_graph, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = self.sampler(data, t=t)
-        
+                
         self.log(
             "test/loss", 
             loss, 
