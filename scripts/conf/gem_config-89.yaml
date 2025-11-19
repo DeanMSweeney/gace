@@ -11,7 +11,7 @@ regressor: "GemNet-OC"
 oc20_train: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data_refined.lmdb"
 oc20_val:   "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/val_id/data_refined.lmdb"
 oc20_mini:  "/workspace/datasets/mini/data_refined.lmdb"
-oc20_test:  "/workspace/datasets/mini/data_refined.lmdb"
+oc20_test: "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data_refined.lmdb" #"/workspace/datasets/mini/data_refined.lmdb"
 
 # training hyperparameters/settings
 batch_size: 1
