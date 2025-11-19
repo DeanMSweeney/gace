@@ -45,16 +45,17 @@ class OptTransportMixin:
     @staticmethod # define as normal function within class's namespace
     def pbc_aware_pos(
                 cell: Tensor, 
-                positions: Tensor, 
+                delta: Tensor, 
                 batch: Tensor, 
                 naive: bool=True,
+                avg_xyz: bool=False,
     ) -> Tensor:
           
           A  =  cell[batch]  # (N,3,3)
           G = A @ A.transpose(1,2) # (N, 3, 3)
           N = len(batch)
           
-          u = positions # (N,3)
+          u = delta # (N,3)
           u_f = torch.linalg.solve(A.transpose(1,2), u.unsqueeze(-1)).squeeze(-1)  # (N,3)
           n0 = torch.round(u_f)
           
@@ -73,8 +74,11 @@ class OptTransportMixin:
                 u_f_min = U_f_n[torch.arange(N), k_min]
                 
           u_min = torch.bmm(u_f_min.unsqueeze(1), A).squeeze(1)
-                
-          return u_min
+          
+          if avg_xyz:
+              return u_min.abs().mean(dim=1, keepdim=True) # N,3 -> N,1
+          else: 
+              return u_min
      
     def path(
         self,
@@ -103,7 +107,7 @@ class OptTransportMixin:
         else: 
                delta_xyz = x1 - x0
                u = __class__.pbc_aware_pos(
-                  positions=delta_xyz,
+                  delta=delta_xyz,
                   cell=data.cell,
                   batch=data.batch,
                   naive=naive,
