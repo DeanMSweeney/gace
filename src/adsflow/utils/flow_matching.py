@@ -24,12 +24,11 @@ class OptTransportMixin:
     def masked_loss(
         a: Tensor,  # N, 3
         b: Tensor,  # N, 3
-        mask: Tensor,  # N, 1 -> e.g., [0, 0, 1, 1, ..., 0]
-        median: bool=False,
+        mask: Tensor=None,  # N, 1 -> e.g., [0, 0, 1, 1, ..., 0]
     ):
         L_per_atom = ((a - b) ** 2).mean(dim=1, keepdim=True)  # N, 1
         masked_L_per_atom = L_per_atom * mask  # N, 1
-
+        
         # Compute masked mean loss
         masked_avg_L = masked_L_per_atom.sum() / mask.sum().clamp_min(1e-8)
         
@@ -102,9 +101,9 @@ class OptTransportMixin:
               u = data.velocity
               
         else: 
-               u_var = x1 - x0
+               delta_xyz = x1 - x0
                u = __class__.pbc_aware_pos(
-                  positions=u_var,
+                  positions=delta_xyz,
                   cell=data.cell,
                   batch=data.batch,
                   naive=naive,
