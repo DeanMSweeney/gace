@@ -185,7 +185,7 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
                     avg_xyz=True,
                     )
                     # collect diagnostics for surface atom 
-                    self.DS0.append(int(delta_max_ads.min())) # distance between atom and adsorbate
+                    self.DS0.append(float(delta_max_ads.min())) # distance between atom and adsorbate
                     
                  # collect diagnostics   
                 self.DS1.append(int(max_loss_z)) # atomic number 
@@ -216,8 +216,8 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
                  # collect diagnostics 
                 self.DS3.append(int(max_distance_z)) # atomic number 
                 self.DS4.append(int(max_distance_tag)) # tag (surface, bulk, adsorbate)
-                self.DS5.append(int(max_distance)) # max distance moved during relaxation 
-                self.DS6.append(int(distance_of_max_loss)) # max distance moved of atom with max loss 
+                self.DS5.append(float(max_distance)) # max distance moved during relaxation 
+                self.DS6.append(float(distance_of_max_loss)) # max distance moved of atom with max loss 
                 
                 """
                 Generate structures and write files for problematic losses
@@ -235,12 +235,12 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
                 # collect diagnostics 
                 self.DS3.append(int(max_distance_z)) # atomic number 
                 self.DS4.append(int(max_distance_tag)) # tag (surface, bulk, adsorbate)
-                self.DS5.append(int(max_distance)) # max distance moved during relaxation 
-                self.DS6.append(int(distance_of_max_loss)) # max distance moved of atom with max loss 
-                self.DS7.append(int(avg_distance))
+                self.DS5.append(float(max_distance)) # max distance moved during relaxation 
+                self.DS6.append(float(distance_of_max_loss)) # max distance moved of atom with max loss 
+                self.DS7.append(float(avg_distance)) # average distance moved of all atoms in struc 
                 
                 # save outputs to .npy 
-                if self.iter > 10000 and not os.path.exists("loss-tag.npy"):
+                if self.iter == 460328 and not os.path.exists("loss-tag.npy"):
                     np.save("loss-displacement_from_ads", np.array(self.DS0))
                     np.save("loss-atomic_number", np.array(self.DS1))
                     np.save("loss-tag", np.array(self.DS2))
