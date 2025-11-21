@@ -15,13 +15,13 @@ from typing import Optional, Literal, Union, Tuple
 
 
 
-class OptTransportMixin: 
+class OptTransportUtils(): 
     """
     This Mixin supports image invariant interpolation paths and masked loss for frozen atoms 
     """
     
-    @staticmethod
     def masked_loss(
+        self,
         a: Tensor,  # N, 3
         b: Tensor,  # N, 3
         mask: Tensor=None,  # N, 1 -> e.g., [0, 0, 1, 1, ..., 0]
@@ -42,8 +42,8 @@ class OptTransportMixin:
        
         return masked_avg_L, masked_med_L, max_L, max_L_idx
             
-    @staticmethod # define as normal function within class's namespace
-    def pbc_aware_pos(
+    def pbc_aware_delta(
+                self,
                 cell: Tensor, 
                 delta: Tensor, 
                 batch: Tensor, 
@@ -106,7 +106,7 @@ class OptTransportMixin:
               
         else: 
                delta_xyz = x1 - x0
-               u = __class__.pbc_aware_pos(
+               u = self.pbc_aware_delta(
                   delta=delta_xyz,
                   cell=data.cell,
                   batch=data.batch,
@@ -193,24 +193,113 @@ class OptTransportMixin:
                 atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
                 ase.io.write(self.relaxed_file, atoms)  # Cartesian
  
-            e_gen = __class__.pbc_aware_pos(
+            e_gen = self.pbc_aware_delta(
                 positions=data.pos_generated - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
                 cell=data.cell,
                 batch=data.batch,
         )
             
-            e_null = __class__.pbc_aware_pos(
+            e_null = self.pbc_aware_delta(
                 positions=data.pos - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
                 cell=data.cell,
                 batch=data.batch,
         )
             
-            struc_mse, struc_mdse, _, _ = __class__.masked_loss(a=e_gen, b=torch.zeros_like(e_gen), mask=self.free_atoms)
+            struc_mse, struc_mdse, _, _ = self.masked_loss(a=e_gen, b=torch.zeros_like(e_gen), mask=self.free_atoms)
             struc_rmse, struc_rmdse = torch.sqrt(struc_mse), torch.sqrt(struc_mdse)
             
-            null_struc_mse, null_struc_mdse, _, _ = __class__.masked_loss(a=e_null, b=torch.zeros_like(e_null), mask=self.free_atoms)
+            null_struc_mse, null_struc_mdse, _, _ = self.masked_loss(a=e_null, b=torch.zeros_like(e_null), mask=self.free_atoms)
             null_struc_rmse, null_struc_rmdse = torch.sqrt(null_struc_mse), torch.sqrt(null_struc_mdse)
         
             return data, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse
         else: 
             return data
+        
+    def analyze_loss(
+        self, 
+        loss: Tensor, 
+        median_loss: Tensor, 
+        max_loss: Tensor, 
+        max_loss_idx: Tensor, 
+        data: Data,
+        sample_x1: bool=False,
+    ): 
+        # activate loop if loss is greater than threshold 
+            if loss > 0.0010: 
+                self.bad_iter += 1
+                
+                """ 
+                Compute statistics for max velocity field loss 
+                """
+                max_loss_z = data.atomic_numbers[max_loss_idx] # atomic number of atom with max loss
+                max_loss_tag = data.tags[max_loss_idx] # tag of atom with max loss 
+                
+                # evaluate distance from adsorbate for surface atoms 
+                if float(max_loss_tag) != 2:
+                    max_atom_pos = data.pos_relaxed[max_loss_idx] #1,3
+                    adsorbate = (data.tags == 2) 
+                    adsorbate_pos = data.pos_relaxed[adsorbate] #N_a, 3, N_a -> # of adsorbate atoms 
+                    
+                    # pbc corrected distance calc 
+                    K = (max_atom_pos - adsorbate_pos).size(0)
+                    delta_max_ads = self.pbc_aware_delta(
+                    delta=max_atom_pos - adsorbate_pos,
+                    cell=data.cell,
+                    batch=torch.zeros(K, dtype=torch.long),
+                    naive=True,
+                    avg_xyz=True,
+                    )
+                    # collect diagnostics for surface atom 
+                    self.DS0.append(float(delta_max_ads.min())) # distance between atom and adsorbate
+                    
+                 # collect diagnostics   
+                self.DS1.append(int(max_loss_z)) # atomic number 
+                self.DS2.append(int(max_loss_tag)) # tag (surface, bulk, adsorbate)
+                
+                """
+                Compute statistics for max distance moved during relaxation 
+                """
+                # pbc aware displacement from relaxation 
+                delta = self.pbc_aware_delta(
+                    delta=data.pos - data.pos_relaxed,
+                    cell=data.cell,
+                    batch=data.batch,
+                    naive=True,
+                    avg_xyz=True,
+                ) 
+                
+                # N,1, zero-out frozen atoms and average
+                distance_per_atom = delta * self.free_atoms  
+                avg_distance = distance_per_atom.sum() / self.free_atoms.sum().clamp_min(1e-8)
+                max_distance = distance_per_atom.max()
+                max_distance_idx = torch.argmax(distance_per_atom)
+                distance_of_max_loss = distance_per_atom[max_loss_idx]
+
+                max_distance_z = data.atomic_numbers[max_distance_idx] # atomic number of atom with max distance moved 
+                max_distance_tag = data.tags[max_distance_idx] # tag of atom with max distance moved 
+                
+                 # collect diagnostics 
+                self.DS3.append(int(max_distance_z)) # atomic number 
+                self.DS4.append(int(max_distance_tag)) # tag (surface, bulk, adsorbate)
+                self.DS5.append(float(max_distance)) # max distance moved during relaxation 
+                self.DS6.append(float(distance_of_max_loss)) # max distance moved of atom with max loss 
+                
+                if sample_x1: 
+                    # generate structures and write files for problematic losses
+                    self.output_file = f"strucs/BAD-output{self.bad_iter}_{loss}_{max_loss}_{max_loss_idx}_{max_loss_z}_{max_loss_tag}.vasp"
+                    self.input_file = f"strucs/BAD-input{self.bad_iter}.vasp"
+                    self.relaxed_file = f"strucs/BAD-relaxed{self.bad_iter}.vasp"
+                    opt_graph, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = self.sampler(data, t=t)
+                else:    
+                    struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = 0, 0, 0, 0
+            
+                # print statements 
+                print(f"High velocity field loss {loss} ❌ || total count: {self.bad_iter}/{self.iter}")
+                
+                # collect diagnostics 
+                self.DS3.append(int(max_distance_z)) # atomic number 
+                self.DS4.append(int(max_distance_tag)) # tag (surface, bulk, adsorbate)
+                self.DS5.append(float(max_distance)) # max distance moved during relaxation 
+                self.DS6.append(float(distance_of_max_loss)) # max distance moved of atom with max loss 
+                self.DS7.append(float(avg_distance)) # average distance moved of all atoms in struc 
+        
