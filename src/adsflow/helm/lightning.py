@@ -160,6 +160,7 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
 
         if self.diagnostics:
             self.analyze_loss(
+                data=data,
                 loss=loss, 
                 median_loss=median_loss, 
                 max_loss=max_loss, 
