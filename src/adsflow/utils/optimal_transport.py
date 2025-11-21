@@ -289,9 +289,10 @@ class OptTransportUtils():
                     self.output_file = f"strucs/BAD-output{self.bad_iter}_{loss}_{max_loss}_{max_loss_idx}_{max_loss_z}_{max_loss_tag}.vasp"
                     self.input_file = f"strucs/BAD-input{self.bad_iter}.vasp"
                     self.relaxed_file = f"strucs/BAD-relaxed{self.bad_iter}.vasp"
+                    
+                    # define time interval for the IVP
+                    t = torch.linspace(0., 1., 100, device=data.pos.device, dtype=data.pos.dtype)
                     opt_graph, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = self.sampler(data, t=t)
-                else:    
-                    struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = 0, 0, 0, 0
             
                 # print statements 
                 print(f"High velocity field loss {loss} ❌ || total count: {self.bad_iter}/{self.iter}")
