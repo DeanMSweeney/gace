@@ -217,11 +217,11 @@ class OptTransportUtils():
         
     def analyze_loss(
         self, 
+        data: Data,
         loss: Tensor, 
         median_loss: Tensor, 
         max_loss: Tensor, 
         max_loss_idx: Tensor, 
-        data: Data,
         sample_x1: bool=False,
     ): 
         # activate loop if loss is greater than threshold 
