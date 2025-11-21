@@ -9,13 +9,13 @@ from lightning.pytorch import LightningModule
 from torch_geometric.data import Data
 from transformers import get_cosine_schedule_with_warmup, get_polynomial_decay_schedule_with_warmup
 
-from adsflow.utils.flow_matching import OptTransportMixin
+from adsflow.utils.optimal_transport import OptTransportUtils
 from adsflow.utils.utils import ship_data
 
 from typing import Optional, Literal, Union, Tuple
 
 
-class LightFlowMatch(LightningModule, OptTransportMixin):
+class LightFlowMatch(LightningModule, OptTransportUtils):
     """
     This class defines the training algorithm for the conditional flow matching model using optimal transport 
     
@@ -159,98 +159,13 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
                         device=data.pos.device, dtype=data.pos.dtype)
 
         if self.diagnostics:
-            # activate loop if loss is greater than threshold 
-            if loss > 0.0010: 
-                self.bad_iter += 1
-                
-                """ 
-                Compute statistics for max velocity field loss 
-                """
-                max_loss_z = data.atomic_numbers[max_loss_idx] # atomic number of atom with max loss
-                max_loss_tag = data.tags[max_loss_idx] # tag of atom with max loss 
-                
-                # evaluate distance from adsorbate for surface atoms 
-                if float(max_loss_tag) != 2:
-                    max_atom_pos = data.pos_relaxed[max_loss_idx] #1,3
-                    adsorbate = (data.tags == 2) 
-                    adsorbate_pos = data.pos_relaxed[adsorbate] #N_a, 3, N_a -> # of adsorbate atoms 
-                    
-                    # pbc corrected distance calc 
-                    K = (max_atom_pos - adsorbate_pos).size(0)
-                    delta_max_ads = __class__.pbc_aware_pos(
-                    delta=max_atom_pos - adsorbate_pos,
-                    cell=data.cell,
-                    batch=torch.zeros(K, dtype=torch.long),
-                    naive=True,
-                    avg_xyz=True,
-                    )
-                    # collect diagnostics for surface atom 
-                    self.DS0.append(float(delta_max_ads.min())) # distance between atom and adsorbate
-                    
-                 # collect diagnostics   
-                self.DS1.append(int(max_loss_z)) # atomic number 
-                self.DS2.append(int(max_loss_tag)) # tag (surface, bulk, adsorbate)
-                
-                """
-                Compute statistics for max distance moved during relaxation 
-                """
-                # pbc aware displacement from relaxation 
-                delta = __class__.pbc_aware_pos(
-                    delta=data.pos - data.pos_relaxed,
-                    cell=data.cell,
-                    batch=data.batch,
-                    naive=True,
-                    avg_xyz=True,
-                ) 
-                
-                # N,1, zero-out frozen atoms and average
-                distance_per_atom = delta * self.free_atoms  
-                avg_distance = distance_per_atom.sum() / self.free_atoms.sum().clamp_min(1e-8)
-                max_distance = distance_per_atom.max()
-                max_distance_idx = torch.argmax(distance_per_atom)
-                distance_of_max_loss = distance_per_atom[max_loss_idx]
-
-                max_distance_z = data.atomic_numbers[max_distance_idx] # atomic number of atom with max distance moved 
-                max_distance_tag = data.tags[max_distance_idx] # tag of atom with max distance moved 
-                
-                 # collect diagnostics 
-                self.DS3.append(int(max_distance_z)) # atomic number 
-                self.DS4.append(int(max_distance_tag)) # tag (surface, bulk, adsorbate)
-                self.DS5.append(float(max_distance)) # max distance moved during relaxation 
-                self.DS6.append(float(distance_of_max_loss)) # max distance moved of atom with max loss 
-                
-                """
-                Generate structures and write files for problematic losses
-                
-                self.output_file = f"strucs/BAD-output{self.bad_iter}_{loss}_{max_loss}_{max_loss_idx}_{max_loss_z}_{max_loss_tag}.vasp"
-                self.input_file = f"strucs/BAD-input{self.bad_iter}.vasp"
-                self.relaxed_file = f"strucs/BAD-relaxed{self.bad_iter}.vasp"
-                opt_graph, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = self.sampler(data, t=t)
-                """
-                struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = 0, 0, 0, 0
-            
-                # print statements 
-                print(f"High velocity field loss {loss} ❌ || total count: {self.bad_iter}/{self.iter}")
-                
-                # collect diagnostics 
-                self.DS3.append(int(max_distance_z)) # atomic number 
-                self.DS4.append(int(max_distance_tag)) # tag (surface, bulk, adsorbate)
-                self.DS5.append(float(max_distance)) # max distance moved during relaxation 
-                self.DS6.append(float(distance_of_max_loss)) # max distance moved of atom with max loss 
-                self.DS7.append(float(avg_distance)) # average distance moved of all atoms in struc 
-                
-                # save outputs to .npy 
-                if self.iter == 460328 and not os.path.exists("loss-tag.npy"):
-                    np.save("loss-displacement_from_ads", np.array(self.DS0))
-                    np.save("loss-atomic_number", np.array(self.DS1))
-                    np.save("loss-tag", np.array(self.DS2))
-                    np.save("distance-atomic_number", np.array(self.DS3))
-                    np.save("distance-tag", np.array(self.DS4))
-                    np.save("distance-max", np.array(self.DS5))
-                    np.save("distance-max_loss", np.array(self.DS6))
-                    np.save("avg_distance", np.array(self.DS7))
-            else: 
-                struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = 0, 0, 0, 0
+            self.analyze_loss(
+                loss=loss, 
+                median_loss=median_loss, 
+                max_loss=max_loss, 
+                max_loss_idx=max_loss_idx,
+                sample_x1=False,
+            )
         else: 
             opt_graph, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = self.sampler(data, t=t)
                 
@@ -315,6 +230,17 @@ class LightFlowMatch(LightningModule, OptTransportMixin):
         
         return loss    
     
+    def on_test_end(self):
+        # Only rank 0 should write files
+        if self.trainer.is_global_zero and self.diagnostics:
+            np.save("loss-displacement_from_ads", np.array(self.DS0))
+            np.save("loss-atomic_number",        np.array(self.DS1))
+            np.save("loss-tag",                  np.array(self.DS2))
+            np.save("distance-atomic_number",    np.array(self.DS3))
+            np.save("distance-tag",              np.array(self.DS4))
+            np.save("distance-max",              np.array(self.DS5))
+            np.save("distance-max_loss",         np.array(self.DS6))
+            np.save("avg_distance",              np.array(self.DS7))
     
     def configure_optimizers(self):
         optimizer = optim.AdamW(
