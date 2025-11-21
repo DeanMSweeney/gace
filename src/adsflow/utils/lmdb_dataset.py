@@ -1,4 +1,19 @@
 """
+NOTE (Modified by Dean M. Sweeney, 2025-07-40)
+
+This file is adapted from Meta’s original OC20 LmdbDataset. Key changes:
+
+1. Added **lazy LMDB opening** (envs opened on first access, not at init).
+2. Disabled **LMDB readahead** to avoid huge I/O prefetch on HPC filesystems.
+3. Computed shard lengths using brief open/close instead of persistent envs.
+4. Simplified global→local index mapping using `bisect_right`.
+5. Renamed class to `LazyLmdbDataset` for clarity; core data decoding unchanged.
+
+All OC20 behavior preserved; design now avoids heavy startup cost and reduces memory/I/O load.
+"""
+
+
+"""
 Copyright (c) Meta, Inc. and its affiliates.
 This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
@@ -148,136 +163,3 @@ def data_list_collater(
         except Exception:
             logging.warning("Missing edge_index; set otf_graph=True")
     return dict(batch.items()) if to_dict else batch
-
-import torch
-from torch import Tensor
-from torch_geometric.data import Data
-from typing import Optional, Literal, Union, Tuple
-
-
-class OptTransportMixin: 
-    """
-    This Mixin supports image invariant interpolation paths and masked loss for frozen atoms 
-    """
-   
-    @staticmethod # define as normal function within class's namespace
-    def pbc_aware_disp(
-                cell: Tensor, 
-                pos: Tensor, 
-                pos_relaxed: Tensor, 
-                batch: Tensor, 
-                naive: bool,
-    ) -> Tensor:
-          
-          A  =  cell[batch]  # (N,3,3)
-          G = A @ A.transpose(1,2) # (N, 3, 3)
-          x0 = pos # (N,3)
-          x1 = pos_relaxed # (N,3)
-          N = len(batch)
-          
-          u = x1 - x0 # (N,3)
-          u_f = torch.linalg.solve(A.transpose(1,2), u.unsqueeze(-1)).squeeze(-1)  # (N,3)
-          n0 = torch.round(u_f)
-
-          if naive:
-                u_f_min = u_f - n0
-          else: 
-                # nearest neighbor search algorithm 
-                D = torch.tensor(list(itertools.product([-1, 0, 1], repeat=3)), dtype=torch.int) # (27, 3)
-                n = n0.unsqueeze(1) + D.unsqueeze(0) # (N, 1, 3) + (1, 27, 3) = (N, 27, 3) 
-                U_f_n = u_f.unsqueeze(1) - n # (N, 1, 3) - (N, 27, 3) = (N, 27, 3)
-                W = U_f_n @ G # (N, 27, 3)
-                u_f2 = (W * U_f_n).sum(dim=-1) # (N, 27)
-                  
-                # output 
-                k_min = u_f2.argmin(dim=1) # N
-                u_f_min = U_f_n[torch.arange(N), k_min]
-                
-          u_min = torch.bmm(u_f_min.unsqueeze(1), A).squeeze(1) 
-          return u_min
-
-### Testing ###
-if __name__ == "__main__":
-    from torch_geometric.data import Data
-    from torch_geometric.loader import DataLoader
-    import itertools
-    from ase import Atoms
-    from ase.io import write
-    
-    dict = {"src": "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb"}
-    dataset = LazyLmdbDataset(dict)
-    loader = DataLoader(
-        dataset=dataset,
-        batch_size=1,
-        pin_memory=True,
-    )
-
-    u1 = []
-    u2 = []
-    for iter, data in enumerate(loader):
-            naive = OptTransportMixin.pbc_aware_disp(
-                  cell = data.cell,
-                  pos = data.pos,
-                  pos_relaxed = data.pos_relaxed,
-                  batch = data.batch,
-                  naive=True,
-            )
-
-            neighbor = naive = OptTransportMixin.pbc_aware_disp(
-                  cell = data.cell,
-                  pos = data.pos,
-                  pos_relaxed = data.pos_relaxed,
-                  batch = data.batch,
-                  naive=False
-            )
-            
-            print(f"Iteration: {iter}")
-            
-            if (naive != neighbor).all(): 
-                print("strucs unequal")
-                
-                # Convert to numpy
-                z_np        = data.atomic_numbers.detach().cpu().numpy()
-                cell_np     = data.cell.detach().cpu().numpy()
-                x0_np       = data.pos.detach().cpu().numpy()
-                xt_naive_np = (data.pos + naive).detach().cpu().numpy()
-                xt_27_np    = (data.pos + neighbor).detach().cpu().numpy()
-
-                # Save to current directory
-                atoms = Atoms(
-                  positions=x0_np, # initial
-                  numbers=z_np,
-                  cell=cell_np,
-                  pbc=True,  # or (True,True,False) for a slab
-                )
-                write("POSCAR",  atoms, vasp5=True, direct=False)  # Cartesian
-                
-                atoms1 = Atoms(
-                  positions=xt_naive_np, # initial
-                  numbers=z_np,
-                  cell=cell_np,
-                  pbc=True,  # or (True,True,False) for a slab
-                )
-                write("POSCAR1",  atoms1, vasp5=True, direct=False)  # Cartesian
-                
-                atoms2 = Atoms(
-                  positions=xt_27_np, # initial
-                  numbers=z_np,
-                  cell=cell_np,
-                  pbc=True,  # or (True,True,False) for a slab
-                )
-                write("POSCAR2",  atoms2, vasp5=True, direct=False)  # Cartesian
-                
-                break 
-            
-
-        
-            
-     
-            
-            
-            
-            
-            
-    
-                
