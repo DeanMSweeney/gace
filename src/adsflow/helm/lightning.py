@@ -54,7 +54,6 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
         self.track_grad_norms = track_grad_norms
         self.input_file = input_file
         self.output_file = output_file
-        self.relaxed_file = None
         
         # Diagnostic studies on output structures
         self.diagnostics = True
@@ -155,8 +154,7 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
         loss, median_loss, max_loss, max_loss_idx = self._transport_loss(data) # avergae, median, argmax
     
         # define time interval for the IVP
-        t = torch.linspace(0., 1., 100, 
-                        device=data.pos.device, dtype=data.pos.dtype)
+        t = torch.linspace(0., 1., 100, device=data.pos.device, dtype=data.pos.dtype)
 
         if self.diagnostics:
             self.analyze_loss(
@@ -167,6 +165,7 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
                 max_loss_idx=max_loss_idx,
                 sample_x1=False,
             )
+            struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = 0, 0, 0, 0
         else: 
             opt_graph, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = self.sampler(data, t=t)
                 
@@ -230,19 +229,45 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
         os.makedirs(out_dir, exist_ok=True)
         
         return loss    
-    
+
     def on_test_end(self):
-        # Only rank 0 should write files
-        if self.trainer.is_global_zero and self.diagnostics:
-            np.save("loss-displacement_from_ads", np.array(self.DS0))
-            np.save("loss-atomic_number",        np.array(self.DS1))
-            np.save("loss-tag",                  np.array(self.DS2))
-            np.save("distance-atomic_number",    np.array(self.DS3))
-            np.save("distance-tag",              np.array(self.DS4))
-            np.save("distance-max",              np.array(self.DS5))
-            np.save("distance-max_loss",         np.array(self.DS6))
-            np.save("avg_distance",              np.array(self.DS7))
-    
+        # Convert Python lists → tensors so Lightning can all_gather them
+        DS0 = torch.tensor(self.DS0, device=self.device, dtype=torch.float32)
+        DS1 = torch.tensor(self.DS1, device=self.device, dtype=torch.long)
+        DS2 = torch.tensor(self.DS2, device=self.device, dtype=torch.long)
+        DS3 = torch.tensor(self.DS3, device=self.device, dtype=torch.long)
+        DS4 = torch.tensor(self.DS4, device=self.device, dtype=torch.long)
+        DS5 = torch.tensor(self.DS5, device=self.device, dtype=torch.float32)
+        DS6 = torch.tensor(self.DS6, device=self.device, dtype=torch.float32)
+        DS7 = torch.tensor(self.DS7, device=self.device, dtype=torch.float32)
+
+        # Gather from all ranks (these will become shape [world_size, N_local])
+        DS0 = self.all_gather(DS0)
+        DS1 = self.all_gather(DS1)
+        DS2 = self.all_gather(DS2)
+        DS3 = self.all_gather(DS3)
+        DS4 = self.all_gather(DS4)
+        DS5 = self.all_gather(DS5)
+        DS6 = self.all_gather(DS6)
+        DS7 = self.all_gather(DS7)
+
+        # Only rank 0 writes files
+        if self.trainer.is_global_zero and not os.path.exists("loss-tag.npy"):
+
+            # Convert gathered tensors back to 1D NumPy arrays
+            def unwrap(x):
+                return x.reshape(-1).cpu().numpy()
+
+            np.save("loss-displacement_from_ads", unwrap(DS0))
+            np.save("loss-atomic_number",        unwrap(DS1))
+            np.save("loss-tag",                  unwrap(DS2))
+            np.save("distance-atomic_number",    unwrap(DS3))
+            np.save("distance-tag",              unwrap(DS4))
+            np.save("distance-max",              unwrap(DS5))
+            np.save("distance-max_loss",         unwrap(DS6))
+            np.save("avg_distance",              unwrap(DS7))
+
+        
     def configure_optimizers(self):
         optimizer = optim.AdamW(
             self.parameters(), 
