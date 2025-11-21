@@ -6,7 +6,7 @@ import torch
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 from adsflow.utils.lmdb_dataset import LazyLmdbDataset
-from adsflow.utils.flow_matching import OptTransportMixin as OTM
+from adsflow.utils.optimal_transport import OptTransportUtils as OTM
 
 
 def precompute_vel(
