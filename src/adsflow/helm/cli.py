@@ -83,7 +83,7 @@ def main(cfg: Config) -> None:
 
         # build trianing set 
         p = {"src": cfg.oc20_mini}
-        dataset = LmdbDataset(p)
+        dataset = LazyLmdbDataset(p)
         train_set, val_set = random_split(dataset, [0.80, 0.20])
 
         train_loader = DataLoader(
