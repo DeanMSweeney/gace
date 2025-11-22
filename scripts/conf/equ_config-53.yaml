@@ -40,3 +40,5 @@ accelerator: "gpu"
 devices: 8
 num_nodes: 1
 precision: "bf16-mixed"
+
+ode_method: "euler"
