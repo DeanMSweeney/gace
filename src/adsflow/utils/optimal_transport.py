@@ -252,10 +252,6 @@ class OptTransportUtils():
                     # collect diagnostics for surface atom 
                     self.DS0.append(float(delta_max_ads.min())) # distance between atom and adsorbate
                     
-                 # collect diagnostics   
-                self.DS1.append(int(max_loss_z)) # atomic number 
-                self.DS2.append(int(max_loss_tag)) # tag (surface, bulk, adsorbate)
-                
                 """
                 Compute statistics for max distance moved during relaxation 
                 """
@@ -278,12 +274,6 @@ class OptTransportUtils():
                 max_distance_z = data.atomic_numbers[max_distance_idx] # atomic number of atom with max distance moved 
                 max_distance_tag = data.tags[max_distance_idx] # tag of atom with max distance moved 
                 
-                 # collect diagnostics 
-                self.DS3.append(int(max_distance_z)) # atomic number 
-                self.DS4.append(int(max_distance_tag)) # tag (surface, bulk, adsorbate)
-                self.DS5.append(float(max_distance)) # max distance moved during relaxation 
-                self.DS6.append(float(distance_of_max_loss)) # max distance moved of atom with max loss 
-                
                 if sample_x1: 
                     # generate structures and write files for problematic losses
                     self.output_file = f"strucs/BAD-output{self.bad_iter}_{loss}_{max_loss}_{max_loss_idx}_{max_loss_z}_{max_loss_tag}.vasp"
@@ -298,6 +288,8 @@ class OptTransportUtils():
                 print(f"High velocity field loss {loss} ❌ || total count: {self.bad_iter}/{self.iter}")
                 
                 # collect diagnostics 
+                self.DS1.append(int(max_loss_z)) # atomic number 
+                self.DS2.append(int(max_loss_tag)) # tag (surface, bulk, adsorbate)
                 self.DS3.append(int(max_distance_z)) # atomic number 
                 self.DS4.append(int(max_distance_tag)) # tag (surface, bulk, adsorbate)
                 self.DS5.append(float(max_distance)) # max distance moved during relaxation 
