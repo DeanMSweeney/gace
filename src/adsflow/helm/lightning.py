@@ -232,40 +232,27 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
 
     def on_test_end(self):
         # Convert Python lists → tensors so Lightning can all_gather them
-        DS0 = torch.tensor(self.DS0, device=self.device, dtype=torch.float32)
-        DS1 = torch.tensor(self.DS1, device=self.device, dtype=torch.long)
-        DS2 = torch.tensor(self.DS2, device=self.device, dtype=torch.long)
-        DS3 = torch.tensor(self.DS3, device=self.device, dtype=torch.long)
-        DS4 = torch.tensor(self.DS4, device=self.device, dtype=torch.long)
-        DS5 = torch.tensor(self.DS5, device=self.device, dtype=torch.float32)
-        DS6 = torch.tensor(self.DS6, device=self.device, dtype=torch.float32)
-        DS7 = torch.tensor(self.DS7, device=self.device, dtype=torch.float32)
+        DS0 = torch.tensor(self.DS0, dtype=torch.float32)
+        DS1 = torch.tensor(self.DS1, dtype=torch.long)
+        DS2 = torch.tensor(self.DS2, dtype=torch.long)
+        DS3 = torch.tensor(self.DS3, dtype=torch.long)
+        DS4 = torch.tensor(self.DS4, dtype=torch.long)
+        DS5 = torch.tensor(self.DS5, dtype=torch.float32)
+        DS6 = torch.tensor(self.DS6, dtype=torch.float32)
+        DS7 = torch.tensor(self.DS7, dtype=torch.float32)
+        
+        # Convert gathered tensors back to 1D NumPy arrays
+        def unwrap(x):
+            return x.reshape(-1).cpu().numpy()
 
-        # Gather from all ranks (these will become shape [world_size, N_local])
-        DS0 = self.all_gather(DS0)
-        DS1 = self.all_gather(DS1)
-        DS2 = self.all_gather(DS2)
-        DS3 = self.all_gather(DS3)
-        DS4 = self.all_gather(DS4)
-        DS5 = self.all_gather(DS5)
-        DS6 = self.all_gather(DS6)
-        DS7 = self.all_gather(DS7)
-
-        # Only rank 0 writes files
-        if self.trainer.is_global_zero and not os.path.exists("loss-tag.npy"):
-
-            # Convert gathered tensors back to 1D NumPy arrays
-            def unwrap(x):
-                return x.reshape(-1).cpu().numpy()
-
-            np.save("loss-displacement_from_ads", unwrap(DS0))
-            np.save("loss-atomic_number",        unwrap(DS1))
-            np.save("loss-tag",                  unwrap(DS2))
-            np.save("distance-atomic_number",    unwrap(DS3))
-            np.save("distance-tag",              unwrap(DS4))
-            np.save("distance-max",              unwrap(DS5))
-            np.save("distance-max_loss",         unwrap(DS6))
-            np.save("avg_distance",              unwrap(DS7))
+        np.save("loss-displacement_from_ads", unwrap(DS0))
+        np.save("loss-atomic_number",        unwrap(DS1))
+        np.save("loss-tag",                  unwrap(DS2))
+        np.save("distance-atomic_number",    unwrap(DS3))
+        np.save("distance-tag",              unwrap(DS4))
+        np.save("distance-max",              unwrap(DS5))
+        np.save("distance-max_loss",         unwrap(DS6))
+        np.save("avg_distance",              unwrap(DS7))
 
         
     def configure_optimizers(self):
