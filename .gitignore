@@ -27,4 +27,5 @@ logs/
 sandbox/
 outputs/
 checkpoints/
-strucs*/
+strucs/
+strucs_1.0/
