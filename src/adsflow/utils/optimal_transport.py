@@ -183,24 +183,14 @@ class OptTransportUtils():
         # Save to current directory
         if hasattr(data, "pos_relaxed"):
             
-            if self.relaxed_file:
-                atoms = Atoms(
-                    positions=xdft_np, # initial
-                    numbers=z_np,
-                    cell=cell_np,
-                    pbc=True,  # or (True, True, False) for a slab
-                    )
-                atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
-                ase.io.write(self.relaxed_file, atoms)  # Cartesian
- 
             e_gen = self.pbc_aware_delta(
-                positions=data.pos_generated - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
+                delta=data.pos_generated - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
                 cell=data.cell,
                 batch=data.batch,
         )
             
             e_null = self.pbc_aware_delta(
-                positions=data.pos - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
+                delta=data.pos - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
                 cell=data.cell,
                 batch=data.batch,
         )
