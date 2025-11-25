@@ -56,7 +56,7 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
         self.output_file = output_file
         
         # Diagnostic studies on output structures
-        self.diagnostics = True
+        self.diagnostics = False
         self.bad_iter, self.good_ter, self.iter = 0, 0, 0
         self.DS0 = []
         self.DS1 = []
