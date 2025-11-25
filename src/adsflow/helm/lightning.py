@@ -39,11 +39,13 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
             track_grad_norms: bool=False,
             input_file=None,
             output_file=None,
+            relaxed_file=None,
+            run_vasp: bool=False,
             **hparams,
         ):
         
         super().__init__()
-        self.save_hyperparameters(ignore=["model", "mask_frzn_atoms", "rtol", "atol", "ode_method", "track_grad_norms"])  # all __init__ args saved as hyperparameters
+        self.save_hyperparameters(ignore=["model", "mask_frzn_atoms", "rtol", "atol", "ode_method", "track_grad_norms", "input_file", "output_file", "relaxed_file", "run_vasp"])  # all __init__ args saved as hyperparameters
         self.model = model
         self.loss_fn = nn.MSELoss() # mean squared error loss function 
         self.variant = variant
@@ -54,8 +56,12 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
         self.track_grad_norms = track_grad_norms
         self.input_file = input_file
         self.output_file = output_file
+        self.relaxed_file = relaxed_file
+        self.run_vasp = run_vasp
         
-        # Diagnostic studies on output structures
+        # =============================================================================
+        # Diagnostic studies on output model performance during evaluation
+        #                   ** For model development only ** 
         self.diagnostics = False
         self.bad_iter, self.good_ter, self.iter = 0, 0, 0
         self.DS0 = []
@@ -66,7 +72,8 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
         self.DS5 = []
         self.DS6 = []
         self.DS7 = []
-
+       # ==============================================================================
+       
     def forward(self, data):
         return self.model(data)
     
