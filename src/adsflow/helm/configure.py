@@ -16,6 +16,7 @@ class OptimizerConfig:
     warmup_proportion:               float=0.01
     eta_min:                         float=0.0
     power:                           float=1.0
+    max_epochs:                      int   = 100
     
 @dataclass
 class Config:
@@ -85,7 +86,6 @@ class Config:
     num_workers:                     Optional[int] = None
     accumulate_grad_batches:         int   = 1
     val_check_interval:              int   = 1.0
-    max_epochs:                      int   = 3000
 
     # Compute architecture
     accelerator:                     str = "gpu"
@@ -120,6 +120,8 @@ class Config:
     # Generation 
     input_file:                     Optional[str]             = None
     output_file:                    Optional[str]             = None
+    relaxed_file:                   Optional[str]             = None
+    run_vasp:                       bool                      = False 
 
     # Misc
     seed:                            int            = 42
