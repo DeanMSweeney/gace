@@ -39,11 +39,13 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
             track_grad_norms: bool=False,
             input_file=None,
             output_file=None,
+            relaxed_file=None,
+            run_vasp: bool=False,
             **hparams,
         ):
         
         super().__init__()
-        self.save_hyperparameters(ignore=["model", "mask_frzn_atoms", "rtol", "atol", "ode_method", "track_grad_norms"])  # all __init__ args saved as hyperparameters
+        self.save_hyperparameters(ignore=["model", "mask_frzn_atoms", "rtol", "atol", "ode_method", "track_grad_norms", "input_file", "output_file", "relaxed_file", "run_vasp"])  # all __init__ args saved as hyperparameters
         self.model = model
         self.loss_fn = nn.MSELoss() # mean squared error loss function 
         self.variant = variant
@@ -54,9 +56,13 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
         self.track_grad_norms = track_grad_norms
         self.input_file = input_file
         self.output_file = output_file
+        self.relaxed_file = relaxed_file
+        self.run_vasp = run_vasp
         
-        # Diagnostic studies on output structures
-        self.diagnostics = True
+        # =============================================================================
+        # Diagnostic studies on output model performance during evaluation
+        #                   ** For model development only ** 
+        self.diagnostics = False
         self.bad_iter, self.good_ter, self.iter = 0, 0, 0
         self.DS0 = []
         self.DS1 = []
@@ -66,7 +72,8 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
         self.DS5 = []
         self.DS6 = []
         self.DS7 = []
-
+       # ==============================================================================
+       
     def forward(self, data):
         return self.model(data)
     
@@ -231,28 +238,29 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
         return loss    
 
     def on_test_end(self):
-        # Convert Python lists → tensors so Lightning can all_gather them
-        DS0 = torch.tensor(self.DS0, dtype=torch.float32)
-        DS1 = torch.tensor(self.DS1, dtype=torch.long)
-        DS2 = torch.tensor(self.DS2, dtype=torch.long)
-        DS3 = torch.tensor(self.DS3, dtype=torch.long)
-        DS4 = torch.tensor(self.DS4, dtype=torch.long)
-        DS5 = torch.tensor(self.DS5, dtype=torch.float32)
-        DS6 = torch.tensor(self.DS6, dtype=torch.float32)
-        DS7 = torch.tensor(self.DS7, dtype=torch.float32)
-        
-        # Convert gathered tensors back to 1D NumPy arrays
-        def unwrap(x):
-            return x.reshape(-1).cpu().numpy()
+        if self.diagnostics:
+            # Convert Python lists → tensors so Lightning can all_gather them
+            DS0 = torch.tensor(self.DS0, dtype=torch.float32)
+            DS1 = torch.tensor(self.DS1, dtype=torch.long)
+            DS2 = torch.tensor(self.DS2, dtype=torch.long)
+            DS3 = torch.tensor(self.DS3, dtype=torch.long)
+            DS4 = torch.tensor(self.DS4, dtype=torch.long)
+            DS5 = torch.tensor(self.DS5, dtype=torch.float32)
+            DS6 = torch.tensor(self.DS6, dtype=torch.float32)
+            DS7 = torch.tensor(self.DS7, dtype=torch.float32)
+            
+            # Convert gathered tensors back to 1D NumPy arrays
+            def unwrap(x):
+                return x.reshape(-1).cpu().numpy()
 
-        np.save("loss-displacement_from_ads", unwrap(DS0))
-        np.save("loss-atomic_number",        unwrap(DS1))
-        np.save("loss-tag",                  unwrap(DS2))
-        np.save("distance-atomic_number",    unwrap(DS3))
-        np.save("distance-tag",              unwrap(DS4))
-        np.save("distance-max",              unwrap(DS5))
-        np.save("distance-max_loss",         unwrap(DS6))
-        np.save("avg_distance",              unwrap(DS7))
+            np.save("loss-displacement_from_ads", unwrap(DS0))
+            np.save("loss-atomic_number",        unwrap(DS1))
+            np.save("loss-tag",                  unwrap(DS2))
+            np.save("distance-atomic_number",    unwrap(DS3))
+            np.save("distance-tag",              unwrap(DS4))
+            np.save("distance-max",              unwrap(DS5))
+            np.save("distance-max_loss",         unwrap(DS6))
+            np.save("avg_distance",              unwrap(DS7))
 
         
     def configure_optimizers(self):

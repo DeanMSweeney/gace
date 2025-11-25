@@ -129,7 +129,7 @@ def main(cfg: Config) -> None:
         declare(f">>> Activated Evaluation mode with OC20-test: {cfg.oc20_test} 🦉")
         ptst = {"src": cfg.oc20_test}
         test_set = LazyLmdbDataset(ptst)
-        #test_set = Subset(test_set, indices=range(10))
+        test_set = Subset(test_set, indices=range(100))
         test_loader = DataLoader(
             dataset=test_set, 
             batch_size=cfg.batch_size,
@@ -157,6 +157,7 @@ def main(cfg: Config) -> None:
         ode_method=cfg.ode_method,
         input_file=cfg.input_file,
         output_file=cfg.output_file,
+        relaxed_file=cfg.relaxed_file, 
         **cfg.optimizer_hparams,
     )
     
@@ -182,7 +183,7 @@ def main(cfg: Config) -> None:
         num_nodes=cfg.num_nodes,
         strategy=cfg.strategy,
         precision=cfg.precision,
-        max_epochs=cfg.max_epochs,
+        max_epochs=cfg.optimizer_hparams.max_epochs,
         accumulate_grad_batches=cfg.accumulate_grad_batches,
         val_check_interval=cfg.val_check_interval,
         log_every_n_steps=10,

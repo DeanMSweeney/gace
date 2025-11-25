@@ -1,23 +1,20 @@
 """
-NOTE (Modified by Dean M. Sweeney, 2025-07-40)
-
-This file is adapted from Meta’s original OC20 LmdbDataset. Key changes:
-
-1. Added **lazy LMDB opening** (envs opened on first access, not at init).
-2. Disabled **LMDB readahead** to avoid huge I/O prefetch on HPC filesystems.
-3. Computed shard lengths using brief open/close instead of persistent envs.
-4. Simplified global→local index mapping using `bisect_right`.
-5. Renamed class to `LazyLmdbDataset` for clarity; core data decoding unchanged.
-
-All OC20 behavior preserved; design now avoids heavy startup cost and reduces memory/I/O load.
-"""
-
-
-"""
 Copyright (c) Meta, Inc. and its affiliates.
 This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 """
+
+# =============================================================================
+# Edited by Dean M. Sweeney on 07/25
+# =============================================================================
+# 1. Added **lazy LMDB opening** (envs opened on first access, not at init).
+# 2. Disabled **LMDB readahead** to avoid huge I/O prefetch on HPC filesystems.
+# 3. Computed shard lengths using brief open/close instead of persistent envs.
+# 4. Simplified global→local index mapping using `bisect_right`.
+# 5. Renamed class to `LazyLmdbDataset` for clarity; core data decoding unchanged.
+#
+# All OC20 behavior preserved; design now avoids heavy startup cost and reduces memory/I/O.
+# =============================================================================
 
 from __future__ import annotations  # enable postponed type annotations
 
