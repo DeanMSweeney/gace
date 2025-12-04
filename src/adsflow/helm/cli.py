@@ -150,6 +150,8 @@ def main(cfg: Config) -> None:
     # compile lightning module 
     lightning = LightFlowMatch(
         model=model, 
+        variant=cfg.variant, 
+        mode=cfg.mode,
         track_grad_norms=cfg.track_grad_norms,
         mask_frzn_atoms=cfg.mask_frzn_atoms,
         rtol=cfg.rtol, 
@@ -158,6 +160,7 @@ def main(cfg: Config) -> None:
         input_file=cfg.input_file,
         output_file=cfg.output_file,
         relaxed_file=cfg.relaxed_file, 
+        run_vasp=cfg.run_vasp,
         **cfg.optimizer_hparams,
     )
     
