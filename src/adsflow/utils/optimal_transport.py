@@ -13,7 +13,9 @@ from torch_geometric.data import Data
 from torchdiffeq import odeint
 from typing import Optional, Literal, Union, Tuple
 
-
+import os
+import shutil
+import subprocess
 
 class OptTransportUtils(): 
     """
@@ -164,7 +166,7 @@ class OptTransportUtils():
                   positions=x1_np, # initial
                   numbers=z_np,
                   cell=cell_np,
-                  pbc=True,  # or (True, True, False) for a slab
+                  pbc=True,  # 
                 )
               atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
               ase.io.write(self.output_file, atoms)  # Cartesian
@@ -180,10 +182,20 @@ class OptTransportUtils():
                 atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
                 ase.io.write(self.input_file, atoms)  # Cartesian
                 
-                if self.run_vasp and self.batch_size == 1:
-                    pass 
-                
-             
+                if self.relaxed_file:
+                    # Save to current directory
+                    atoms = Atoms(
+                        positions=xdft_np, # initial
+                        numbers=z_np,
+                        cell=cell_np,
+                        pbc=True,  # 
+                        )
+                    atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
+                    ase.io.write(self.input_file, atoms)  # Cartesian
+        
+                if self.run_vasp: 
+                    self.DFT(data)
+            
         # Save to current directory
         if hasattr(data, "pos_relaxed"):
             
@@ -194,7 +206,7 @@ class OptTransportUtils():
         )
             
             e_null = self.pbc_aware_delta(
-                delta=data.pos - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
+                delta=data.pos - data.pos_relaxed, # write generated possitional coordinates to pos_gen attribute 
                 cell=data.cell,
                 batch=data.batch,
         )
@@ -204,6 +216,7 @@ class OptTransportUtils():
             
             null_struc_mse, null_struc_mdse, _, _ = self.masked_loss(a=e_null, b=torch.zeros_like(e_null), mask=self.free_atoms)
             null_struc_rmse, null_struc_rmdse = torch.sqrt(null_struc_mse), torch.sqrt(null_struc_mdse)
+            
         
             return data, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse
         else: 
@@ -290,3 +303,56 @@ class OptTransportUtils():
                 self.DS6.append(float(distance_of_max_loss)) # max distance moved of atom with max loss 
                 self.DS7.append(float(avg_distance)) # average distance moved of all atoms in struc 
         
+    def DFT(
+        self,
+        data: Data,
+    ):
+        # Get the current working directory to return to later
+        original_dir = os.getcwd()
+
+        try:
+            # Get the sid from the data object
+            sid = data.sid
+
+            # Create the strucs directory if it doesn't exist
+            if not os.path.exists("./strucs"):
+                os.makedirs("./strucs")
+
+            # Create the sid directory within strucs
+            sid_dir = os.path.join("./strucs", str(sid))
+            os.makedirs(sid_dir, exist_ok=True)
+            
+            # Function to build simulation directory
+            def build_vasp_dir(sim_dir: Optional[bool]=None, struc_file: Optional[bool]=None):
+                sim_path = os.path.join(sid_dir, sim_dir)
+                os.makedirs(sim_path, exist_ok=True)
+                shutil.move(struc_file, os.path.join(sim_path, "POSCAR"))
+                
+                for file in ["INCAR", "KPOINTS", "VASP.sh"]:
+                    if os.path.exists(file):
+                        shutil.copy(file, sim_path)
+                    else: 
+                        raise AttributeError(f"Missing {file} file for VASP configuration.")
+
+                    # Submit the .sh file in each directory
+                    os.chdir(sim_path)
+                    subprocess.run(["potcar.sh"])
+                    subprocess.run(["sbatch", "VASP.sh"])
+                    os.chdir(original_dir)
+                
+            # Move and rename files to their respective directories
+            if os.path.exists(self.output_file):
+                build_vasp_dir(sim_dir="generated", struc_file=self.output_file)
+            else: 
+                raise AttributeError("Generated strucutre file does not exist")
+            
+            if self.mode == "eval":
+                if os.path.exists(self.input_file):
+                    build_vasp_dir(sim_dir="inputted", struc_file=self.input_file)
+                    
+                if os.path.exists(self.relaxed_file) and self.mode == "eval":
+                    build_vasp_dir(sim_dir="relaxed", struc_file=self.relaxed_file)
+                
+        finally:
+            # Always return to the original directory
+            os.chdir(original_dir)
