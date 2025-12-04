@@ -32,6 +32,7 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
             self, 
             model,
             variant: str="refine",
+            mode: str="debug",
             mask_frzn_atoms: bool=True,
             rtol: float = 1e-7, 
             atol: float = 1e-9,
@@ -45,10 +46,11 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
         ):
         
         super().__init__()
-        self.save_hyperparameters(ignore=["model", "mask_frzn_atoms", "rtol", "atol", "ode_method", "track_grad_norms", "input_file", "output_file", "relaxed_file", "run_vasp"])  # all __init__ args saved as hyperparameters
+        self.save_hyperparameters(ignore=["model", "variant", "mode", "mask_frzn_atoms", "rtol", "atol", "ode_method", "track_grad_norms", "input_file", "output_file", "relaxed_file", "run_vasp"])  # all __init__ args saved as hyperparameters
         self.model = model
+        self.variant = variant 
+        self.mode = mode
         self.loss_fn = nn.MSELoss() # mean squared error loss function 
-        self.variant = variant
         self.mask_frzn_atoms = mask_frzn_atoms
         self.rtol = rtol
         self.atol = atol 
