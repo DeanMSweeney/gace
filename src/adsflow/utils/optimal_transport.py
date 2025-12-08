@@ -169,16 +169,20 @@ class OptTransportUtils():
               atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
               ase.io.write(self.output_file, atoms)  # Cartesian
               
-              # Save to current directory
-              atoms = Atoms(
-                  positions=x0_np, # initial
-                  numbers=z_np,
-                  cell=cell_np,
-                  pbc=True,  # or (True, True, False) for a slab
-                )
-              atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
               if self.input_file:
-                  ase.io.write(self.input_file, atoms)  # Cartesian
+                # Save to current directory
+                atoms = Atoms(
+                    positions=x0_np, # initial
+                    numbers=z_np,
+                    cell=cell_np,
+                    pbc=True,  # or (True, True, False) for a slab
+                    )
+                atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
+                ase.io.write(self.input_file, atoms)  # Cartesian
+                
+                if self.run_vasp and self.batch_size == 1:
+                    pass 
+                
              
         # Save to current directory
         if hasattr(data, "pos_relaxed"):
