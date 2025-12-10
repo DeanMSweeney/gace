@@ -24,25 +24,52 @@ class OptTransportUtils():
     
     def masked_loss(
         self,
+        input_data,
         a: Tensor,  # N, 3
         b: Tensor,  # N, 3
         mask: Tensor=None,  # N, 1 -> e.g., [0, 0, 1, 1, ..., 0]
     ):
+        # compute per atom loss 
         L_per_atom = ((a - b) ** 2).mean(dim=1, keepdim=True)  # N, 1
         masked_L_per_atom = L_per_atom * mask  # N, 1
+        data = input_data
         
-        # Compute masked mean loss
-        masked_avg_L = masked_L_per_atom.sum() / mask.sum().clamp_min(1e-8)
+        weight_by_dist = True 
+        target_adsorbate = False
+        if weight_by_dist:
+            # compute distance moved by all atoms 
+            d = self.pbc_aware_delta(
+                cell=data.cell, 
+                delta=(data.pos_init - data.pos_relaxed),
+                batch=data.batch, 
+                avg_xyz=True, # average distance for each atom 
+            )
+            
+            # compute normalized displacement and weights 
+            r = d / d.sum()
+            w = r / (r.sum()) 
+            
+            # compute masked loss 
+            L = w * masked_L_per_atom.sum()
+                
+        elif target_adsorbate:
+            pass
         
+        else: # mask frozen atoms only
+            
+            # Compute masked mean loss
+            L = masked_L_per_atom.sum() / mask.sum().clamp_min(1e-8)
+            
+            
         # Compute max (absolute) loss for stability monitoring
         max_L = masked_L_per_atom.max()
         max_L_idx = torch.argmax(masked_L_per_atom)
 
         # Compute masked median loss (only over nonzero mask elements)
         masked_values = L_per_atom[mask.bool()].flatten()
-        masked_med_L = masked_values.median()
+        median_L = masked_values.median()
        
-        return masked_avg_L, masked_med_L, max_L, max_L_idx
+        return L, median_L, max_L, max_L_idx
             
     def pbc_aware_delta(
                 self,
@@ -90,14 +117,14 @@ class OptTransportUtils():
         naive: str=True,
     ) -> Tuple[Data, Tensor]:
         
-        data = input_data.clone()
+        data = input_data
 
-        x1 = data.pos_relaxed.clone() # sample relaxed positions x1 ~ p(x) (final)
+        x1 = data.pos_relaxed # sample relaxed positions x1 ~ p(x) (final)
 
         if variant == "Forge":
                 x0 = torch.randn_like(x1) # sample noise 
         else:
-                x0 = data.pos.clone() # sample initial positions and discard x0 ~ q(x) (initial)
+                x0 = data.pos() # sample initial positions and discard x0 ~ q(x) (initial)
 
         t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device) # (batch_size, 1)
         t = t_per_graph[data.batch] # (num_atoms, 1)

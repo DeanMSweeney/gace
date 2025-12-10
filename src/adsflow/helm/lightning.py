@@ -86,7 +86,7 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
 
         if self.mask_frzn_atoms and self.variant == "refine":
             self.free_atoms = (1 - data.fixed).unsqueeze(1) # N
-            loss, median_loss, max_loss, max_loss_idx = self.masked_loss(a=u_hat, b=u, mask=self.free_atoms) 
+            loss, median_loss, max_loss, max_loss_idx = self.masked_loss(data=data, a=u_hat, b=u, mask=self.free_atoms) 
         else: 
             loss = self.loss_fn(u_hat, u)  
         return loss, median_loss, max_loss, max_loss_idx
