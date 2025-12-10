@@ -17,6 +17,7 @@ class OptimizerConfig:
     eta_min:                         float=0.0
     power:                           float=1.0
     max_epochs:                      int   = 100
+    alpha:                           float = 0 
     
 @dataclass
 class Config:
