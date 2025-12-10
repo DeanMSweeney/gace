@@ -118,10 +118,10 @@ class Config:
     ode_method:                      str             = "dopri5"
     
     # Generation 
-    input_file:                     Optional[str]             = None
-    output_file:                    Optional[str]             = None
-    relaxed_file:                   Optional[str]             = None
-    run_vasp:                       bool                      = False 
+    in_POS:                         Optional[str]         = None
+    gen_POS:                    Optional[str]             = None
+    rlxd_POS:                   Optional[str]             = None
+    config_vasp:                       bool               = False 
 
     # Misc
     seed:                            int            = 42
