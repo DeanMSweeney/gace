@@ -43,6 +43,7 @@ T_co = TypeVar("T_co", covariant=True)
 @registry.register_dataset("lmdb")
 @registry.register_dataset("single_point_lmdb")
 @registry.register_dataset("trajectory_lmdb")
+
 class LazyLmdbDataset(BaseDataset):
     """Dataset for OC20 LMDB tasks (S2EF, IS2RS, IS2RE)."""
 
@@ -50,6 +51,7 @@ class LazyLmdbDataset(BaseDataset):
         super().__init__(config)  # sets self.paths from config
         assert len(self.paths) == 1, f"{type(self)} requires a single src path"
         self.path = self.paths[0]
+        print(self.path)
 
         # choose one or multiple LMDB files
         if self.path.is_file():
@@ -147,7 +149,6 @@ class LazyLmdbDataset(BaseDataset):
             if env is not None:
                 env.close()
 
-
 def data_list_collater(
     data_list: list[BaseData], otf_graph: bool = False, to_dict: bool = False
 ) -> BaseData | dict[str, torch.Tensor]:
@@ -160,3 +161,21 @@ def data_list_collater(
         except Exception:
             logging.warning("Missing edge_index; set otf_graph=True")
     return dict(batch.items()) if to_dict else batch
+
+
+if __name__ == "__main__":
+    from torch_geometric.loader import DataLoader
+    
+    # build trianing set 
+    t = "/workspace/datasets/mini/data_refined.lmdb"
+    p = {"src": t}
+    dataset = LazyLmdbDataset(p)
+    
+    train_loader = DataLoader(
+            dataset, 
+            batch_size=1,
+        )
+    
+    for data in train_loader:
+        
+        print(data.y_relaxed)
