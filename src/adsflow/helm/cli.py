@@ -129,16 +129,16 @@ def main(cfg: Config) -> None:
         declare(f">>> Activated Evaluation mode with OC20-test: {cfg.oc20_test} 🦉")
         ptst = {"src": cfg.oc20_test}
         test_set = LazyLmdbDataset(ptst)
-        test_set = Subset(test_set, indices=range(100))
+        #test_set = Subset(test_set, indices=range(10))
         test_loader = DataLoader(
             dataset=test_set, 
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
         )
-    elif cfg.mode == "generate" and cfg.input_file: 
+    elif cfg.mode == "generate" and cfg.in_POS: 
         declare(">>> Activated Generation mode with single user input 🧚‍♀️")
-        atomic_struc = ase.io.read(cfg.input_file)
+        atomic_struc = ase.io.read(cfg.in_POS)
         poscar_to_data = AtomsToGraphs(radius=12).convert(atoms=atomic_struc)
         gen_loader = DataLoader(
             dataset=[poscar_to_data], 
@@ -157,10 +157,10 @@ def main(cfg: Config) -> None:
         rtol=cfg.rtol, 
         atol=cfg.atol,
         ode_method=cfg.ode_method,
-        input_file=cfg.input_file,
-        output_file=cfg.output_file,
-        relaxed_file=cfg.relaxed_file, 
-        run_vasp=cfg.run_vasp,
+        in_POS=cfg.in_POS,
+        gen_POS=cfg.gen_POS,
+        rlxd_POS=cfg.rlxd_POS, 
+        config_vasp=cfg.config_vasp,
         **cfg.optimizer_hparams,
     )
     
