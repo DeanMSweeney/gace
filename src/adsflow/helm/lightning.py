@@ -64,7 +64,7 @@ class LightFlowMatch(LightningModule, OptTransport):
         # =============================================================================
         # Diagnostic studies on output model performance during evaluation
         #                   ** For model development only ** 
-        self.diagnostics = True
+        self.diagnostics = False
         self.bad_iter, self.good_ter, self.iter = 0, 0, 0
        # ==============================================================================
        
@@ -176,7 +176,7 @@ class LightFlowMatch(LightningModule, OptTransport):
             # define time interval for the IVP
             t = torch.linspace(0., 1., 100, device=data.pos.device, dtype=data.pos.dtype)
             opt_graph, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = self.sampler(data, t=t)
-            print(f"Mean loss of batch: {loss} || Median loss of batch: {median_loss} || Structural RME of batch: {struc_rmse}")
+            print(f"Mean loss of batch: {loss} || Median loss of batch: {median_loss} || Structural RMSE of batch: {struc_rmse}")
                 
         self.log(
             "test/loss", 
