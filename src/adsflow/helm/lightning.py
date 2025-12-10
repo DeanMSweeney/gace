@@ -177,6 +177,7 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
             struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = 0, 0, 0, 0
         else: 
             opt_graph, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = self.sampler(data, t=t)
+            print(f"Mean loss of batch: {loss} || Median loss of batch: {median_loss} || Structural RME of batch: {struc_rmse}")
                 
         self.log(
             "test/loss", 
