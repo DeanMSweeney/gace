@@ -27,35 +27,36 @@ class OptTransport():
         a: Tensor,  # N, 3
         b: Tensor,  # N, 3
         mask: Tensor=None,  # N, 1 -> e.g., [0, 0, 1, 1, ..., 0]
+        alpha: float=1,
+        weight_by_dist: bool=True,
+        target_adsorbate: bool=False,
     ):
-        # compute per atom loss 
+        # compute per atom loss
         L_per_atom = ((a - b) ** 2).mean(dim=1, keepdim=True)  # N, 1
         masked_L_per_atom = L_per_atom * mask  # N, 1
         data = input_data.clone()
-        
-        weight_by_dist = False
-        target_adsorbate = False
+
         if weight_by_dist:
-            # compute distance moved by all atoms 
+            # compute distance moved by all atoms
             d = pbc_aware_delta(
-                cell=data.cell, 
+                cell=data.cell,
                 delta=(data.pos_init - data.pos_relaxed),
-                batch=data.batch, 
-                avg_xyz=True, # average distance for each atom 
+                batch=data.batch,
+                avg_xyz=True, # average distance for each atom
             )
-            
-            # compute normalized displacement and weights 
-            r = d / d.sum()
-            w = r / (r.sum()) 
-            
-            # compute masked loss 
-            L = w * masked_L_per_atom.sum()
-                
+
+            # compute weights with numerical stability
+            d_alpha = d ** alpha
+            w = d_alpha / d_alpha.sum().clamp_min(1e-8)
+
+            # compute masked weighted loss (sum of weighted per-atom losses)
+            L = (w * masked_L_per_atom).sum()
+
         elif target_adsorbate:
             pass
-        
+
         else: # mask frozen atoms only
-            
+
             # Compute masked mean loss
             L = masked_L_per_atom.sum() / mask.sum().clamp_min(1e-8)
             
