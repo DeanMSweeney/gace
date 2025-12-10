@@ -1,10 +1,6 @@
 
 import numpy as np 
 import itertools
-import ase
-import ase.io
-from ase import Atoms
-from ase.constraints import FixAtoms
 import torch
 from torch import Tensor
 import torch.nn as nn
@@ -13,7 +9,7 @@ from torch_geometric.data import Data
 from torchdiffeq import odeint
 from typing import Optional, Literal, Union, Tuple
 
-from adsflow.utils.post_processing import config_DFT
+from adsflow.utils.post_processing import config_DFT, write_strucs
 from adsflow.utils.invariance import pbc_aware_delta
 
 import os
@@ -35,7 +31,7 @@ class OptTransport():
         # compute per atom loss 
         L_per_atom = ((a - b) ** 2).mean(dim=1, keepdim=True)  # N, 1
         masked_L_per_atom = L_per_atom * mask  # N, 1
-        data = input_data
+        data = input_data.clone()
         
         weight_by_dist = False
         target_adsorbate = False
@@ -82,7 +78,7 @@ class OptTransport():
         naive: str=True,
     ) -> Tuple[Data, Tensor]:
         
-        data = input_data
+        data = input_data.clone()
 
         x1 = data.pos_relaxed # sample relaxed positions x1 ~ p(x) (final)
 
@@ -114,7 +110,7 @@ class OptTransport():
 
         return data, u 
   
-    def sampler(
+    def sample(
             self, 
             input_data: Data,
             t: torch.Tensor,
@@ -145,53 +141,20 @@ class OptTransport():
         mask = (data.fixed == 1)
         data.pos_generated[mask] = data.pos[mask]
         
-        if self.gen_POS: 
-              z_np = data.atomic_numbers.detach().cpu().numpy()
-              cell_np = data.cell.squeeze(0).detach().cpu().numpy()
-              x1_np = data.pos_generated.detach().cpu().numpy()
-              x0_np = data.pos.detach().cpu().numpy()
-              xdft_np = data.pos_relaxed.detach().cpu().numpy()
-              f_np = data.fixed.detach().cpu().numpy()
-              
-              # Save to current directory
-              atoms = Atoms(
-                  positions=x1_np, # initial
-                  numbers=z_np,
-                  cell=cell_np,
-                  pbc=True,  # 
+        if self.gen_POS:
+                write_strucs(
+                    data=data, 
+                    gen_POS=self.gen_POS, 
+                    in_POS=self.in_POS, 
+                    rlxd_POS=self.rlxd_POS,
                 )
-              atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
-              ase.io.write(self.gen_POS, atoms)  # Cartesian
-              
-              if self.in_POS:
-                # Save to current directory
-                atoms = Atoms(
-                    positions=x0_np, # initial
-                    numbers=z_np,
-                    cell=cell_np,
-                    pbc=True,  # or (True, True, False) for a slab
-                    )
-                atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
-                ase.io.write(self.in_POS, atoms)  # Cartesian
                 
-                if self.rlxd_POS:
-                    # Save to current directory
-                    atoms = Atoms(
-                        positions=xdft_np, # initial
-                        numbers=z_np,
-                        cell=cell_np,
-                        pbc=True,  # 
-                        )
-                    atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
-                    ase.io.write(self.rlxd_POS, atoms)  # Cartesian
-        
                 if self.config_vasp: 
                     config_DFT(
                         data=data, 
-                        in_POS=self.in_POS, 
-                        gen_POS=self.gen_POS, 
-                        rlxd_POS=self.rlxd_POS,
-                        
+                        gen_POS=self.gen_POS,
+                        in_POS=self.in_POS,  
+                        rlxd_POS=self.rlxd_POS, 
                     )
         else: 
             print("Output file not provided... structure will not be saved")
