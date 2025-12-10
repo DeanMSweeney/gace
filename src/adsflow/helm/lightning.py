@@ -9,13 +9,13 @@ from lightning.pytorch import LightningModule
 from torch_geometric.data import Data
 from transformers import get_cosine_schedule_with_warmup, get_polynomial_decay_schedule_with_warmup
 
-from adsflow.utils.optimal_transport import OptTransportUtils
-from adsflow.utils.utils import ship_data
+from adsflow.utils.optimal_transport import OptTransport
+from adsflow.utils.post_processing import analyze_loss
 
 from typing import Optional, Literal, Union, Tuple
 
 
-class LightFlowMatch(LightningModule, OptTransportUtils):
+class LightFlowMatch(LightningModule, OptTransport):
     """
     This class defines the training algorithm for the conditional flow matching model using optimal transport 
     
@@ -38,15 +38,15 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
             atol: float = 1e-9,
             ode_method: str = "dopri5",
             track_grad_norms: bool=False,
-            input_file=None,
-            output_file=None,
-            relaxed_file=None,
-            run_vasp: bool=False,
+            in_POS=None,
+            gen_POS=None,
+            rlxd_POS=None,
+            config_vasp: bool=False,
             **hparams,
         ):
         
         super().__init__()
-        self.save_hyperparameters(ignore=["model", "variant", "mode", "mask_frzn_atoms", "rtol", "atol", "ode_method", "track_grad_norms", "input_file", "output_file", "relaxed_file", "run_vasp"])  # all __init__ args saved as hyperparameters
+        self.save_hyperparameters(ignore=["model", "variant", "mode", "mask_frzn_atoms", "rtol", "atol", "ode_method", "track_grad_norms", "in_POS", "gen_POS", "rlxd_POS", "run_vasp"])  # all __init__ args saved as hyperparameters
         self.model = model
         self.variant = variant 
         self.mode = mode
@@ -56,24 +56,16 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
         self.atol = atol 
         self.ode_method = ode_method
         self.track_grad_norms = track_grad_norms
-        self.input_file = input_file
-        self.output_file = output_file
-        self.relaxed_file = relaxed_file
-        self.run_vasp = run_vasp
+        self.in_POS = in_POS
+        self.gen_POS = gen_POS
+        self.rlxd_POS = rlxd_POS
+        self.config_vasp = config_vasp
         
         # =============================================================================
         # Diagnostic studies on output model performance during evaluation
         #                   ** For model development only ** 
-        self.diagnostics = False
+        self.diagnostics = True
         self.bad_iter, self.good_ter, self.iter = 0, 0, 0
-        self.DS0 = []
-        self.DS1 = []
-        self.DS2 = []
-        self.DS3 = []
-        self.DS4 = []
-        self.DS5 = []
-        self.DS6 = []
-        self.DS7 = []
        # ==============================================================================
        
     def forward(self, data):
@@ -86,7 +78,7 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
 
         if self.mask_frzn_atoms and self.variant == "refine":
             self.free_atoms = (1 - data.fixed).unsqueeze(1) # N
-            loss, median_loss, max_loss, max_loss_idx = self.masked_loss(a=u_hat, b=u, mask=self.free_atoms) 
+            loss, median_loss, max_loss, max_loss_idx = self.masked_loss(input_data=data, a=u_hat, b=u, mask=self.free_atoms) 
         else: 
             loss = self.loss_fn(u_hat, u)  
         return loss, median_loss, max_loss, max_loss_idx
@@ -159,23 +151,30 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
     
     def test_step(self, data: Data, batch_idx):
         # compute performance metrics/diagnostics
-        self.iter += 1
         loss, median_loss, max_loss, max_loss_idx = self._transport_loss(data) # avergae, median, argmax
-    
-        # define time interval for the IVP
-        t = torch.linspace(0., 1., 100, device=data.pos.device, dtype=data.pos.dtype)
 
         if self.diagnostics:
-            self.analyze_loss(
-                data=data,
-                loss=loss, 
-                median_loss=median_loss, 
-                max_loss=max_loss, 
-                max_loss_idx=max_loss_idx,
-                sample_x1=False,
-            )
+            if loss > 0.001: 
+                self.bad_iter += 1 
+                (self.DS0, 
+                self.DS1, 
+                self.DS2, 
+                self.DS3, 
+                self.DS4, 
+                self.DS5, 
+                self.DS6, 
+                self.DS7) = analyze_loss(
+                    data=data,
+                    loss=loss, 
+                    median_loss=median_loss, 
+                    max_loss=max_loss, 
+                    max_loss_idx=max_loss_idx,
+                    bad_iter=self.bad_iter, 
+                )
             struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = 0, 0, 0, 0
         else: 
+            # define time interval for the IVP
+            t = torch.linspace(0., 1., 100, device=data.pos.device, dtype=data.pos.dtype)
             opt_graph, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = self.sampler(data, t=t)
             print(f"Mean loss of batch: {loss} || Median loss of batch: {median_loss} || Structural RME of batch: {struc_rmse}")
                 
@@ -242,6 +241,8 @@ class LightFlowMatch(LightningModule, OptTransportUtils):
 
     def on_test_end(self):
         if self.diagnostics:
+            print(">>> You are running with diagnostic mode turned on ‼️")
+            
             # Convert Python lists → tensors so Lightning can all_gather them
             DS0 = torch.tensor(self.DS0, dtype=torch.float32)
             DS1 = torch.tensor(self.DS1, dtype=torch.long)
