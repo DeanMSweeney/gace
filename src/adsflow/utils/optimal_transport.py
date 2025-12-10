@@ -218,11 +218,13 @@ class OptTransportUtils():
                         pbc=True,  # 
                         )
                     atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
-                    ase.io.write(self.input_file, atoms)  # Cartesian
+                    ase.io.write(self.relaxed_file, atoms)  # Cartesian
         
                 if self.run_vasp: 
-                    self.DFT(data)
-            
+                    self.config_DFT(data)
+        else: 
+            print("Output file not provided... structure will not be saved")
+                
         # Save to current directory
         if hasattr(data, "pos_relaxed"):
             
@@ -248,7 +250,63 @@ class OptTransportUtils():
             return data, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse
         else: 
             return data
-        
+  
+    def config_DFT(
+        self,
+        data: Data,
+    ):
+        print(">>> Running VASP DFT calculations w/ user provided input files  🖲️")
+        # Get the current working directory to return to later
+        original_dir = os.getcwd()
+
+        try:
+            # Get the sid from the data object
+            sid = data.sid.item()
+
+            # Create the strucs directory if it doesn't exist
+            if not os.path.exists("./strucs"):
+                os.makedirs("./strucs")
+
+            # Create the sid directory within strucs
+            sid_dir = os.path.join("./strucs", str(sid))
+            os.makedirs(sid_dir, exist_ok=True)
+            
+            # Function to build simulation directory
+            def build_vasp_dir(sim_dir: Optional[bool]=None, struc_file: Optional[bool]=None):
+                sim_path = os.path.join(sid_dir, sim_dir)
+                os.makedirs(sim_path, exist_ok=True)
+                shutil.move(struc_file, os.path.join(sim_path, "POSCAR"))
+                
+                for file in ["INCAR", "KPOINTS", "VASP.sh"]:
+                    if os.path.exists(file):
+                        shutil.copy(file, sim_path)
+                    else: 
+                        raise AttributeError(f"Missing {file} file for VASP run.")
+
+                # Submit the .sh file in each directory
+                os.chdir(sim_path)
+                subprocess.run(["potcar.sh"])
+                #subprocess.run(["sbatch", "VASP.sh"])
+                os.chdir(original_dir)
+                
+            # Move and rename files to their respective directories
+            if os.path.exists(self.output_file):
+                build_vasp_dir(sim_dir="generated", struc_file=self.output_file)
+            else: 
+                raise AttributeError("Generated strucutre file does not exist")
+            
+            if self.mode == "eval":
+                if os.path.exists(self.input_file):
+                    build_vasp_dir(sim_dir="inputted", struc_file=self.input_file)
+                    
+                if os.path.exists(self.relaxed_file):
+                    build_vasp_dir(sim_dir="relaxed", struc_file=self.relaxed_file)
+                
+        finally:
+            # Always return to the original directory
+            os.chdir(original_dir)
+            
+          
     def analyze_loss(
         self, 
         data: Data,
@@ -329,57 +387,3 @@ class OptTransportUtils():
                 self.DS5.append(float(max_distance)) # max distance moved during relaxation 
                 self.DS6.append(float(distance_of_max_loss)) # max distance moved of atom with max loss 
                 self.DS7.append(float(avg_distance)) # average distance moved of all atoms in struc 
-        
-    def DFT(
-        self,
-        data: Data,
-    ):
-        # Get the current working directory to return to later
-        original_dir = os.getcwd()
-
-        try:
-            # Get the sid from the data object
-            sid = data.sid
-
-            # Create the strucs directory if it doesn't exist
-            if not os.path.exists("./strucs"):
-                os.makedirs("./strucs")
-
-            # Create the sid directory within strucs
-            sid_dir = os.path.join("./strucs", str(sid))
-            os.makedirs(sid_dir, exist_ok=True)
-            
-            # Function to build simulation directory
-            def build_vasp_dir(sim_dir: Optional[bool]=None, struc_file: Optional[bool]=None):
-                sim_path = os.path.join(sid_dir, sim_dir)
-                os.makedirs(sim_path, exist_ok=True)
-                shutil.move(struc_file, os.path.join(sim_path, "POSCAR"))
-                
-                for file in ["INCAR", "KPOINTS", "VASP.sh"]:
-                    if os.path.exists(file):
-                        shutil.copy(file, sim_path)
-                    else: 
-                        raise AttributeError(f"Missing {file} file for VASP configuration.")
-
-                    # Submit the .sh file in each directory
-                    os.chdir(sim_path)
-                    subprocess.run(["potcar.sh"])
-                    subprocess.run(["sbatch", "VASP.sh"])
-                    os.chdir(original_dir)
-                
-            # Move and rename files to their respective directories
-            if os.path.exists(self.output_file):
-                build_vasp_dir(sim_dir="generated", struc_file=self.output_file)
-            else: 
-                raise AttributeError("Generated strucutre file does not exist")
-            
-            if self.mode == "eval":
-                if os.path.exists(self.input_file):
-                    build_vasp_dir(sim_dir="inputted", struc_file=self.input_file)
-                    
-                if os.path.exists(self.relaxed_file) and self.mode == "eval":
-                    build_vasp_dir(sim_dir="relaxed", struc_file=self.relaxed_file)
-                
-        finally:
-            # Always return to the original directory
-            os.chdir(original_dir)
