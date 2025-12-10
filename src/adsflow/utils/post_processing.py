@@ -37,9 +37,9 @@ def write_strucs(
         pbc=True,  # 
     )
     atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
-    ase.io.write(self.gen_POS, atoms)  # Cartesian
+    ase.io.write(gen_POS, atoms)  # Cartesian
     
-    if self.in_POS:
+    if in_POS:
         # Save to current directory
         atoms = Atoms(
             positions=x0_np, # initial
@@ -48,9 +48,9 @@ def write_strucs(
             pbc=True,  # or (True, True, False) for a slab
             )
         atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
-        ase.io.write(self.in_POS, atoms)  # Cartesian
+        ase.io.write(in_POS, atoms)  # Cartesian
     
-    if self.rlxd_POS:
+    if rlxd_POS:
         # Save to current directory
         atoms = Atoms(
             positions=xdft_np, # initial
@@ -59,7 +59,7 @@ def write_strucs(
             pbc=True,  # 
             )
         atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
-        ase.io.write(self.rlxd_POS, atoms)  # Cartesian
+        ase.io.write(rlxd_POS, atoms)  # Cartesian
         
 
 def config_DFT(
