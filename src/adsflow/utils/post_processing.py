@@ -143,7 +143,6 @@ def analyze_loss(
     print(f"High velocity field loss {loss} ❌ || total count: {bad_iter}")
     
     # collect diagnostics 
-    print(DS1)
     DS1.append(int(max_loss_z)) # atomic number 
     DS2.append(int(max_loss_tag)) # tag (surface, bulk, adsorbate)
     DS3.append(int(max_distance_z)) # atomic number 
