@@ -107,6 +107,7 @@ class Config:
     
     # Restart model from checkpoint
     ckpt_path:                       Optional[str]           = None
+    resume_training:                      bool               = True
 
     # Model run mode
     variant:                         Literal["refine", "forge"] = "refine"
