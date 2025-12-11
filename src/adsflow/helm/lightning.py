@@ -64,7 +64,7 @@ class LightFlowMatch(LightningModule, OptTransport):
         # =============================================================================
         # Diagnostic studies on output model performance during evaluation
         #                   ** For model development only ** 
-        self.diagnostics = True
+        self.diagnostics = False
         self.bad_iter, self.good_ter, self.iter = 0, 0, 0
        # ==============================================================================
        
@@ -78,7 +78,15 @@ class LightFlowMatch(LightningModule, OptTransport):
 
         if self.mask_frzn_atoms and self.variant == "refine":
             self.free_atoms = (1 - data.fixed).unsqueeze(1) # N
-            loss, median_loss, max_loss, max_loss_idx = self.masked_loss(input_data=data, a=u_hat, b=u, mask=self.free_atoms) 
+            loss, median_loss, max_loss, max_loss_idx = self.masked_loss(
+                input_data=data, 
+                a=u_hat, 
+                b=u,
+                mask=self.free_atoms,
+                alpha=self.hparams.alpha, 
+                ramp_L=self.hparams.ramp_L,
+                ramp_n_epochs=self.hparams.ramp_n_epochs,
+            ) 
         else: 
             loss = self.loss_fn(u_hat, u)  
         return loss, median_loss, max_loss, max_loss_idx
@@ -175,8 +183,8 @@ class LightFlowMatch(LightningModule, OptTransport):
         else: 
             # define time interval for the IVP
             t = torch.linspace(0., 1., 100, device=data.pos.device, dtype=data.pos.dtype)
-            opt_graph, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = self.sampler(data, t=t)
-            print(f"Mean loss of batch: {loss} || Median loss of batch: {median_loss} || Structural RME of batch: {struc_rmse}")
+            opt_graph, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = self.sample(input_data=data, t=t)
+            print(f"Mean loss of batch: {loss} || Median loss of batch: {median_loss} || Structural RMSE of batch: {struc_rmse}")
                 
         self.log(
             "test/loss", 

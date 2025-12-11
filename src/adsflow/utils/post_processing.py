@@ -1,4 +1,3 @@
-import itertools
 import ase
 import ase.io
 from ase import Atoms
@@ -17,6 +16,51 @@ import os
 import shutil
 import subprocess
 
+def write_strucs(
+    data: Data, 
+    gen_POS: str, 
+    in_POS: Optional[str]=None, 
+    rlxd_POS: Optional[str]=None,  
+):
+    z_np = data.atomic_numbers.detach().cpu().numpy()
+    cell_np = data.cell.squeeze(0).detach().cpu().numpy()
+    x1_np = data.pos_generated.detach().cpu().numpy()
+    x0_np = data.pos.detach().cpu().numpy()
+    xdft_np = data.pos_relaxed.detach().cpu().numpy()
+    f_np = data.fixed.detach().cpu().numpy()
+              
+    # Save to current directory
+    atoms = Atoms(
+        positions=x1_np, # initial
+        numbers=z_np,
+        cell=cell_np,
+        pbc=True,  # 
+    )
+    atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
+    ase.io.write(gen_POS, atoms)  # Cartesian
+    
+    if in_POS:
+        # Save to current directory
+        atoms = Atoms(
+            positions=x0_np, # initial
+            numbers=z_np,
+            cell=cell_np,
+            pbc=True,  # or (True, True, False) for a slab
+            )
+        atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
+        ase.io.write(in_POS, atoms)  # Cartesian
+    
+    if rlxd_POS:
+        # Save to current directory
+        atoms = Atoms(
+            positions=xdft_np, # initial
+            numbers=z_np,
+            cell=cell_np,
+            pbc=True,  # 
+            )
+        atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
+        ase.io.write(rlxd_POS, atoms)  # Cartesian
+        
 
 def config_DFT(
     data: Data,
@@ -143,7 +187,6 @@ def analyze_loss(
     print(f"High velocity field loss {loss} ❌ || total count: {bad_iter}")
     
     # collect diagnostics 
-    print(DS1)
     DS1.append(int(max_loss_z)) # atomic number 
     DS2.append(int(max_loss_tag)) # tag (surface, bulk, adsorbate)
     DS3.append(int(max_distance_z)) # atomic number 

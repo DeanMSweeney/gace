@@ -1,10 +1,6 @@
 
 import numpy as np 
 import itertools
-import ase
-import ase.io
-from ase import Atoms
-from ase.constraints import FixAtoms
 import torch
 from torch import Tensor
 import torch.nn as nn
@@ -13,7 +9,7 @@ from torch_geometric.data import Data
 from torchdiffeq import odeint
 from typing import Optional, Literal, Union, Tuple
 
-from adsflow.utils.post_processing import config_DFT
+from adsflow.utils.post_processing import config_DFT, write_strucs
 from adsflow.utils.invariance import pbc_aware_delta
 
 import os
@@ -31,39 +27,36 @@ class OptTransport():
         a: Tensor,  # N, 3
         b: Tensor,  # N, 3
         mask: Tensor=None,  # N, 1 -> e.g., [0, 0, 1, 1, ..., 0]
+        alpha: float=0,
     ):
-        # compute per atom loss 
+        # compute per atom loss
         L_per_atom = ((a - b) ** 2).mean(dim=1, keepdim=True)  # N, 1
         masked_L_per_atom = L_per_atom * mask  # N, 1
-        data = input_data
-        
-        weight_by_dist = False
-        target_adsorbate = False
-        if weight_by_dist:
-            # compute distance moved by all atoms 
-            d = pbc_aware_delta(
-                cell=data.cell, 
-                delta=(data.pos_init - data.pos_relaxed),
-                batch=data.batch, 
-                avg_xyz=True, # average distance for each atom 
-            )
-            
-            # compute normalized displacement and weights 
-            r = d / d.sum()
-            w = r / (r.sum()) 
-            
-            # compute masked loss 
-            L = w * masked_L_per_atom.sum()
-                
-        elif target_adsorbate:
-            pass
-        
-        else: # mask frozen atoms only
-            
-            # Compute masked mean loss
-            L = masked_L_per_atom.sum() / mask.sum().clamp_min(1e-8)
-            
-            
+        data = input_data.clone()
+
+        # compute distance moved by all atoms
+        d = pbc_aware_delta(
+            cell=data.cell,
+            delta=(data.pos_init - data.pos_relaxed),
+            batch=data.batch,
+            avg_xyz=True, # average distance for each atom
+        )
+
+        # compute weights with numerical stability
+        d_alpha = d ** alpha
+        if alpha == 0: 
+            w = 1 / mask.sum().clamp_min(1e-8) # equal weighting, equivalent to L = 1/N * sum(l_per_atom), w = 1/N
+        else:
+            w = d_alpha / d_alpha.sum().clamp_min(1e-8)
+
+        # compute masked weighted loss (sum of weighted per-atom losses)
+        L = (w * masked_L_per_atom).sum()
+
+        if ramp_L:
+            warmup_epochs = 5 
+            beta = min(1.0, self.current_epoch / warmup_epochs)
+            L  = beta * L + (1 - beta) * masked_L_per_atom.sum() / mask.sum().clamp_min(1e-8)
+
         # Compute max (absolute) loss for stability monitoring
         max_L = masked_L_per_atom.max()
         max_L_idx = torch.argmax(masked_L_per_atom)
@@ -82,7 +75,7 @@ class OptTransport():
         naive: str=True,
     ) -> Tuple[Data, Tensor]:
         
-        data = input_data
+        data = input_data.clone()
 
         x1 = data.pos_relaxed # sample relaxed positions x1 ~ p(x) (final)
 
@@ -114,7 +107,7 @@ class OptTransport():
 
         return data, u 
   
-    def sampler(
+    def sample(
             self, 
             input_data: Data,
             t: torch.Tensor,
@@ -145,53 +138,20 @@ class OptTransport():
         mask = (data.fixed == 1)
         data.pos_generated[mask] = data.pos[mask]
         
-        if self.output_file: 
-              z_np = data.atomic_numbers.detach().cpu().numpy()
-              cell_np = data.cell.squeeze(0).detach().cpu().numpy()
-              x1_np = data.pos_generated.detach().cpu().numpy()
-              x0_np = data.pos.detach().cpu().numpy()
-              xdft_np = data.pos_relaxed.detach().cpu().numpy()
-              f_np = data.fixed.detach().cpu().numpy()
-              
-              # Save to current directory
-              atoms = Atoms(
-                  positions=x1_np, # initial
-                  numbers=z_np,
-                  cell=cell_np,
-                  pbc=True,  # 
+        if self.gen_POS:
+                write_strucs(
+                    data=data, 
+                    gen_POS=self.gen_POS, 
+                    in_POS=self.in_POS, 
+                    rlxd_POS=self.rlxd_POS,
                 )
-              atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
-              ase.io.write(self.output_file, atoms)  # Cartesian
-              
-              if self.input_file:
-                # Save to current directory
-                atoms = Atoms(
-                    positions=x0_np, # initial
-                    numbers=z_np,
-                    cell=cell_np,
-                    pbc=True,  # or (True, True, False) for a slab
-                    )
-                atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
-                ase.io.write(self.input_file, atoms)  # Cartesian
                 
-                if self.relaxed_file:
-                    # Save to current directory
-                    atoms = Atoms(
-                        positions=xdft_np, # initial
-                        numbers=z_np,
-                        cell=cell_np,
-                        pbc=True,  # 
-                        )
-                    atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
-                    ase.io.write(self.relaxed_file, atoms)  # Cartesian
-        
                 if self.config_vasp: 
                     config_DFT(
                         data=data, 
-                        in_POS=self.in_POS, 
-                        gen_POS=self.gen_POS, 
-                        rlxd_POS=self.rlxd_POS,
-                        
+                        gen_POS=self.gen_POS,
+                        in_POS=self.in_POS,  
+                        rlxd_POS=self.rlxd_POS, 
                     )
         else: 
             print("Output file not provided... structure will not be saved")
@@ -211,13 +171,12 @@ class OptTransport():
                 batch=data.batch,
         )
             
-            struc_mse, struc_mdse, _, _ = self.masked_loss(a=e_gen, b=torch.zeros_like(e_gen), mask=self.free_atoms)
+            struc_mse, struc_mdse, _, _ = self.masked_loss(input_data=data, a=e_gen, b=torch.zeros_like(e_gen), mask=self.free_atoms)
             struc_rmse, struc_rmdse = torch.sqrt(struc_mse), torch.sqrt(struc_mdse)
             
-            null_struc_mse, null_struc_mdse, _, _ = self.masked_loss(a=e_null, b=torch.zeros_like(e_null), mask=self.free_atoms)
+            null_struc_mse, null_struc_mdse, _, _ = self.masked_loss(input_data=data, a=e_null, b=torch.zeros_like(e_null), mask=self.free_atoms)
             null_struc_rmse, null_struc_rmdse = torch.sqrt(null_struc_mse), torch.sqrt(null_struc_mdse)
             
-        
             return data, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse
         else: 
             return data
