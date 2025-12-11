@@ -63,7 +63,7 @@ def main(cfg: Config) -> None:
     # print configuration file at rank 0
     declare(f">>> Training and model configurations:\n {OmegaConf.to_yaml(cfg)}")
 
-    # configure model checkpoint callbacks
+    # configure model checkpoint callbacks for writing data to .ckpt 
     callbacks = [(ModelCheckpoint(
         dirpath=cfg.ckpt_dir,
         filename=f"{cfg.run_name}-{{epoch:02d}}",
@@ -129,7 +129,7 @@ def main(cfg: Config) -> None:
         declare(f">>> Activated Evaluation mode with OC20-test: {cfg.oc20_test} 🦉")
         ptst = {"src": cfg.oc20_test}
         test_set = LazyLmdbDataset(ptst)
-        #test_set = Subset(test_set, indices=range(10))
+        #test_set = Subset(test_set, indices=range(100))
         test_loader = DataLoader(
             dataset=test_set, 
             batch_size=cfg.batch_size,
@@ -177,7 +177,7 @@ def main(cfg: Config) -> None:
     else: 
         logger = cfg.logger
 
-    # define trainer 
+    # define trainer
     trainer = pl.Trainer(
         logger=logger,
         callbacks=callbacks,
@@ -193,13 +193,22 @@ def main(cfg: Config) -> None:
         gradient_clip_val=1,
     )
 
-    # fit the model 
+    # handle checkpoint loading
+    ckpt_path_for_trainer = cfg.ckpt_path
+    if cfg.ckpt_path and not cfg.resume_training:
+        declare(f">>> Loading model weights only from: {cfg.ckpt_path} 🔄")
+        checkpoint = torch.load(cfg.ckpt_path, map_location="cpu")
+        lightning.load_state_dict(checkpoint["state_dict"])
+        declare(">>> Model weights loaded. Training will restart from scratch (epoch 0, new optimizer state)")
+        ckpt_path_for_trainer = None  # don't pass checkpoint to trainer
+
+    # fit the model
     if cfg.mode == "debug" or cfg.mode == "train":
         trainer.fit(
             model=lightning,
             train_dataloaders=train_loader,
             val_dataloaders=val_loader,
-            ckpt_path=cfg.ckpt_path, # use for model training restart and evaluation
+            ckpt_path=ckpt_path_for_trainer, # use for model training restart and evaluation
         )
     elif cfg.mode == "eval": 
         trainer.test(

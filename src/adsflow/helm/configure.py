@@ -17,6 +17,9 @@ class OptimizerConfig:
     eta_min:                         float=0.0
     power:                           float=1.0
     max_epochs:                      int   = 100
+    alpha:                           float = 0 
+    ramp_L:                          bool = False   
+    ramp_n_epochs:                    int = 5 
     
 @dataclass
 class Config:
@@ -106,6 +109,7 @@ class Config:
     
     # Restart model from checkpoint
     ckpt_path:                       Optional[str]           = None
+    resume_training:                 bool                    = True
 
     # Model run mode
     variant:                         Literal["refine", "forge"] = "refine"
