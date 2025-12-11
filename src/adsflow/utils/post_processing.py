@@ -155,7 +155,7 @@ def analyze_loss(
         cell=data.cell,
         batch=torch.zeros(K, dtype=torch.long),
         naive=True,
-        avg_xyz=True,
+        norm=True,
         )
         # collect diagnostics for surface atom 
         DS0.append(float(delta_max_ads.min())) # distance between atom and adsorbate
@@ -169,7 +169,7 @@ def analyze_loss(
         cell=data.cell,
         batch=data.batch,
         naive=True,
-        avg_xyz=True,
+        norm=True,
     ) 
     
     # N,1, zero-out frozen atoms and average

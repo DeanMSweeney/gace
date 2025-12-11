@@ -11,7 +11,7 @@ def pbc_aware_delta(
             delta: Tensor, 
             batch: Tensor, 
             naive: bool=True,
-            avg_xyz: bool=False,
+            norm: bool=False,
 ) -> Tensor:
         
         A  =  cell[batch]  # (N,3,3)
@@ -38,7 +38,7 @@ def pbc_aware_delta(
             
         u_min = torch.bmm(u_f_min.unsqueeze(1), A).squeeze(1)
         
-        if avg_xyz:
+        if norm:
             return u_min.abs().mean(dim=1, keepdim=True) # N,3 -> N,1
         else: 
             return u_min
