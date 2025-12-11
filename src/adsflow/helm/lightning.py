@@ -83,7 +83,9 @@ class LightFlowMatch(LightningModule, OptTransport):
                 a=u_hat, 
                 b=u,
                 mask=self.free_atoms,
-                alpha=self.hparams.alpha
+                alpha=self.hparams.alpha, 
+                ramp_L=self.hparams.ramp_L,
+                ramp_n_epochs=self.hparams.ramp_n_epochs,
             ) 
         else: 
             loss = self.loss_fn(u_hat, u)  
