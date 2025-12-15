@@ -26,43 +26,44 @@ class OptTransport():
         input_data,
         a: Tensor,  # N, 3
         b: Tensor,  # N, 3
-        mask: Tensor=None,  # N, 1 -> e.g., [0, 0, 1, 1, ..., 0]
-        alpha: float=0,
+        mask: Tensor,  # N, 1 -> e.g., [0, 0, 1, 1, ..., 0]
+        alpha: float=0, # masked MSE
+        ramp_L: bool=False,
+        ramp_n_epochs: int=5,
     ):
         # compute per atom loss
         L_per_atom = ((a - b) ** 2).mean(dim=1, keepdim=True)  # N, 1
         masked_L_per_atom = L_per_atom * mask  # N, 1
-        data = input_data.clone()
-
+        
         # compute distance moved by all atoms
+        data = input_data
         d = pbc_aware_delta(
             cell=data.cell,
             delta=(data.pos_init - data.pos_relaxed),
             batch=data.batch,
-            avg_xyz=True, # average distance for each atom
+            norm=True, # average distance for each atom
         )
-
+        
         # compute weights with numerical stability
-        d_alpha = d ** alpha
         if alpha == 0: 
             w = 1 / mask.sum().clamp_min(1e-8) # equal weighting, equivalent to L = 1/N * sum(l_per_atom), w = 1/N
         else:
+            d_alpha = d ** alpha
             w = d_alpha / d_alpha.sum().clamp_min(1e-8)
 
         # compute masked weighted loss (sum of weighted per-atom losses)
-        L = (w * masked_L_per_atom).sum()
-
+        weighted_L_per_atom = w * masked_L_per_atom
+        L = (weighted_L_per_atom).sum()
         if ramp_L:
-            warmup_epochs = 5 
-            beta = min(1.0, self.current_epoch / warmup_epochs)
-            L  = beta * L + (1 - beta) * masked_L_per_atom.sum() / mask.sum().clamp_min(1e-8)
+            beta = min(1.0, self.current_epoch / ramp_n_epochs)
+            L  = beta * L + (1 - beta) * (masked_L_per_atom.sum() / mask.sum().clamp_min(1e-8))
 
         # Compute max (absolute) loss for stability monitoring
-        max_L = masked_L_per_atom.max()
-        max_L_idx = torch.argmax(masked_L_per_atom)
+        max_L = weighted_L_per_atom.max()
+        max_L_idx = torch.argmax(weighted_L_per_atom)
 
         # Compute masked median loss (only over nonzero mask elements)
-        masked_values = L_per_atom[mask.bool()].flatten()
+        masked_values = weighted_L_per_atom[mask.bool()].flatten()
         median_L = masked_values.median()
        
         return L, median_L, max_L, max_L_idx
