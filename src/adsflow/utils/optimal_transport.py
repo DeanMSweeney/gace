@@ -52,17 +52,18 @@ class OptTransport():
             w = d_alpha / d_alpha.sum().clamp_min(1e-8)
 
         # compute masked weighted loss (sum of weighted per-atom losses)
-        L = (w * masked_L_per_atom).sum()
+        weighted_L_per_atom = w * masked_L_per_atom
+        L = (weighted_L_per_atom).sum()
         if ramp_L:
             beta = min(1.0, self.current_epoch / ramp_n_epochs)
             L  = beta * L + (1 - beta) * (masked_L_per_atom.sum() / mask.sum().clamp_min(1e-8))
 
         # Compute max (absolute) loss for stability monitoring
-        max_L = masked_L_per_atom.max()
-        max_L_idx = torch.argmax(masked_L_per_atom)
+        max_L = weighted_L_per_atom.max()
+        max_L_idx = torch.argmax(weighted_L_per_atom)
 
         # Compute masked median loss (only over nonzero mask elements)
-        masked_values = L_per_atom[mask.bool()].flatten()
+        masked_values = weighted_L_per_atom[mask.bool()].flatten()
         median_L = masked_values.median()
        
         return L, median_L, max_L, max_L_idx
