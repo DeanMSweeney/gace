@@ -23,6 +23,7 @@ import re
 import sys
 import tarfile
 from dataclasses import dataclass
+from multiprocessing import Pool
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -214,58 +215,82 @@ def iter_tar_members(tar: tarfile.TarFile, suffix: str = ".extxyz.xz") -> Iterab
             yield m
 
 
+def process_single_tar(args_tuple: Tuple[Path, Path, int]) -> Tuple[str, int, int, int]:
+    """
+    Process a single tar file. Returns (adsorbate, n_members, n_traj_ok, n_traj_skip).
+    """
+    tar_path, out_root, rows_per_shard = args_tuple
+
+    adsorbate = infer_adsorbate_name(tar_path)
+    ads_out = out_root / adsorbate / "metrics"
+    writer = ShardWriter(out_dir=ads_out, rows_per_shard=rows_per_shard)
+
+    print(f"adsorbate='{adsorbate}'  metrics_dir='{ads_out}'", flush=True)
+
+    n_members = 0
+    n_traj_ok = 0
+    n_traj_skip = 0
+
+    with tarfile.open(tar_path, "r") as tar:
+        for member in iter_tar_members(tar, suffix=".extxyz.xz"):
+            n_members += 1
+
+            sid = infer_sid_from_member(member.name)
+            if sid is None:
+                n_traj_skip += 1
+                continue
+
+            if n_members % 10 == 0:
+                print(f"  Processing member {n_members} (sid={sid}, {member.name})", flush=True)
+
+            traj_atoms = read_extxyz_xz_from_tar_member(tar, member)
+            frame_rows = compute_frame_metrics(traj_atoms, sid=sid, adsorbate=adsorbate)
+            if frame_rows:
+                writer.add_rows(frame_rows)
+                n_traj_ok += 1
+            else:
+                n_traj_skip += 1
+
+    writer.close()
+    print(
+        f"[done] adsorbate='{adsorbate}' members_seen={n_members} traj_ok={n_traj_ok} traj_skipped={n_traj_skip}",
+        flush=True,
+    )
+
+    return (adsorbate, n_members, n_traj_ok, n_traj_skip)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--in_root", type=str, required=True, help="Directory containing per-adsorbate *.tar files")
     ap.add_argument("--rows_per_shard", type=int, default=2_000_000, help="Frames (rows) per parquet shard")
+    ap.add_argument("--num_workers", type=int, default=16, help="Number of parallel workers")
     args = ap.parse_args()
 
     in_root = Path(args.in_root)
-    out_root = in_root 
+    out_root = in_root
     out_root = Path(out_root)
     out_root.mkdir(parents=True, exist_ok=True)
-    
+
     tar_paths = sorted(in_root.glob("*.tar"))
     if not tar_paths:
         print(f"No .tar files found in {in_root}", file=sys.stderr)
         sys.exit(1)
 
-    for tar_path in tar_paths:
-        adsorbate = infer_adsorbate_name(tar_path)
+    print(f"Processing {len(tar_paths)} tar files with {args.num_workers} workers", flush=True)
 
-        ads_out = out_root / adsorbate / "metrics"
-        writer = ShardWriter(out_dir=ads_out, rows_per_shard=args.rows_per_shard)
+    # Prepare arguments for parallel processing
+    process_args = [(tar_path, out_root, args.rows_per_shard) for tar_path in tar_paths]
 
-        print(f"adsorbate='{adsorbate}'  metrics_dir='{ads_out}'", flush=True)
+    # Process tar files in parallel
+    with Pool(processes=args.num_workers) as pool:
+        results = pool.map(process_single_tar, process_args)
 
-        n_members = 0
-        n_traj_ok = 0
-        n_traj_skip = 0
-
-        with tarfile.open(tar_path, "r") as tar:
-            for member in iter_tar_members(tar, suffix=".extxyz.xz"):
-                n_members += 1
-
-                sid = infer_sid_from_member(member.name)
-                if sid is None:
-                    n_traj_skip += 1
-                    continue
-
-                if n_members % 10 == 0:
-                    print(f"  Processing member {n_members} (sid={sid}, {member.name})", flush=True)
-
-                traj_atoms = read_extxyz_xz_from_tar_member(tar, member)
-                frame_rows = compute_frame_metrics(traj_atoms, sid=sid, adsorbate=adsorbate)
-                if frame_rows:
-                    writer.add_rows(frame_rows)
-                    n_traj_ok += 1
-                else:
-                    n_traj_skip += 1
-        
-
-        writer.close()
+    # Print summary
+    print("\n=== Summary ===", flush=True)
+    for adsorbate, n_members, n_traj_ok, n_traj_skip in results:
         print(
-            f"[done] adsorbate='{adsorbate}' members_seen={n_members} traj_ok={n_traj_ok} traj_skipped={n_traj_skip}",
+            f"  {adsorbate}: members={n_members} ok={n_traj_ok} skipped={n_traj_skip}",
             flush=True,
         )
 
