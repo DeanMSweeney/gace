@@ -30,4 +30,6 @@ checkpoints/
 strucs/
 strucs_1.0/
 conf/
-
+0/
+trajs/
+dense/
