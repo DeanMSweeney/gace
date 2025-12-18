@@ -4,20 +4,30 @@ import torch
 from torch import Tensor
 from torch_geometric.data import Data
 from typing import Optional, Literal, Union, Tuple
+import itertools
 
 
 def pbc_aware_delta(
             cell: Tensor, 
             delta: Tensor, 
-            batch: Tensor, 
+            batch: Optional[Tensor]=None, 
             naive: bool=True,
             norm: bool=False,
 ) -> Tensor:
+    
+        """
+            Cell either (batch_size, 3, 3) from batched trainign data or (3, 3) from input 
+            Cell/A must be converted to (N, 3, 3) for parallelization algorithm to work 
+        """
         
-        A  =  cell[batch]  # (N,3,3)
-        G = A @ A.transpose(1,2) # (N, 3, 3)
-        N = len(batch)
+        if not isinstance(cell, Tensor):
+            cell = torch.from_numpy(np.asarray(cell)).to(dtype=torch.float32)
+        if not isinstance(delta, Tensor):
+            delta = torch.from_numpy(np.asarray(delta)).to(dtype=torch.float32)
         
+        N = torch.zeros(delta.size(0), dtype=torch.long) # number of atoms 
+        A = cell.unsqueeze(0)[N] if batch is None else cell[batch] 
+    
         u = delta # (N,3)
         u_f = torch.linalg.solve(A.transpose(1,2), u.unsqueeze(-1)).squeeze(-1)  # (N,3)
         n0 = torch.round(u_f)
@@ -26,6 +36,7 @@ def pbc_aware_delta(
             u_f_min = u_f - n0
         else: 
             # nearest neighbor search algorithm 
+            G = A @ A.transpose(1,2) # (N, 3, 3)
             D = torch.tensor(list(itertools.product([-1, 0, 1], repeat=3)), dtype=torch.int, device=n0.device) # (27, 3)
             n = n0.unsqueeze(1) + D.unsqueeze(0) # (N, 1, 3) + (1, 27, 3) = (N, 27, 3) 
             U_f_n = u_f.unsqueeze(1) - n # (N, 1, 3) - (N, 27, 3) = (N, 27, 3)
@@ -34,7 +45,7 @@ def pbc_aware_delta(
                 
             # output 
             k_min = u_f2.argmin(dim=1) # N
-            u_f_min = U_f_n[torch.arange(N), k_min]
+            u_f_min = U_f_n[torch.arange(delta.size(0)), k_min]
             
         u_min = torch.bmm(u_f_min.unsqueeze(1), A).squeeze(1)
         
