@@ -16,6 +16,7 @@ POSCAR*
 *.swp
 *.gz
 *.sh
+*.tar
 core
 
 # Folders
@@ -33,3 +34,4 @@ conf/
 0/
 trajs/
 dense/
+
