@@ -16,7 +16,6 @@ POSCAR*
 *.swp
 *.gz
 *.sh
-*.tar
 core
 
 # Folders
