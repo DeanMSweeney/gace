@@ -154,20 +154,23 @@ def compute_frame_metrics(traj_atoms: List, sid: int, adsorbate: str) -> List[Di
         # Max force
         F = at.get_forces()  # (N,3)
         norms = np.linalg.norm(F, axis=1)  # (N,)
-        Fmax = float(np.max(norms))
-        dFmax = abs(Fmax - Fmax_opt)
+        mask = get_free_mask(at) # free, frozen => 1, 0
+        Fmax = float(np.max(norms * mask))
+        dFmax = abs(Fmax - Fmax_opt) 
 
         # Position MAE
         positions = at.get_positions()
-        mask = get_free_mask(at)
-        
-        pos_mae = pbc_aware_delta(
+
+        delta = pbc_aware_delta(
             delta=positions - pos_opt,
             cell=at.get_cell(),
-            norm=True,
+            norm=False,
         )
-        pos_mae = (np.array(pos_mae) * mask).sum() / mask.sum() 
-
+        
+        delta_sqd = (np.array(delta) ** 2).sum(axis=1) * mask # N
+        pos_max = np.max(np.sqrt(delta_sqd))
+        pos_rmse = np.sqrt(delta_sqd.sum() / (3 * mask.sum()))
+        
         row = {
             "adsorbate": adsorbate,
             "sid": int(sid),
@@ -179,7 +182,8 @@ def compute_frame_metrics(traj_atoms: List, sid: int, adsorbate: str) -> List[Di
             "Fmax": float(Fmax),
             "Fmax_opt": float(Fmax_opt),
             "dFmax": float(dFmax),
-            "pos_mae": float(pos_mae),
+            "pos_rmse": float(pos_rmse),
+            "pos_max": float(pos_max)
         }
         rows.append(row)
 
@@ -293,7 +297,6 @@ def main():
             f"  {adsorbate}: members={n_members} ok={n_traj_ok} skipped={n_traj_skip}",
             flush=True,
         )
-
 
 if __name__ == "__main__":
     main()
