@@ -19,7 +19,6 @@ def main(traj_parquets: str, sid_root: str, bins: List[int], force_bins: List[Tu
     c1 = 0
     c2_total, c2_bin1, c2_bin2, c2_bin3, c2_bin4 = 0, 0, 0, 0, 0
     c3 = 0
-    idx = 0
 
     # Store selected frames for each sid
     selected_data = []
@@ -35,9 +34,6 @@ def main(traj_parquets: str, sid_root: str, bins: List[int], force_bins: List[Tu
 
         # iterate through each tracecjtory
         df = pd.read_parquet(traj_path)
-
-        if idx == 0:
-            print(df.head())
 
         # Group by sid
         grouped = df.groupby("sid")
@@ -83,8 +79,6 @@ def main(traj_parquets: str, sid_root: str, bins: List[int], force_bins: List[Tu
                     
                 c3 += len(frame_idx)
 
-
-        idx += 1
 
     # Save selected frames to output file
     if selected_data:
