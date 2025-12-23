@@ -95,7 +95,8 @@ def main(traj_root: str, sid_root: str, bins: List[int], force_bins: List[Tuple[
         df_output.to_parquet(output_path, index=False)
         print(f"Saved {len(selected_data)} selected frame groups to {output_path}")
 
-    print("Dataset Statistics")
+    print("==============================")
+    print("Dataset Statistics 📈")
     print("==============================")
     print(f"Total trajectories processed: {c1}  with {c2_total} out of {c3} frames selected")
     print(f"Bin 1 count: {c2_bin1}")
