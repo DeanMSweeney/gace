@@ -11,7 +11,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 from adsflow.utils.data_builder import select_by_force
    
-def main(traj_root: str, sid_root: str, bins: List[int], force_bins: List[Tuple[float, float]], struc_tol: float = 0.005, seed: Optional[int] = None):
+def main(traj_parquets: str, sid_root: str, bins: List[int], force_bins: List[Tuple[float, float]], struc_tol: float = 0.005, seed: Optional[int] = None):
     # Set random seed for reproducibility
     if seed is not None:
         np.random.seed(seed)
@@ -107,7 +107,7 @@ def main(traj_root: str, sid_root: str, bins: List[int], force_bins: List[Tuple[
         
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--traj_root", type=str, required=True, help="Directory containing per-adsorbate *.tar files")
+    ap.add_argument("--traj_parquets", type=str, required=True, help="Directory containing per-adsorbate *.tar files")
     ap.add_argument("--sid_root", type=str, required=True, help="Path to val/test system ids (sids)")
     ap.add_argument("--bins", type=int, nargs='+', required=True, help="Number of frames in each bin")
     ap.add_argument("--force_bins", type=float, nargs='+', default=[0.0, 0.05, 0.05, 0.10, 0.10, 0.30, 0.30, 0.60],
@@ -117,7 +117,7 @@ if __name__ == "__main__":
     ap.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     args = ap.parse_args()
 
-    traj_root = Path(args.traj_root)
+    traj_parquets = Path(args.traj_parquets)
     sid_root = Path(args.sid_root)
 
     # Create output directory if needed
@@ -126,4 +126,4 @@ if __name__ == "__main__":
     # Parse force_bins into list of tuples
     force_bins = [(args.force_bins[i], args.force_bins[i+1]) for i in range(0, len(args.force_bins), 2)]
 
-    main(traj_root=traj_root, sid_root=sid_root, bins=args.bins, force_bins=force_bins, struc_tol=args.struc_tol, seed=args.seed)
+    main(traj_parquetst=traj_parquets, sid_root=sid_root, bins=args.bins, force_bins=force_bins, struc_tol=args.struc_tol, seed=args.seed)
