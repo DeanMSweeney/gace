@@ -31,7 +31,7 @@ def main(traj_parquets: str, sid_root: str, bins: List[int], force_bins: List[Tu
         test_val_sids.update(df_sid["sid"].to_numpy())
 
     # iterate through all trajectory files in trajectory root
-    for traj_path in tqdm(glob.glob(f"{traj_root}/*.parquet")): # 82 adsorbates considered in OC20
+    for traj_path in tqdm(glob.glob(f"{traj_parquets}/*.parquet")): # 82 adsorbates considered in OC20
 
         # iterate through each tracecjtory
         df = pd.read_parquet(traj_path)
@@ -90,8 +90,8 @@ def main(traj_parquets: str, sid_root: str, bins: List[int], force_bins: List[Tu
     if selected_data:
         df_output = pd.DataFrame(selected_data)
         print(df_output.head())
-        os.makedirs(traj_root / "selected", exist_ok=True)
-        output_path = traj_root / "selected" / "selected_frames.parquet"
+        os.makedirs(traj_parquets / "selected", exist_ok=True)
+        output_path = traj_parquets / "selected" / "selected_frames.parquet"
         df_output.to_parquet(output_path, index=False)
         print(f"Saved {len(selected_data)} selected frame groups to {output_path}")
 
@@ -109,7 +109,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--traj_parquets", type=str, required=True, help="Directory containing per-adsorbate *.tar files")
     ap.add_argument("--sid_root", type=str, required=True, help="Path to val/test system ids (sids)")
-    ap.add_argument("--bins", type=int, nargs='+', required=True, help="Number of frames in each bin")
+    ap.add_argument("--bins", type=int, nargs='+', default=[4, 3, 2, 2], help="Number of frames in each bin")
     ap.add_argument("--force_bins", type=float, nargs='+', default=[0.0, 0.05, 0.05, 0.10, 0.10, 0.30, 0.30, 0.60],
                     help="Force bin edges as pairs (lower, upper). Default: 0.0 0.05 0.05 0.10 0.10 0.30 0.30 0.60")
     ap.add_argument("--struc_tol", type=float, default=0.005, help="Minimum dSmax difference threshold (default: 0.005)")
@@ -126,4 +126,4 @@ if __name__ == "__main__":
     # Parse force_bins into list of tuples
     force_bins = [(args.force_bins[i], args.force_bins[i+1]) for i in range(0, len(args.force_bins), 2)]
 
-    main(traj_parquetst=traj_parquets, sid_root=sid_root, bins=args.bins, force_bins=force_bins, struc_tol=args.struc_tol, seed=args.seed)
+    main(traj_parquets=traj_parquets, sid_root=sid_root, bins=args.bins, force_bins=force_bins, struc_tol=args.struc_tol, seed=args.seed)
