@@ -102,10 +102,10 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--traj_parquets", type=str, required=True, help="Directory containing per-adsorbate *.tar files")
     ap.add_argument("--sid_root", type=str, required=True, help="Path to val/test system ids (sids)")
-    ap.add_argument("--bins", type=int, nargs='+', default=[5, 2, 1, 1], help="Number of frames in each bin")
+    ap.add_argument("--bins", type=int, nargs='+', default=[6, 4, 1, 1], help="Number of frames in each bin")
     ap.add_argument("--force_bins", type=float, nargs='+', default=[0.0, 0.05, 0.05, 0.10, 0.10, 0.30, 0.30, 0.60],
                     help="Force bin edges as pairs (lower, upper). Default: 0.0 0.05 0.05 0.10 0.10 0.30 0.30 0.60")
-    ap.add_argument("--struc_tol", type=float, default=0.1, help="Minimum dSmax difference threshold (default: 0.005)")
+    ap.add_argument("--struc_tol", type=float, default=0.05, help="Minimum dSmax difference threshold (default: 0.005)")
     ap.add_argument("--num_workers", type=int, default=1, help="Number of parallel workers")
     ap.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     args = ap.parse_args()
