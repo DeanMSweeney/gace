@@ -211,7 +211,7 @@ def select_by_force(dE, Fmax, dSmax, frame_idx, bin_count, bins, struc_tol=0.005
                 prev_selected_dSmax=prev_selected_dSmax,
                 must_include_idx=local_zero_idx,
                 frame_zero_dSmax=frame_zero_dSmax,
-                struc_tol=struc_tol,
+                struc_tol=struc_tol / 2 if bin_num == 1 else struc_tol,
                 seed=seed,
             )
             selected = bin_indices[local_selected] if len(local_selected) > 0 else []
