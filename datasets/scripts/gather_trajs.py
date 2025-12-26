@@ -171,6 +171,7 @@ def compute_frame_metrics(traj_atoms: List, sid: int, adsorbate: str) -> List[Di
         pos_max = np.max(np.sqrt(delta_sqd))
         pos_rmse = np.sqrt(delta_sqd.sum() / (3 * mask.sum()))
         
+        # store scalar values 
         row = {
             "adsorbate": adsorbate,
             "sid": int(sid),
