@@ -45,7 +45,7 @@ def main(traj_parquets: str, sid_root: str, bins: List[int], force_bins: List[Tu
                 Fmax = group_df["Fmax"].to_numpy()
                 dSmax = group_df["pos_max"].to_numpy()
                 frame_idx = group_df["frame_idx"].to_numpy()
-                ads_num = group_df["adsorbate"]
+                ads_num = group_df["adsorbate"].astype("string").fillna("")
                 
                 # Use force-based binning selection
                 selected_indices, bin_labels = select_by_force(
@@ -104,7 +104,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--traj_parquets", type=str, required=True, help="Directory containing per-adsorbate *.tar files")
     ap.add_argument("--sid_root", type=str, required=True, help="Path to val/test system ids (sids)")
-    ap.add_argument("--bins", type=int, nargs='+', default=[6, 4, 1, 1], help="Number of frames in each bin")
+    ap.add_argument("--bins", type=int, nargs='+', default=[5, 3, 1, 1], help="Number of frames in each bin")
     ap.add_argument("--force_bins", type=float, nargs='+', default=[0.0, 0.05, 0.05, 0.10, 0.10, 0.30, 0.30, 0.60],
                     help="Force bin edges as pairs (lower, upper). Default: 0.0 0.05 0.05 0.10 0.10 0.30 0.30 0.60")
     ap.add_argument("--struc_tol", type=float, default=0.05, help="Minimum dSmax difference threshold (default: 0.005)")

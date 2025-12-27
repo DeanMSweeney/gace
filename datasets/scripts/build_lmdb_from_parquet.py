@@ -48,7 +48,6 @@ from tqdm import tqdm
 # Regex for extracting sid from filenames
 SID_RE = re.compile(r"(?:sid[_\-]?|^)(\d+)(?:\D|$)", re.IGNORECASE)
 
-
 def infer_adsorbate_name(tar_path: Path) -> str:
     """Infer adsorbate folder name from tar filename."""
     return tar_path.stem
@@ -210,44 +209,6 @@ class LmdbWriter:
     def close(self) -> None:
         """Flush any remaining data and close."""
         self.flush()
-
-
-def build_sid_to_adsorbate_map(metrics_dir: Path) -> Dict[int, str]:
-    """
-    Build mapping from sid to adsorbate by reading trajectory metrics.
-
-    Args:
-        metrics_dir: Root directory containing adsorbate subdirectories with metrics
-
-    Returns:
-        Dictionary mapping sid -> adsorbate name
-    """
-    sid_to_ads = {}
-
-    # Find all metrics parquet files
-    # Structure: metrics_dir/<adsorbate>/metrics/*.parquet
-    for ads_dir in metrics_dir.iterdir():
-        if not ads_dir.is_dir():
-            continue
-
-        metrics_path = ads_dir / "metrics"
-        if not metrics_path.exists():
-            continue
-
-        adsorbate = ads_dir.name
-
-        # Read all parquet files in this adsorbate's metrics folder
-        for pq_file in metrics_path.glob("*.parquet"):
-            if pq_file.name.startswith("selected"):
-                continue  # Skip selected_frames.parquet
-
-            df = pd.read_parquet(pq_file)
-            if 'sid' in df.columns:
-                for sid in df['sid'].unique():
-                    sid_to_ads[int(sid)] = adsorbate
-
-    return sid_to_ads
-
 
 def process_single_tar(
     tar_path: Path,
@@ -412,18 +373,12 @@ def main():
     print(f"Loaded {len(selected_df)} trajectory selections", flush=True)
 
     # Check if adsorbate column exists in parquet
-    if 'adsorbate' in selected_df.columns:
-        print(f"Using adsorbate information from parquet file", flush=True)
-        # Build sid -> adsorbate mapping from parquet
-        sid_to_adsorbate = {}
-        for _, row in selected_df.iterrows():
-            sid_to_adsorbate[int(row['sid'])] = str(row['adsorbate'])
-        print(f"Mapped {len(sid_to_adsorbate)} unique sids to adsorbates", flush=True)
-    else:
-        # Fall back to building mapping from trajectory metrics
-        print(f"Adsorbate column not found in parquet, building sid->adsorbate mapping from {metrics_root}...", flush=True)
-        sid_to_adsorbate = build_sid_to_adsorbate_map(metrics_root)
-        print(f"Mapped {len(sid_to_adsorbate)} unique sids to adsorbates", flush=True)
+    print(f"Using adsorbate information from parquet file", flush=True)
+    # Build sid -> adsorbate mapping from parquet
+    sid_to_adsorbate = {}
+    for _, row in selected_df.iterrows():
+        sid_to_adsorbate[int(row['sid'])] = str(row['adsorbate'])
+    print(f"Mapped {len(sid_to_adsorbate)} unique sids to adsorbates", flush=True)
 
     # Get list of tar files
     tar_paths = sorted(tar_root.glob("*.tar"))
