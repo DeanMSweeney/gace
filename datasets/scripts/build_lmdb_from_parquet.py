@@ -45,6 +45,8 @@ from ase.io import read as ase_read
 from ase.constraints import FixAtoms
 from tqdm import tqdm
 
+from adsflow.utils.invariance import pbc_aware_delta
+
 # Regex for extracting sid from filenames
 SID_RE = re.compile(r"(?:sid[_\-]?|^)(\d+)(?:\D|$)", re.IGNORECASE)
 
@@ -88,7 +90,6 @@ def get_fixed_mask(atoms) -> np.ndarray:
             mask[c.index] = True
     return mask
 
-
 def atoms_to_lmdb_data(
     atoms,
     atoms_relaxed,
@@ -109,10 +110,22 @@ def atoms_to_lmdb_data(
     Returns:
         Dictionary with OC20-style LMDB fields
     """
+    
+    pos = atoms.get_positions().astype(np.float32)
+    pos_init = atoms_init.get_positions().astype(np.float32)
+    cell = atoms.get_cell().array.astype(np.float32)
+    
+    velocity = pbc_aware_delta(
+        delta=pos - pos_init,
+        cell=cell,
+    ) # outputs a torch.Tensor
+
     data = {
         # Positions
         "pos": atoms.get_positions().astype(np.float32),
         "pos_init": atoms_init.get_positions().astype(np.float32),
+
+        "velocity": velocity.cpu().numpy().astype(np.float32), 
 
         # Cell
         "cell": atoms.get_cell().array.astype(np.float32),
