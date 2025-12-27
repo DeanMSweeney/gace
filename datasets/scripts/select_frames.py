@@ -45,7 +45,7 @@ def main(traj_parquets: str, sid_root: str, bins: List[int], force_bins: List[Tu
                 Fmax = group_df["Fmax"].to_numpy()
                 dSmax = group_df["pos_max"].to_numpy()
                 frame_idx = group_df["frame_idx"].to_numpy()
-                ads_num = group_df["adsorbate"].astype("string").fillna("")
+                ads_num = group_df["adsorbate"].iloc[0] if "adsorbate" in group_df.columns else ""
                 
                 # Use force-based binning selection
                 selected_indices, bin_labels = select_by_force(
@@ -85,8 +85,9 @@ def main(traj_parquets: str, sid_root: str, bins: List[int], force_bins: List[Tu
     if selected_data:
         df_output = pd.DataFrame(selected_data)
         print(df_output.head())
-        os.makedirs(traj_parquets / "selected", exist_ok=True)
-        output_path = traj_parquets / "selected" / "selected_frames.parquet"
+        output_dir = traj_parquets / "selected"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / "selected_frames.parquet"
         df_output.to_parquet(output_path, index=False)
         print(f"Saved {len(selected_data)} selected frame groups to {output_path}")
 
