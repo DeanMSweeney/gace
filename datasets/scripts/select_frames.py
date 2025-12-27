@@ -45,6 +45,7 @@ def main(traj_parquets: str, sid_root: str, bins: List[int], force_bins: List[Tu
                 Fmax = group_df["Fmax"].to_numpy()
                 dSmax = group_df["pos_max"].to_numpy()
                 frame_idx = group_df["frame_idx"].to_numpy()
+                ads_num = group_df["adsorbate"]
                 
                 # Use force-based binning selection
                 selected_indices, bin_labels = select_by_force(
@@ -55,13 +56,14 @@ def main(traj_parquets: str, sid_root: str, bins: List[int], force_bins: List[Tu
                     bin_count=bins,
                     bins=force_bins,
                     struc_tol=struc_tol,
-                    seed=seed
+                    seed=seed,
                 )
                 
                 c1 += 1
                 # Store selected frame data
                 if len(selected_indices) > 0:
                     selected_data.append({
+                        'adsorbate': ads_num,
                         'sid': sid,
                         'selected_frames': frame_idx[selected_indices].tolist(),
                         'dE': dE[selected_indices].tolist(),
