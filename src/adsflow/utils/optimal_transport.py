@@ -32,41 +32,35 @@ class OptTransport():
         ramp_n_epochs: int=5,
     ):
         # compute per atom loss
-        L_per_atom = ((a - b) ** 2).mean(dim=1, keepdim=True)  # N, 1
-        masked_L_per_atom = L_per_atom * mask  # N, 1
-        
-        # compute distance moved by all atoms
-        data = input_data
-        d = pbc_aware_delta(
-            cell=data.cell,
-            delta=(data.pos_init - data.pos_relaxed),
-            batch=data.batch,
-            norm=True, # average distance for each atom
-        )
-        
-        # compute weights with numerical stability
-        if alpha == 0: 
-            w = 1 / mask.sum().clamp_min(1e-8) # equal weighting, equivalent to L = 1/N * sum(l_per_atom), w = 1/N
-        else:
-            d_alpha = d ** alpha
-            w = d_alpha / d_alpha.sum().clamp_min(1e-8)
+        with torch.no_grad():
+            # compute weights with numerical stability
+            if alpha == 0: 
+                w = 1 / mask.sum().clamp_min(1e-8) # equal weighting, equivalent to L = 1/N * sum(l_per_atom), w = 1/N
+            else:
+                # compute distance moved by all atoms
+                data = input_data
+                d = pbc_aware_delta(
+                    cell=data.cell,
+                    delta=(data.pos_init - data.pos_relaxed),
+                    batch=data.batch,
+                    norm=True, # average distance for each atom
+                )
+                d_alpha = d ** alpha
+                w = d_alpha / d_alpha.sum().clamp_min(1e-8)
 
         # compute masked weighted loss (sum of weighted per-atom losses)
+        L_per_atom = ((a - b) ** 2).mean(dim=1, keepdim=True)  # N, 1
+        masked_L_per_atom = L_per_atom * mask  # N, 1
+        print(mask.size(), L_per_atom.size())
         weighted_L_per_atom = w * masked_L_per_atom
         L = (weighted_L_per_atom).sum()
-        if ramp_L:
-            beta = min(1.0, self.current_epoch / ramp_n_epochs)
-            L  = beta * L + (1 - beta) * (masked_L_per_atom.sum() / mask.sum().clamp_min(1e-8))
+            
+        with torch.no_grad():
+            # Compute max (absolute) loss for stability monitoring
+            max_L = weighted_L_per_atom.max()
+            max_L_idx = torch.argmax(weighted_L_per_atom)
 
-        # Compute max (absolute) loss for stability monitoring
-        max_L = weighted_L_per_atom.max()
-        max_L_idx = torch.argmax(weighted_L_per_atom)
-
-        # Compute masked median loss (only over nonzero mask elements)
-        masked_values = weighted_L_per_atom[mask.bool()].flatten()
-        median_L = masked_values.median()
-       
-        return L, median_L, max_L, max_L_idx
+        return L, max_L, max_L_idx
             
     def path(
         self,
@@ -76,35 +70,36 @@ class OptTransport():
         naive: str=True,
     ) -> Tuple[Data, Tensor]:
         
-        data = input_data.clone()
+        with torch.no_grad():
+            data = input_data.clone()
 
-        x1 = data.pos_relaxed # sample relaxed positions x1 ~ p(x) (final)
+            x1 = data.pos_relaxed # sample relaxed positions x1 ~ p(x) (final)
 
-        if variant == "Forge":
-                x0 = torch.randn_like(x1) # sample noise 
-        else:
-                x0 = data.pos # sample initial positions x0 ~ q(x) (initial)
+            if variant == "Forge":
+                    x0 = torch.randn_like(x1) # sample noise 
+            else:
+                    x0 = data.pos # sample initial positions x0 ~ q(x) (initial)
 
-        t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device) # (batch_size, 1)
-        t = t_per_graph[data.batch] # (num_atoms, 1)
-    
-        if hasattr(data, "velocity"):
-              # load from data object
-              u = data.velocity
-              
-        else: 
-               delta_xyz = x1 - x0
-               u = pbc_aware_delta(
-                  delta=delta_xyz,
-                  cell=data.cell,
-                  batch=data.batch,
-                  naive=naive,
-            )
+            t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device) # (batch_size, 1)
+            t = t_per_graph[data.batch] # (num_atoms, 1)
+        
+            if hasattr(data, "velocity"):
+                # load from data object
+                u = data.velocity
+                
+            else: 
+                delta_xyz = x1 - x0
+                u = pbc_aware_delta(
+                    delta=delta_xyz,
+                    cell=data.cell,
+                    batch=data.batch,
+                    naive=naive,
+                )
 
-        xt = x0 + t * u # x1 * t + (1-t) * x0
-        data.pos = xt # reassign xt to pos 
-        data.pos_init = x0
-        data.t = t
+            xt = x0 + t * u # x1 * t + (1-t) * x0
+            data.pos = xt # reassign xt to pos 
+            data.pos_init = x0
+            data.t = t
 
         return data, u 
   
@@ -172,13 +167,13 @@ class OptTransport():
                 batch=data.batch,
         )
             
-            struc_mse, struc_mdse, _, _ = self.masked_loss(input_data=data, a=e_gen, b=torch.zeros_like(e_gen), mask=self.free_atoms)
-            struc_rmse, struc_rmdse = torch.sqrt(struc_mse), torch.sqrt(struc_mdse)
+            struc_mse,  _, _ = self.masked_loss(input_data=data, a=e_gen, b=torch.zeros_like(e_gen), mask=self.free_atoms)
+            struc_rmse = torch.sqrt(struc_mse)
             
-            null_struc_mse, null_struc_mdse, _, _ = self.masked_loss(input_data=data, a=e_null, b=torch.zeros_like(e_null), mask=self.free_atoms)
-            null_struc_rmse, null_struc_rmdse = torch.sqrt(null_struc_mse), torch.sqrt(null_struc_mdse)
+            null_struc_mse, _, _ = self.masked_loss(input_data=data, a=e_null, b=torch.zeros_like(e_null), mask=self.free_atoms)
+            null_struc_rmse,  = torch.sqrt(null_struc_mse)
             
-            return data, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse
+            return data, struc_rmse, null_struc_rmse
         else: 
             return data
   
