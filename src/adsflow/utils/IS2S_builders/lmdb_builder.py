@@ -275,14 +275,25 @@ def process_single_tar(
         de_vals = row['dE']
         dsmax_vals = row['dSmax']
 
-        # Ensure they are lists
-        if not isinstance(frames, list):
+        # Ensure they are lists (convert numpy arrays to lists)
+        if hasattr(frames, 'tolist'):
+            frames = frames.tolist()
+        elif not isinstance(frames, list):
             frames = [frames]
-        if not isinstance(fmax_vals, list):
+
+        if hasattr(fmax_vals, 'tolist'):
+            fmax_vals = fmax_vals.tolist()
+        elif not isinstance(fmax_vals, list):
             fmax_vals = [fmax_vals]
-        if not isinstance(de_vals, list):
+
+        if hasattr(de_vals, 'tolist'):
+            de_vals = de_vals.tolist()
+        elif not isinstance(de_vals, list):
             de_vals = [de_vals]
-        if not isinstance(dsmax_vals, list):
+
+        if hasattr(dsmax_vals, 'tolist'):
+            dsmax_vals = dsmax_vals.tolist()
+        elif not isinstance(dsmax_vals, list):
             dsmax_vals = [dsmax_vals]
 
         sid_to_data[sid] = {
@@ -334,7 +345,8 @@ def process_single_tar(
 
             # Extract selected frames
             for i, frame_idx in enumerate(frames_to_extract):
-               
+                
+                print(frame_idx)
                 atoms = traj_atoms[frame_idx]
 
                 # Get the corresponding Fmax, dE, dSmax values
