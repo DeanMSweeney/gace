@@ -45,7 +45,6 @@ import numpy as np
 import pandas as pd
 from ase.io import read as ase_read
 from ase.constraints import FixAtoms
-from tqdm import tqdm
 
 from adsflow.utils.invariance import pbc_aware_delta
 
@@ -315,11 +314,11 @@ def process_single_tar(
     n_frames_extracted = 0
 
     with tarfile.open(tar_path, "r") as tar:
-        # Get all members first to show progress
+        # Get all members first
         all_members = [m for m in tar if m.isfile() and m.name.endswith(".extxyz.xz")]
 
-        # Iterate through tar members with progress bar
-        for member in tqdm(all_members, desc=f"{adsorbate}", unit="traj"):
+        # Iterate through tar members
+        for member in all_members:
             sid = infer_sid_from_member(member.name)
             if sid is None or sid not in sid_to_data:
                 continue
