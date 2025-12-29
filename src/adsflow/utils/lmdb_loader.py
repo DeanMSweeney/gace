@@ -162,7 +162,6 @@ def data_list_collater(
             logging.warning("Missing edge_index; set otf_graph=True")
     return dict(batch.items()) if to_dict else batch
 
-
 if __name__ == "__main__":
     from torch_geometric.loader import DataLoader
     
