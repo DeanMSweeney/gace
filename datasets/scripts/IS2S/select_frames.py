@@ -116,7 +116,7 @@ if __name__ == "__main__":
     traj_parquets = Path(args.traj_parquets)
     sid_root = Path(args.sid_root)
 
-    # Create output directory if needed
+    # Added for future parallelization implmentation if needed 
     num_workers = args.num_workers
 
     # Parse force_bins into list of tuples

@@ -2,14 +2,26 @@ from __future__ import annotations
 
 import argparse
 import sys
+from multiprocessing import Pool
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 from ase.constraints import FixAtoms
-from tqdm import tqdm
 
 from adsflow.utils.IS2S_builders.lmdb_builder import process_single_tar
+
+
+def process_tar_wrapper(args: Tuple) -> Tuple[str, int, int]:
+    """Wrapper function for multiprocessing to unpack arguments."""
+    tar_path, selected_frames_df, sid_to_adsorbate, out_dir, entries_per_shard = args
+    return process_single_tar(
+        tar_path=tar_path,
+        selected_frames_df=selected_frames_df,
+        sid_to_adsorbate=sid_to_adsorbate,
+        out_dir=out_dir,
+        entries_per_shard=entries_per_shard,
+    )
 
 def main():
     ap = argparse.ArgumentParser(
@@ -38,6 +50,12 @@ def main():
         type=int,
         default=10_000,
         help="Number of entries per LMDB shard"
+    )
+    ap.add_argument(
+        "--num_workers",
+        type=int,
+        default=16,
+        help="Number of parallel workers"
     )
     args = ap.parse_args()
 
@@ -72,25 +90,24 @@ def main():
         print(f"Error: No .tar files found in {tar_root}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Found {len(tar_paths)} tar files to process", flush=True)
+    print(f"Found {len(tar_paths)} tar files to process with {args.num_workers} workers", flush=True)
 
     # Create output directory
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Sequential processing
-    total_traj = 0
-    total_frames = 0
+    # Prepare arguments for parallel processing
+    process_args = [
+        (tar_path, selected_df, sid_to_adsorbate, out_dir, args.entries_per_shard)
+        for tar_path in tar_paths
+    ]
 
-    for tar_path in tqdm(tar_paths, desc="Processing tar files"):
-        _, n_traj, n_frames = process_single_tar(
-            tar_path=tar_path,
-            selected_frames_df=selected_df,
-            sid_to_adsorbate=sid_to_adsorbate,
-            out_dir=out_dir,
-            entries_per_shard=args.entries_per_shard,
-        )
-        total_traj += n_traj
-        total_frames += n_frames
+    # Process tar files in parallel
+    with Pool(processes=args.num_workers) as pool:
+        results = pool.map(process_tar_wrapper, process_args)
+
+    # Aggregate results
+    total_traj = sum(n_traj for _, n_traj, _ in results)
+    total_frames = sum(n_frames for _, _, n_frames in results)
 
     # Print summary
     print("\n=== Summary ===", flush=True)
