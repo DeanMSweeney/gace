@@ -173,6 +173,7 @@ class LmdbWriter:
     out_dir: Path
     entries_per_shard: int = 10_000
     map_size: int = 1099511627776  # 1TB
+    prefix: str = "data"  # Prefix for shard filenames
 
     _data: List[Dict] = field(default_factory=list)
     _shard_id: int = 0
@@ -184,12 +185,12 @@ class LmdbWriter:
 
     def _find_next_shard_id(self) -> int:
         """Resume-friendly: continue after max existing shard id."""
-        existing = sorted(self.out_dir.glob("data_*.lmdb"))
+        existing = sorted(self.out_dir.glob(f"{self.prefix}_*.lmdb"))
         if not existing:
             return 0
         max_id = -1
         for p in existing:
-            m = re.search(r"data_(\d+)\.lmdb$", p.name)
+            m = re.search(rf"{re.escape(self.prefix)}_(\d+)\.lmdb$", p.name)
             if m:
                 max_id = max(max_id, int(m.group(1)))
         return max_id + 1
@@ -205,7 +206,7 @@ class LmdbWriter:
         if not self._data:
             return
 
-        shard_path = self.out_dir / f"data_{self._shard_id:04d}.lmdb"
+        shard_path = self.out_dir / f"{self.prefix}_{self._shard_id:04d}.lmdb"
 
         # Create LMDB environment
         env = lmdb.open(
@@ -297,7 +298,7 @@ def process_single_tar(
 
     print(f"[processing] adsorbate='{adsorbate}'  sids={len(sid_to_data)}  frames={sum(len(v['frames']) for v in sid_to_data.values())}", flush=True)
 
-    writer = LmdbWriter(out_dir=out_dir, entries_per_shard=entries_per_shard)
+    writer = LmdbWriter(out_dir=out_dir, entries_per_shard=entries_per_shard, prefix=adsorbate)
 
     n_traj_ok = 0
     n_frames_extracted = 0
