@@ -334,10 +334,7 @@ def process_single_tar(
 
             # Extract selected frames
             for i, frame_idx in enumerate(frames_to_extract):
-                if frame_idx >= len(traj_atoms):
-                    print(f"[warning] frame_idx={frame_idx} out of range for sid={sid} (max={len(traj_atoms)-1})", flush=True)
-                    continue
-
+               
                 atoms = traj_atoms[frame_idx]
 
                 # Get the corresponding Fmax, dE, dSmax values
