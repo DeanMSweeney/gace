@@ -1,7 +1,7 @@
 import hydra
 import time
 
-from adsflow.helm.configure import Config
+from adsflow.helm.config import Config
 from adsflow.helm.cli import main as train
 
 
