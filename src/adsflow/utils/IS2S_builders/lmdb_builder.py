@@ -346,7 +346,6 @@ def process_single_tar(
             # Extract selected frames
             for i, frame_idx in enumerate(frames_to_extract):
                 
-                print(frame_idx)
                 atoms = traj_atoms[frame_idx]
 
                 # Get the corresponding Fmax, dE, dSmax values
