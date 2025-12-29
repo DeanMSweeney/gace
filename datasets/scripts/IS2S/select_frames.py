@@ -9,7 +9,7 @@ import argparse
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from adsflow.utils.data_builder import select_by_force
+from adsflow.utils.IS2S_builders.greedy_curation import select_by_force
    
 def main(traj_parquets: str, sid_root: str, bins: List[int], force_bins: List[Tuple[float, float]], struc_tol: float = 0.01, seed: Optional[int] = None):
     # Set random seed for reproducibility
