@@ -1,3 +1,7 @@
+"""
+Writes new lmdb files with precomputed velocity metrics
+"""
+
 import os
 import lmdb
 import pickle
@@ -5,7 +9,7 @@ import numpy as np
 import torch 
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
-from adsflow.utils.lmdb_dataset import LazyLmdbDataset
+from adsflow.utils.lmdb_loader import LazyLmdbDataset
 from adsflow.utils.optimal_transport import OptTransportUtils as OTM
 
 

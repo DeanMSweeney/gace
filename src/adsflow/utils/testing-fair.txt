@@ -1,2 +1,0 @@
-DataBatch(edge_index=[2, 90067], pos=[2463, 3], cell=[25, 3, 3], atomic_numbers=[2463], natoms=[25], cell_offsets=[90067, 3], force=[2463, 3], fixed=[2463], tags=[2463], y_init=[25], y_relaxed=[25], pos_relaxed=[2463, 3], sid=[25], batch=[2463], ptr=[26])
-
