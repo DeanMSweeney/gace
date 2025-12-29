@@ -170,7 +170,7 @@ class OptTransport():
             struc_rmse = torch.sqrt(struc_mse)
             
             null_struc_mse, _, _ = self.masked_loss(input_data=data, a=e_null, b=torch.zeros_like(e_null), mask=self.free_atoms)
-            null_struc_rmse,  = torch.sqrt(null_struc_mse)
+            null_struc_rmse  = torch.sqrt(null_struc_mse)
             
             return data, struc_rmse, null_struc_rmse
         else: 
