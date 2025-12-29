@@ -190,26 +190,10 @@ class LightFlowMatch(LightningModule, OptTransport):
             batch_size=len(data.natoms),
             sync_dist=True,
         )
-        
-        self.log(
-            "test/struc_rmdse", 
-            struc_rmdse, 
-            prog_bar=True, 
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
 
         self.log(
             "test/null_struc_rmse", 
             null_struc_rmse, 
-            prog_bar=True, 
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-        
-        self.log(
-            "test/null_struc_rmdse", 
-            null_struc_rmdse, 
             prog_bar=True, 
             batch_size=len(data.natoms),
             sync_dist=True,
