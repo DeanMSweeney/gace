@@ -164,7 +164,7 @@ class LightFlowMatch(LightningModule, OptTransport):
         else: 
             # define time interval for the IVP
             t = torch.linspace(0., 1., 100, device=data.pos.device, dtype=data.pos.dtype)
-            opt_graph, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = self.sample(input_data=data, t=t)
+            opt_graph, struc_rmse, null_struc_rmse = self.sample(input_data=data, t=t)
             print(f"Mean loss of batch: {loss} || Structural RMSE of batch: {struc_rmse}")
                 
         self.log(
@@ -174,7 +174,6 @@ class LightFlowMatch(LightningModule, OptTransport):
             batch_size=len(data.natoms),
             sync_dist=True,
         )
-        
         
         self.log(
             "test/max_loss", 
