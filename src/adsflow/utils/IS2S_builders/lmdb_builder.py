@@ -315,11 +315,11 @@ def process_single_tar(
     n_frames_extracted = 0
 
     with tarfile.open(tar_path, "r") as tar:
-        # Iterate through tar members
-        for member in tar:
-            if not member.isfile() or not member.name.endswith(".extxyz.xz"):
-                continue
+        # Get all members first to show progress
+        all_members = [m for m in tar if m.isfile() and m.name.endswith(".extxyz.xz")]
 
+        # Iterate through tar members with progress bar
+        for member in tqdm(all_members, desc=f"{adsorbate}", unit="traj"):
             sid = infer_sid_from_member(member.name)
             if sid is None or sid not in sid_to_data:
                 continue
