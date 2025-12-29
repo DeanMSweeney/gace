@@ -48,7 +48,7 @@ def main():
     ap.add_argument(
         "--entries_per_shard",
         type=int,
-        default=10_000,
+        default=100_000,
         help="Number of entries per LMDB shard"
     )
     ap.add_argument(
