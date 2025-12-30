@@ -8,7 +8,6 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 from ase.constraints import FixAtoms
-from tqdm import tqdm
 
 from adsflow.utils.IS2S_builders.lmdb_builder import process_single_tar
 
@@ -102,11 +101,9 @@ def main():
         for tar_path in tar_paths
     ]
 
-    # Process tar files in parallel with progress bar
+    # Process tar files in parallel
     with Pool(processes=args.num_workers) as pool:
-        results = list(
-            pool.imap(process_tar_wrapper, process_args),
-        )
+        results = list(pool.imap(process_tar_wrapper, process_args))
 
     # Aggregate results
     total_traj = sum(n_traj for _, n_traj, _ in results)
