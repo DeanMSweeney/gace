@@ -104,12 +104,12 @@ def main():
 
     # Process tar files in parallel with progress bar
     with Pool(processes=args.num_workers) as pool:
-        results = list(tqdm(
+        results = list(
             pool.imap(process_tar_wrapper, process_args),
             total=len(process_args),
             desc="Processing tar files",
             unit="tar"
-        ))
+        )
 
     # Aggregate results
     total_traj = sum(n_traj for _, n_traj, _ in results)
