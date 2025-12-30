@@ -45,7 +45,6 @@ import numpy as np
 import pandas as pd
 from ase.io import read as ase_read
 from ase.constraints import FixAtoms
-from tqdm import tqdm
 
 from adsflow.utils.invariance import pbc_aware_delta
 
