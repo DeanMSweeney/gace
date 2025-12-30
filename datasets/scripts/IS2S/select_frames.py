@@ -45,7 +45,7 @@ def main(traj_parquets: str, sid_root: str, bins: List[int], force_bins: List[Tu
                 Fmax = group_df["Fmax"].to_numpy()
                 dSmax = group_df["pos_max"].to_numpy()
                 frame_idx = group_df["frame_idx"].to_numpy()
-                ads_num = group_df["adsorbate"].iloc[0] if "adsorbate" in group_df.columns else ""
+                ads_num = group_df["adsorbate"].iloc[0] if "adsorbate" in group_df.columns else "" # take only fist element from adsorbate 
                 
                 # Use force-based binning selection
                 selected_indices, bin_labels = select_by_force(
@@ -79,6 +79,8 @@ def main(traj_parquets: str, sid_root: str, bins: List[int], force_bins: List[Tu
                     c2_bin4 += np.sum(bin_labels == 4)
                     
                 c3 += len(frame_idx)
+            else:
+                print(f"SID in test/val sets")
 
 
     # Save selected frames to output file

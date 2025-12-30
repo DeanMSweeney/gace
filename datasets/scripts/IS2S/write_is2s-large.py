@@ -78,7 +78,7 @@ def main():
     print(f"Loaded {len(selected_df)} trajectory selections", flush=True)
     print(f"Columns in parquet: {selected_df.columns.tolist()}", flush=True)
 
-    # Build sid -> adsorbate mapping from parquet
+    # Build sid -> adsorbate mapping by iterating through all rows of parquet file 
     sid_to_adsorbate = {}
     for _, row in selected_df.iterrows():
         sid_to_adsorbate[int(row['sid'])] = str(row['adsorbate'])
