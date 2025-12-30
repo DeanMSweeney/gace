@@ -265,7 +265,7 @@ def process_single_tar(
     for _, row in selected_frames_df.iterrows():
         sid = int(row['sid'])
 
-        # Check if this sid belongs to current adsorbate
+        # Check if this sid belongs to current adsorbate in parquet file 
         if sid_to_adsorbate.get(sid) != adsorbate:
             continue
 
