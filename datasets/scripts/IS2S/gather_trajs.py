@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Stream OC20 per-adsorbate IS2RE/S trajectory tarballs and build sharded metrics.
+Stream OC20 per-adsorbate IS2RE/S trajectory tarballs and build metrics.
 
 Output:
-<out_root>/<adsorbate>/metrics/part-00000.parquet, part-00001.parquet, ...
+<out_root>/{adsorbate}.parquet
 
 Each row corresponds to one frame.
 """
@@ -16,6 +16,7 @@ import sys
 from multiprocessing import Pool
 from pathlib import Path
 
+from tqdm import tqdm
 from adsflow.utils.IS2S_builders.frame_metrics import process_single_tar
 
 SID_RE = re.compile(r"(?:sid[_\-]?|^)(\d+)(?:\D|$)", re.IGNORECASE)
@@ -23,13 +24,13 @@ SID_RE = re.compile(r"(?:sid[_\-]?|^)(\d+)(?:\D|$)", re.IGNORECASE)
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--in_root", type=str, required=True, help="Directory containing per-adsorbate *.tar files")
+    ap.add_argument("--out_root", type=str, required=True, help="Directory containing to store new data")
     ap.add_argument("--rows_per_shard", type=int, default=2_000_000, help="Frames (rows) per parquet shard")
     ap.add_argument("--num_workers", type=int, default=16, help="Number of parallel workers")
     args = ap.parse_args()
 
     in_root = Path(args.in_root)
-    out_root = in_root
-    out_root = Path(out_root)
+    out_root = Path(args.out_root)
     out_root.mkdir(parents=True, exist_ok=True)
 
     tar_paths = sorted(in_root.glob("*.tar"))
@@ -42,9 +43,14 @@ def main():
     # Prepare arguments for parallel processing
     process_args = [(tar_path, out_root, args.rows_per_shard) for tar_path in tar_paths]
 
-    # Process tar files in parallel
+    # Process tar files in parallel with single progress bar
     with Pool(processes=args.num_workers) as pool:
-        results = pool.map(process_single_tar, process_args)
+        results = list(tqdm(
+            pool.imap_unordered(process_single_tar, process_args),
+            total=len(tar_paths),
+            desc="Processing adsorbates",
+            unit="file"
+        ))
 
     # Print summary
     print("\n=== Summary ===", flush=True)
