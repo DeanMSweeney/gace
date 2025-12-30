@@ -228,7 +228,7 @@ class LmdbWriter:
 
         env.close()
 
-        print(f"[write] {shard_path}  entries={len(self._data)}")
+        print(f"[write] {shard_path}  entries={len(self._data)}", flush=True)
         self._global_index += len(self._data)
         self._data.clear()
         self._shard_id += 1
@@ -303,10 +303,10 @@ def process_single_tar(
         }
 
     if len(sid_to_data) == 0:
-        print(f"[skip] No selected frames for adsorbate '{adsorbate}'")
+        print(f"[skip] No selected frames for adsorbate '{adsorbate}'", flush=True)
         return (adsorbate, 0, 0)
 
-    print(f"[processing] adsorbate='{adsorbate}'  sids={len(sid_to_data)}  frames={sum(len(v['frames']) for v in sid_to_data.values())}")
+    print(f"[processing] adsorbate='{adsorbate}'  sids={len(sid_to_data)}  frames={sum(len(v['frames']) for v in sid_to_data.values())}", flush=True)
 
     writer = LmdbWriter(out_dir=out_dir, entries_per_shard=entries_per_shard, prefix=adsorbate)
 
@@ -373,6 +373,6 @@ def process_single_tar(
 
     writer.close()
 
-    print(f"[done] adsorbate='{adsorbate}' traj_ok={n_traj_ok} frames_extracted={n_frames_extracted}")
+    print(f"[done] adsorbate='{adsorbate}' traj_ok={n_traj_ok} frames_extracted={n_frames_extracted}", flush=True)
 
     return (adsorbate, n_traj_ok, n_frames_extracted)
