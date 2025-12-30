@@ -306,7 +306,7 @@ def process_single_tar(
         print(f"[skip] No selected frames for adsorbate '{adsorbate}'")
         return (adsorbate, 0, 0)
 
-    #print(f"[processing] adsorbate='{adsorbate}'  sids={len(sid_to_data)}  frames={sum(len(v['frames']) for v in sid_to_data.values())}")
+    print(f"[processing] adsorbate='{adsorbate}'  sids={len(sid_to_data)}  frames={sum(len(v['frames']) for v in sid_to_data.values())}")
 
     writer = LmdbWriter(out_dir=out_dir, entries_per_shard=entries_per_shard, prefix=adsorbate)
 
