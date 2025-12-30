@@ -212,14 +212,12 @@ def process_single_tar(args_tuple: Tuple[Path, Path, int]) -> Tuple[str, int, in
     tar_path, out_root, rows_per_shard = args_tuple
 
     adsorbate = infer_adsorbate_name(tar_path)
-    ads_out = out_root / adsorbate / "metrics"
-    writer = ShardWriter(out_dir=ads_out, rows_per_shard=rows_per_shard)
-
-    print(f"adsorbate='{adsorbate}'  metrics_dir='{ads_out}'", flush=True)
+    out_path = out_root / f"{adsorbate}.parquet"
 
     n_members = 0
     n_traj_ok = 0
     n_traj_skip = 0
+    all_rows = []
 
     with tarfile.open(tar_path, "r") as tar:
         for member in iter_tar_members(tar, suffix=".extxyz.xz"):
@@ -230,22 +228,19 @@ def process_single_tar(args_tuple: Tuple[Path, Path, int]) -> Tuple[str, int, in
                 n_traj_skip += 1
                 continue
 
-            if n_members % 10 == 0:
-                print(f"  Processing member {n_members} (sid={sid}, {member.name})", flush=True)
-
             traj_atoms = read_extxyz_xz_from_tar_member(tar, member)
             frame_rows = compute_frame_metrics(traj_atoms, sid=sid, adsorbate=adsorbate)
             if frame_rows:
-                writer.add_rows(frame_rows)
+                all_rows.extend(frame_rows)
                 n_traj_ok += 1
             else:
                 n_traj_skip += 1
 
-    writer.close()
-    print(
-        f"[done] adsorbate='{adsorbate}' members_seen={n_members} traj_ok={n_traj_ok} traj_skipped={n_traj_skip}",
-        flush=True,
-    )
+    # Write all rows to a single parquet file
+    if all_rows:
+        df = pd.DataFrame(all_rows)
+        table = pa.Table.from_pandas(df, preserve_index=False)
+        pq.write_table(table, out_path, compression="zstd")
 
     return (adsorbate, n_members, n_traj_ok, n_traj_skip)
 

@@ -1,9 +1,5 @@
-
-import numpy as np 
-import itertools
 import torch
 from torch import Tensor
-import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.data import Data
 from torchdiffeq import odeint
@@ -12,9 +8,6 @@ from typing import Optional, Literal, Union, Tuple
 from adsflow.utils.post_processing import config_DFT, write_strucs
 from adsflow.utils.invariance import pbc_aware_delta
 
-import os
-import shutil
-import subprocess
 
 class OptTransport(): 
     """
