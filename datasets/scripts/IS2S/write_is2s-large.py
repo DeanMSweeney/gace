@@ -106,9 +106,6 @@ def main():
     with Pool(processes=args.num_workers) as pool:
         results = list(
             pool.imap(process_tar_wrapper, process_args),
-            total=len(process_args),
-            desc="Processing tar files",
-            unit="tar"
         )
 
     # Aggregate results
