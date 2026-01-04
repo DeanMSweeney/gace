@@ -32,12 +32,15 @@ class OptTransport():
             else:
                 # compute distance moved by all atoms
                 data = input_data
-                d = pbc_aware_delta(
-                    cell=data.cell,
-                    delta=(data.pos_init - data.pos_relaxed),
-                    batch=data.batch,
-                    norm=True, # average distance for each atom
-                )
+                if hasattr(data, "velocity"):
+                    d = data.velocity 
+                else:
+                    d = pbc_aware_delta(
+                        cell=data.cell,
+                        delta=(data.pos_init - data.pos_relaxed),
+                        batch=data.batch,
+                        norm=True, # average distance for each atom
+                    )
                 d_alpha = d ** alpha
                 w = d_alpha / d_alpha.sum().clamp_min(1e-8)
 
