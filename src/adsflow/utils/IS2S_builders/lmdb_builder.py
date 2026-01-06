@@ -8,7 +8,7 @@ Key features:
 - Iterates through .tar files by adsorbate number
 - For each adsorbate, processes all sids with that ads_num from the parquet
 - Each entry includes: positions, cell, fixed atoms, Fmax, dEmax, dSmax, sid, fid, pos_init
-- All frames include potential energy and forces for consistent batching
+- All frames include potential energies for consistent batching
 
 LMDB dataset fields:
 - pos: atomic positions (N, 3)
@@ -23,9 +23,8 @@ LMDB dataset fields:
 - dSmax: max position difference from parquet (scalar)
 - sid: system id (scalar)
 - fid: frame index (scalar)
-- force: forces on atoms (N, 3) - for all frames
-- y: energy of current frame (scalar) - for all frames
-- y_relaxed: relaxed energy from last frame (scalar) - for all frames
+- y_init: energy of initial frame (scalar)
+- y_relaxed: relaxed energy from last frame (scalar)
 """
 
 from __future__ import annotations
@@ -113,7 +112,7 @@ def atoms_to_lmdb_data(
         dSmax: Max position difference from parquet
 
     Returns:
-        Dictionary with LMDB fields including force, y, and y_relaxed for all frames
+        Dictionary with LMDB fields including y_init and y_relaxed
     """
     pos = atoms_init.get_positions().astype(np.float32)
     pos_relaxed = atoms.get_positions().astype(np.float32)
@@ -153,7 +152,6 @@ def atoms_to_lmdb_data(
         "fid": int(frame_idx),
 
         # Forces and energies for all frames
-        "force": atoms.get_forces().astype(np.float32),
         "y_init": float(atoms_init.get_potential_energy()),
         "y_relaxed": float(atoms.get_potential_energy()),
     }
