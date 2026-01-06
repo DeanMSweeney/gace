@@ -1,4 +1,4 @@
-from adsflow.utils.data_processing import precompute_vel
+from adsflow.utils.IS2RS_builders.OT_velocity import precompute_vel
 
 
 if __name__ == "__main__":

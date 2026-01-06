@@ -9,7 +9,7 @@ import argparse
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from adsflow.utils.data_builder import select_by_force
+from adsflow.utils.IS2S_builders.greedy_curation import select_by_force
    
 def main(traj_parquets: str, sid_root: str, bins: List[int], force_bins: List[Tuple[float, float]], struc_tol: float = 0.01, seed: Optional[int] = None):
     # Set random seed for reproducibility
@@ -45,6 +45,7 @@ def main(traj_parquets: str, sid_root: str, bins: List[int], force_bins: List[Tu
                 Fmax = group_df["Fmax"].to_numpy()
                 dSmax = group_df["pos_max"].to_numpy()
                 frame_idx = group_df["frame_idx"].to_numpy()
+                ads_num = group_df["adsorbate"].iloc[0] if "adsorbate" in group_df.columns else "" # take only fist element from adsorbate 
                 
                 # Use force-based binning selection
                 selected_indices, bin_labels = select_by_force(
@@ -55,13 +56,14 @@ def main(traj_parquets: str, sid_root: str, bins: List[int], force_bins: List[Tu
                     bin_count=bins,
                     bins=force_bins,
                     struc_tol=struc_tol,
-                    seed=seed
+                    seed=seed,
                 )
                 
                 c1 += 1
                 # Store selected frame data
                 if len(selected_indices) > 0:
                     selected_data.append({
+                        'adsorbate': ads_num,
                         'sid': sid,
                         'selected_frames': frame_idx[selected_indices].tolist(),
                         'dE': dE[selected_indices].tolist(),
@@ -77,14 +79,17 @@ def main(traj_parquets: str, sid_root: str, bins: List[int], force_bins: List[Tu
                     c2_bin4 += np.sum(bin_labels == 4)
                     
                 c3 += len(frame_idx)
+            else:
+                print(f"SID in test/val sets")
 
 
     # Save selected frames to output file
     if selected_data:
         df_output = pd.DataFrame(selected_data)
         print(df_output.head())
-        os.makedirs(traj_parquets / "selected", exist_ok=True)
-        output_path = traj_parquets / "selected" / "selected_frames.parquet"
+        output_dir = traj_parquets / "selected"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / "selected_frames.parquet"
         df_output.to_parquet(output_path, index=False)
         print(f"Saved {len(selected_data)} selected frame groups to {output_path}")
 
@@ -100,9 +105,9 @@ def main(traj_parquets: str, sid_root: str, bins: List[int], force_bins: List[Tu
         
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--traj_parquets", type=str, required=True, help="Directory containing per-adsorbate *.tar files")
+    ap.add_argument("--traj_parquets", type=str, required=True, help="Directory containing per-adsorbate *.parquet files")
     ap.add_argument("--sid_root", type=str, required=True, help="Path to val/test system ids (sids)")
-    ap.add_argument("--bins", type=int, nargs='+', default=[6, 4, 1, 1], help="Number of frames in each bin")
+    ap.add_argument("--bins", type=int, nargs='+', default=[5, 3, 1, 1], help="Number of frames in each bin")
     ap.add_argument("--force_bins", type=float, nargs='+', default=[0.0, 0.05, 0.05, 0.10, 0.10, 0.30, 0.30, 0.60],
                     help="Force bin edges as pairs (lower, upper). Default: 0.0 0.05 0.05 0.10 0.10 0.30 0.30 0.60")
     ap.add_argument("--struc_tol", type=float, default=0.05, help="Minimum dSmax difference threshold (default: 0.005)")
@@ -113,7 +118,7 @@ if __name__ == "__main__":
     traj_parquets = Path(args.traj_parquets)
     sid_root = Path(args.sid_root)
 
-    # Create output directory if needed
+    # Added for future parallelization implmentation if needed 
     num_workers = args.num_workers
 
     # Parse force_bins into list of tuples

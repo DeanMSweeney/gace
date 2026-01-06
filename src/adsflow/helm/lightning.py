@@ -77,37 +77,24 @@ class LightFlowMatch(LightningModule, OptTransport):
         u_hat = self(data) # N, 3
 
         if self.mask_frzn_atoms and self.variant == "refine":
-            self.free_atoms = (1 - data.fixed).unsqueeze(1) # N
-            loss, median_loss, max_loss, max_loss_idx = self.masked_loss(
+            loss, max_loss, max_loss_idx = self.masked_loss(
                 input_data=data, 
                 a=u_hat, 
                 b=u,
-                mask=self.free_atoms,
                 alpha=self.hparams.alpha, 
-                ramp_L=self.hparams.ramp_L,
-                ramp_n_epochs=self.hparams.ramp_n_epochs,
+                tune_adsorbate=self.hparams.tune_adsorbate,
             ) 
         else: 
             loss = self.loss_fn(u_hat, u)  
-        return loss, median_loss, max_loss, max_loss_idx
+        return loss, max_loss, max_loss_idx
     
     # define training and validation methods 
     def training_step(self, data: Data, batch_idx):
-        loss, median_loss, max_loss, _ = self._transport_loss(data)
+        loss, max_loss, _ = self._transport_loss(data)
         
         self.log( # log train loss per epoch 
             "train/loss",
             loss, 
-            on_step=True, 
-            on_epoch=True,
-            prog_bar=True, 
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-        
-        self.log( # log train loss per epoch 
-            "train/median_loss",
-            median_loss, 
             on_step=True, 
             on_epoch=True,
             prog_bar=True, 
@@ -129,19 +116,11 @@ class LightFlowMatch(LightningModule, OptTransport):
         
     
     def validation_step(self, data: Data, batch_idx):
-        loss, median_loss, max_loss, _ = self._transport_loss(data)
+        loss, max_loss, _ = self._transport_loss(data)
         
         self.log(
             "val/loss", 
             loss, 
-            prog_bar=True, 
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-        
-        self.log(
-            "median_val/loss", 
-            median_loss, 
             prog_bar=True, 
             batch_size=len(data.natoms),
             sync_dist=True,
@@ -159,7 +138,7 @@ class LightFlowMatch(LightningModule, OptTransport):
     
     def test_step(self, data: Data, batch_idx):
         # compute performance metrics/diagnostics
-        loss, median_loss, max_loss, max_loss_idx = self._transport_loss(data) # avergae, median, argmax
+        loss, max_loss, max_loss_idx = self._transport_loss(data) # avergae, median, argmax
 
         if self.diagnostics:
             if loss > 0.001: 
@@ -174,7 +153,6 @@ class LightFlowMatch(LightningModule, OptTransport):
                 self.DS7) = analyze_loss(
                     data=data,
                     loss=loss, 
-                    median_loss=median_loss, 
                     max_loss=max_loss, 
                     max_loss_idx=max_loss_idx,
                     bad_iter=self.bad_iter, 
@@ -183,20 +161,12 @@ class LightFlowMatch(LightningModule, OptTransport):
         else: 
             # define time interval for the IVP
             t = torch.linspace(0., 1., 100, device=data.pos.device, dtype=data.pos.dtype)
-            opt_graph, struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = self.sample(input_data=data, t=t)
-            print(f"Mean loss of batch: {loss} || Median loss of batch: {median_loss} || Structural RMSE of batch: {struc_rmse}")
+            opt_graph, struc_rmse, null_struc_rmse = self.sample(input_data=data, t=t)
+            print(f"Mean loss of batch: {loss} || Structural RMSE of batch: {struc_rmse}")
                 
         self.log(
             "test/loss", 
             loss, 
-            prog_bar=True, 
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-        
-        self.log(
-            "median/test/loss", 
-            median_loss, 
             prog_bar=True, 
             batch_size=len(data.natoms),
             sync_dist=True,
@@ -217,26 +187,10 @@ class LightFlowMatch(LightningModule, OptTransport):
             batch_size=len(data.natoms),
             sync_dist=True,
         )
-        
-        self.log(
-            "test/struc_rmdse", 
-            struc_rmdse, 
-            prog_bar=True, 
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
 
         self.log(
             "test/null_struc_rmse", 
             null_struc_rmse, 
-            prog_bar=True, 
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-        
-        self.log(
-            "test/null_struc_rmdse", 
-            null_struc_rmdse, 
             prog_bar=True, 
             batch_size=len(data.natoms),
             sync_dist=True,
