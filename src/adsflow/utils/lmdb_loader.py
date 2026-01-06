@@ -22,10 +22,11 @@ import bisect                       # for binary-search on cumulative lengths
 import pickle                       # for deserializing stored entries
 from typing import TYPE_CHECKING, TypeVar
 
+import logging 
 import lmdb                         # LMDB environment bindings
 import numpy as np                  # numeric operations
 import torch                        # PyTorch core
-from torch_geometric.data import Batch  # for collating Data objects
+from torch_geometric.data import Batch, Data  # for collating Data objects
 
 from fairchem.core.common.registry import registry
 from fairchem.core.common.typing import assert_is_instance
@@ -39,6 +40,37 @@ if TYPE_CHECKING:
     from torch_geometric.data.data import BaseData
 
 T_co = TypeVar("T_co", covariant=True)
+
+def dict_to_pyg_data(data_dict: dict) -> Data:
+    """
+    Convert a dictionary to a PyG Data object.
+
+    Args:
+        data_dict: Dictionary with LMDB fields (from lmdb_builder.py)
+
+    Returns:
+        PyG Data object with all fields as torch tensors
+    """
+    # Convert numpy arrays to torch tensors
+    data = Data(
+        pos=torch.from_numpy(data_dict["pos"]),
+        pos_relaxed=torch.from_numpy(data_dict["pos_relaxed"]),
+        velocity=torch.from_numpy(data_dict["velocity"]),
+        cell=torch.from_numpy(data_dict["cell"]).unsqueeze(0),
+        atomic_numbers=torch.from_numpy(data_dict["atomic_numbers"]),
+        natoms=torch.tensor(data_dict["natoms"]),
+        fixed=torch.from_numpy(data_dict["fixed"]),
+        tags=torch.from_numpy(data_dict["tags"]),
+        Fmax=torch.tensor(data_dict["Fmax"]),
+        dEmax=torch.tensor(data_dict["dEmax"]),
+        dSmax=torch.tensor(data_dict["dSmax"]),
+        sid=torch.tensor(data_dict["sid"]),
+        fid=torch.tensor(data_dict["fid"]),
+        y_init=torch.tensor(data_dict["y_init"]),
+        y_relaxed=torch.tensor(data_dict["y_relaxed"]),
+    )
+
+    return data
 
 @registry.register_dataset("lmdb")
 @registry.register_dataset("single_point_lmdb")
@@ -133,8 +165,15 @@ class LazyLmdbDataset(BaseDataset):
         key = f"{self._keys[shard_idx][local_idx]}".encode("ascii")
         raw = env.begin().get(key)  # zero-copy retrieval
 
-        # deserialize and convert to PyG Data
-        data = pyg2_data_transform(pickle.loads(raw))
+        # deserialize
+        loaded_data = pickle.loads(raw)
+
+        # check if it's a dictionary (from lmdb_builder) and convert to PyG Data
+        if isinstance(loaded_data, dict):
+            data = dict_to_pyg_data(loaded_data)
+        else:
+            # already a PyG Data object, apply pyg2 transform
+            data = pyg2_data_transform(loaded_data)
 
         # user-postprocessing
         data = self.transforms(data)
