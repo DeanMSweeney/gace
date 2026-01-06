@@ -23,11 +23,12 @@ Extract per-frame metrics (energy, forces, positions) from trajectory tar files:
 ```bash
 python datasets/scripts/IS2S/gather_trajs.py \
     --in_root /path/to/tar/files \
+    --out_root /path/to/output/metrics \
     --rows_per_shard 2000000 \
     --num_workers 16
 ```
 
-**Output:** Creates `<adsorbate>/metrics/part-*.parquet` files for each tar file.
+**Output:** Creates parquet files in the output directory with per-frame metrics for each adsorbate.
 
 ## Step 2: Select Frames
 

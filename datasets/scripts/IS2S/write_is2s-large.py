@@ -59,8 +59,8 @@ def main():
     )
     args = ap.parse_args()
 
-    parquet_file = Path(args.parquet_file)
-    tar_root = Path(args.tar_root)
+    parquet_file = Path(args.selected_frames_parquet)
+    tar_root = Path(args.traj_tar_root)
     out_dir = Path(args.out_dir)
 
     # Validate inputs
