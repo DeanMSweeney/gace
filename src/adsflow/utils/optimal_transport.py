@@ -28,7 +28,7 @@ class OptTransport():
         with torch.no_grad():
             data = input_data
             mask = (1 - data.fixed).unsqueeze(1) # # N, 1 -> e.g., [0, 0, ..., 0, 1, ..., 1] (0 <-> frozen, 1 <-> free)
-            # compute weights with numerical stability
+        
             if alpha == 0: # weight all samples equally 
                 w = 1 / mask.sum().clamp_min(1e-8) # equal weighting, equivalent to L = 1/N * sum(l_per_atom), w = 1/N
             else:
