@@ -77,15 +77,12 @@ class LightFlowMatch(LightningModule, OptTransport):
         u_hat = self(data) # N, 3
 
         if self.mask_frzn_atoms and self.variant == "refine":
-            self.free_atoms = (1 - data.fixed).unsqueeze(1) # N
             loss, max_loss, max_loss_idx = self.masked_loss(
                 input_data=data, 
                 a=u_hat, 
                 b=u,
-                mask=self.free_atoms,
                 alpha=self.hparams.alpha, 
-                ramp_L=self.hparams.ramp_L,
-                ramp_n_epochs=self.hparams.ramp_n_epochs,
+                tune_adsorbate=self.hparams.tune_adsorbate,
             ) 
         else: 
             loss = self.loss_fn(u_hat, u)  
