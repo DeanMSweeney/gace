@@ -1,6 +1,40 @@
 # Dataset Builders
 
-Documentation for IS2S and IS2RS dataset preparation scripts.
+Documentation for IS2RS and IS2S dataset preparation scripts.
+
+---
+
+## IS2RS Dataset Builder
+
+Precompute velocity metrics for IS2RE datasets using optimal transport.
+
+### Workflow
+
+The IS2RS pipeline adds velocity information to existing LMDB datasets:
+
+**write_vel.py** - Precompute and add velocity vectors to LMDB data
+
+### Precompute Velocities
+
+Add optimal transport-based velocity vectors to an existing IS2RE LMDB dataset:
+
+```bash
+python datasets/scripts/IS2RS/write_vel.py
+```
+
+**Configuration:** Edit the script to set paths:
+- `src_path`: Input LMDB dataset path
+- `dst_path`: Output LMDB dataset path (with velocity)
+- `batch_size`: Number of samples per batch
+- `commit_every`: Commit frequency for LMDB writes
+
+**Key features:**
+- Uses optimal transport to compute velocity fields
+- Creates new LMDB with velocity stored per sample
+- Preserves all original data attributes
+- Configurable batch processing and commit intervals
+
+**Output:** Creates a new LMDB file with precomputed `velocity` attribute for each sample.
 
 ---
 
@@ -70,37 +104,3 @@ python datasets/scripts/IS2S/write_is2s-large.py \
 - `--entries_per_shard`: Frames per LMDB file (controls memory usage)
 
 **Output:** Creates `data_*.lmdb` files in the output directory.
-
----
-
-## IS2RS Dataset Builder
-
-Precompute velocity metrics for IS2RE datasets using optimal transport.
-
-### Workflow
-
-The IS2RS pipeline adds velocity information to existing LMDB datasets:
-
-**write_vel.py** - Precompute and add velocity vectors to LMDB data
-
-### Precompute Velocities
-
-Add optimal transport-based velocity vectors to an existing IS2RE LMDB dataset:
-
-```bash
-python datasets/scripts/IS2RS/write_vel.py
-```
-
-**Configuration:** Edit the script to set paths:
-- `src_path`: Input LMDB dataset path
-- `dst_path`: Output LMDB dataset path (with velocity)
-- `batch_size`: Number of samples per batch
-- `commit_every`: Commit frequency for LMDB writes
-
-**Key features:**
-- Uses optimal transport to compute velocity fields
-- Creates new LMDB with velocity stored per sample
-- Preserves all original data attributes
-- Configurable batch processing and commit intervals
-
-**Output:** Creates a new LMDB file with precomputed `velocity` attribute for each sample.
