@@ -42,11 +42,12 @@ class LightFlowMatch(LightningModule, OptTransport):
             gen_POS=None,
             rlxd_POS=None,
             config_vasp: bool=False,
+            threshold: float=0.20,
             **hparams,
         ):
         
         super().__init__()
-        self.save_hyperparameters(ignore=["model", "variant", "mode", "mask_frzn_atoms", "rtol", "atol", "ode_method", "track_grad_norms", "in_POS", "gen_POS", "rlxd_POS", "run_vasp"])  # all __init__ args saved as hyperparameters
+        self.save_hyperparameters(ignore=["model", "variant", "mode", "mask_frzn_atoms", "rtol", "atol", "ode_method", "track_grad_norms", "in_POS", "gen_POS", "rlxd_POS", "config_vasp"])  # all __init__ args saved as hyperparameters
         self.model = model
         self.variant = variant 
         self.mode = mode
@@ -60,6 +61,7 @@ class LightFlowMatch(LightningModule, OptTransport):
         self.gen_POS = gen_POS
         self.rlxd_POS = rlxd_POS
         self.config_vasp = config_vasp
+        self.threshold = threshold
         
         # =============================================================================
         # Diagnostic studies on output model performance during evaluation
@@ -84,8 +86,7 @@ class LightFlowMatch(LightningModule, OptTransport):
                 alpha=self.hparams.alpha, 
                 tune_adsorbate=self.hparams.tune_adsorbate,
             ) 
-        else: 
-            loss = self.loss_fn(u_hat, u)  
+   
         return loss, max_loss, max_loss_idx
     
     # define training and validation methods 
@@ -157,13 +158,29 @@ class LightFlowMatch(LightningModule, OptTransport):
                     max_loss_idx=max_loss_idx,
                     bad_iter=self.bad_iter, 
                 )
-            struc_rmse, struc_rmdse, null_struc_rmse, null_struc_rmdse = 0, 0, 0, 0
-        else: 
+            (
+                opt_graph, 
+                generated_mae, 
+                generated_dwt, 
+                generated_adwt, 
+                initial_mae, 
+                initial_dwt, 
+                initial_adwt, 
+            ) = 0, 0, 0, 0, 0, 0, 0
+            
+        else:
             # define time interval for the IVP
             t = torch.linspace(0., 1., 100, device=data.pos.device, dtype=data.pos.dtype)
-            opt_graph, struc_rmse, null_struc_rmse = self.sample(input_data=data, t=t)
-            print(f"Mean loss of batch: {loss} || Structural RMSE of batch: {struc_rmse}")
-                
+            (
+                opt_graph, 
+                generated_mae, 
+                generated_dwt, 
+                generated_adwt, 
+                initial_mae, 
+                initial_dwt, 
+                initial_adwt, 
+            ) = self.sample(input_data=data, t=t, threshold=self.threshold)
+             
         self.log(
             "test/loss", 
             loss, 
@@ -180,17 +197,50 @@ class LightFlowMatch(LightningModule, OptTransport):
             sync_dist=True,
         )
 
+        # strucutral information 
         self.log(
-            "test/struc_rmse", 
-            struc_rmse, 
+            "test/generated_mae", 
+            generated_mae, 
             prog_bar=True, 
             batch_size=len(data.natoms),
             sync_dist=True,
         )
 
         self.log(
-            "test/null_struc_rmse", 
-            null_struc_rmse, 
+            "test/initial_mae", 
+            initial_mae, 
+            prog_bar=True, 
+            batch_size=len(data.natoms),
+            sync_dist=True,
+        )
+        
+        self.log(
+            "test/generated_dwt", 
+            generated_dwt, 
+            prog_bar=True, 
+            batch_size=len(data.natoms),
+            sync_dist=True,
+        )
+
+        self.log(
+            "test/initial_dwt", 
+            initial_dwt, 
+            prog_bar=True, 
+            batch_size=len(data.natoms),
+            sync_dist=True,
+        )
+        
+        self.log(
+            "test/generated_adwt", 
+            generated_adwt, 
+            prog_bar=True, 
+            batch_size=len(data.natoms),
+            sync_dist=True,
+        )
+
+        self.log(
+            "test/initial_adwt", 
+            initial_adwt, 
             prog_bar=True, 
             batch_size=len(data.natoms),
             sync_dist=True,

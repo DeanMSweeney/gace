@@ -161,6 +161,7 @@ def main(cfg: Config) -> None:
         gen_POS=cfg.gen_POS,
         rlxd_POS=cfg.rlxd_POS, 
         config_vasp=cfg.config_vasp,
+        threshold=cfg.threshold, 
         **cfg.optimizer_hparams,
     )
     
