@@ -28,13 +28,13 @@ def main():
         description="Build LMDB dataset from selected frames parquet file"
     )
     ap.add_argument(
-        "--parquet_file",
+        "--selected_frames_parquet",
         type=str,
         required=True,
         help="Path to selected_frames.parquet file"
     )
     ap.add_argument(
-        "--tar_root",
+        "--traj_tar_root",
         type=str,
         required=True,
         help="Directory containing per-adsorbate *.tar files"
