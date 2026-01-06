@@ -18,8 +18,7 @@ class OptimizerConfig:
     power:                           float=1.0
     max_epochs:                      int   = 100
     alpha:                           float = 0 
-    ramp_L:                          bool = False   
-    ramp_n_epochs:                    int = 5 
+    tune_adsorbate:                  bool = False
     
 @dataclass
 class Config:
