@@ -1,29 +1,14 @@
-#!/usr/bin/env python3
 """
 Stream OC20 per-adsorbate IS2RE/S trajectory tarballs and build sharded metrics.
-
-Assumptions (as per your description):
-- Each adsorbate tar contains trajectories organized by system id (sid).
-- Each trajectory file is .extxyz.xz inside the tar.
-- Frames contain energies and forces readable by ASE.
-
-Output:
-<out_root>/<adsorbate>/metrics/part-00000.parquet, part-00001.parquet, ...
-
-Each row corresponds to one frame.
 """
 
 from __future__ import annotations
 
-import argparse
 import io
 import lzma
-import os
 import re
-import sys
 import tarfile
 from dataclasses import dataclass
-from multiprocessing import Pool
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -120,7 +105,7 @@ def get_free_mask(atoms):
     mask = np.ones(len(atoms), dtype=bool)
     for c in atoms.constraints:
         if isinstance(c, FixAtoms):
-            mask[c.index] = 0
+            mask[c.index] = 0 # set all frozen elements to zero 
     return mask  # True = free atoms
 
 
@@ -227,14 +212,12 @@ def process_single_tar(args_tuple: Tuple[Path, Path, int]) -> Tuple[str, int, in
     tar_path, out_root, rows_per_shard = args_tuple
 
     adsorbate = infer_adsorbate_name(tar_path)
-    ads_out = out_root / adsorbate / "metrics"
-    writer = ShardWriter(out_dir=ads_out, rows_per_shard=rows_per_shard)
-
-    print(f"adsorbate='{adsorbate}'  metrics_dir='{ads_out}'", flush=True)
+    out_path = out_root / f"{adsorbate}.parquet"
 
     n_members = 0
     n_traj_ok = 0
     n_traj_skip = 0
+    all_rows = []
 
     with tarfile.open(tar_path, "r") as tar:
         for member in iter_tar_members(tar, suffix=".extxyz.xz"):
@@ -245,59 +228,19 @@ def process_single_tar(args_tuple: Tuple[Path, Path, int]) -> Tuple[str, int, in
                 n_traj_skip += 1
                 continue
 
-            if n_members % 10 == 0:
-                print(f"  Processing member {n_members} (sid={sid}, {member.name})", flush=True)
-
             traj_atoms = read_extxyz_xz_from_tar_member(tar, member)
             frame_rows = compute_frame_metrics(traj_atoms, sid=sid, adsorbate=adsorbate)
             if frame_rows:
-                writer.add_rows(frame_rows)
+                all_rows.extend(frame_rows)
                 n_traj_ok += 1
             else:
                 n_traj_skip += 1
 
-    writer.close()
-    print(
-        f"[done] adsorbate='{adsorbate}' members_seen={n_members} traj_ok={n_traj_ok} traj_skipped={n_traj_skip}",
-        flush=True,
-    )
+    # Write all rows to a single parquet file
+    if all_rows:
+        df = pd.DataFrame(all_rows)
+        table = pa.Table.from_pandas(df, preserve_index=False)
+        pq.write_table(table, out_path, compression="zstd")
 
     return (adsorbate, n_members, n_traj_ok, n_traj_skip)
 
-
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--in_root", type=str, required=True, help="Directory containing per-adsorbate *.tar files")
-    ap.add_argument("--rows_per_shard", type=int, default=2_000_000, help="Frames (rows) per parquet shard")
-    ap.add_argument("--num_workers", type=int, default=16, help="Number of parallel workers")
-    args = ap.parse_args()
-
-    in_root = Path(args.in_root)
-    out_root = in_root
-    out_root = Path(out_root)
-    out_root.mkdir(parents=True, exist_ok=True)
-
-    tar_paths = sorted(in_root.glob("*.tar"))
-    if not tar_paths:
-        print(f"No .tar files found in {in_root}", file=sys.stderr)
-        sys.exit(1)
-
-    print(f"Processing {len(tar_paths)} tar files with {args.num_workers} workers", flush=True)
-
-    # Prepare arguments for parallel processing
-    process_args = [(tar_path, out_root, args.rows_per_shard) for tar_path in tar_paths]
-
-    # Process tar files in parallel
-    with Pool(processes=args.num_workers) as pool:
-        results = pool.map(process_single_tar, process_args)
-
-    # Print summary
-    print("\n=== Summary ===", flush=True)
-    for adsorbate, n_members, n_traj_ok, n_traj_skip in results:
-        print(
-            f"  {adsorbate}: members={n_members} ok={n_traj_ok} skipped={n_traj_skip}",
-            flush=True,
-        )
-
-if __name__ == "__main__":
-    main()

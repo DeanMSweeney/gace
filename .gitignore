@@ -17,6 +17,7 @@ POSCAR*
 *.gz
 *.sh
 core
+error.txt
 
 # Folders
 '$HOME'/

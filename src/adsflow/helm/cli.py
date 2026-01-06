@@ -23,9 +23,9 @@ from typing import Optional, Literal, Union, Tuple
 from adsflow.helm.lightning import LightFlowMatch
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
 from adsflow.models.equiformer_v2.equiformerv2_flow import EquiformerV2_Flow
-from adsflow.utils.lmdb_dataset import LazyLmdbDataset
+from adsflow.utils.lmdb_loader import LazyLmdbDataset
 from adsflow.utils.utils import ship_data
-from adsflow.helm.configure import Config
+from adsflow.helm.config import Config
 
 from fairchem.core.datasets.lmdb_dataset import LmdbDataset
 from fairchem.core.preprocessing.atoms_to_graphs import AtomsToGraphs
@@ -129,7 +129,7 @@ def main(cfg: Config) -> None:
         declare(f">>> Activated Evaluation mode with OC20-test: {cfg.oc20_test} 🦉")
         ptst = {"src": cfg.oc20_test}
         test_set = LazyLmdbDataset(ptst)
-        #test_set = Subset(test_set, indices=range(100))
+        test_set = Subset(test_set, indices=range(100))
         test_loader = DataLoader(
             dataset=test_set, 
             batch_size=cfg.batch_size,
