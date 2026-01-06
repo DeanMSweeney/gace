@@ -119,6 +119,7 @@ class Config:
     rtol:                            float           = 1e-7
     atol:                            float           = 1e-9
     ode_method:                      str             = "dopri5"
+    threshold:                       Optional[float] = 0.20
     
     # Generation 
     in_POS:                         Optional[str]         = None

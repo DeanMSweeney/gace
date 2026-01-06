@@ -8,6 +8,7 @@ from typing import Optional, Literal, Union, Tuple
 
 from adsflow.utils.post_processing import config_DFT, write_strucs
 from adsflow.utils.invariance import pbc_aware_delta
+from adsflow.utils.eval_metrics import ADwT
 
 
 class OptTransport(): 
@@ -21,7 +22,7 @@ class OptTransport():
         a: Tensor,  # N, 3
         b: Tensor,  # N, 3
         alpha: float=0, # masked MSE
-        tune_adsorbate: bool=True,
+        tune_adsorbate: bool=False,
     ):  
         # compute per atom loss
         with torch.no_grad():
@@ -113,6 +114,7 @@ class OptTransport():
             self, 
             input_data: Data,
             t: torch.Tensor,
+            threshold: float=0.20,
             
     ) -> Union[Data, Tuple[Data, torch.Tensor]]:
         
@@ -137,8 +139,8 @@ class OptTransport():
       
         data.pos = input_data.pos
         data.pos_generated = xt[-1]
-        mask = (data.fixed == 1)
-        data.pos_generated[mask] = data.pos[mask]
+        frozen_atoms = (data.fixed == 1)
+        data.pos_generated[frozen_atoms] = data.pos[frozen_atoms]
         
         if self.gen_POS:
                 write_strucs(
@@ -161,25 +163,34 @@ class OptTransport():
         # Save to current directory
         if hasattr(data, "pos_relaxed"):
             
-            e_gen = pbc_aware_delta(
-                delta=data.pos_generated - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
-                cell=data.cell,
-                batch=data.batch,
-        )
+            # collect data for analysis
+            mask = (1 - data.fixed).bool()
+            cell = data.cell 
+            batch = data.batch 
+            pos_init = data.pos 
+            pos_predicted = data.pos_generated
+            pos_target = data.pos_relaxed 
             
-            e_null = pbc_aware_delta(
-                delta=data.pos - data.pos_relaxed, # write generated possitional coordinates to pos_gen attribute 
-                cell=data.cell,
-                batch=data.batch,
-        )
+            generated_mae, generated_dwt, generated_adwt = ADwT(
+               pos_predicted=pos_predicted, 
+               pos_target=pos_target,
+               threshold=threshold,
+               fixed_atoms_mask=mask,
+               cell=cell, 
+               batch=batch, 
+           )
             
-            struc_mse,  _, _ = self.masked_loss(input_data=data, a=e_gen, b=torch.zeros_like(e_gen), mask=self.free_atoms)
-            struc_rmse = torch.sqrt(struc_mse)
+            initial_mae, initial_dwt, initial_adwt = ADwT(
+               pos_predicted=pos_init, 
+               pos_target=pos_target,
+               threshold=threshold,
+               fixed_atoms_mask=mask,
+               cell=cell, 
+               batch=batch, 
+           )
             
-            null_struc_mse, _, _ = self.masked_loss(input_data=data, a=e_null, b=torch.zeros_like(e_null), mask=self.free_atoms)
-            null_struc_rmse  = torch.sqrt(null_struc_mse)
-            
-            return data, struc_rmse, null_struc_rmse
+
+            return data, generated_mae, generated_dwt, generated_adwt, initial_mae, initial_dwt, initial_adwt
         else: 
             return data
   
