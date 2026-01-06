@@ -93,7 +93,6 @@ def get_fixed_mask(atoms) -> np.ndarray:
 def atoms_to_lmdb_data(
     atoms,
     atoms_init,
-    atoms_relaxed,
     sid: int,
     frame_idx: int,
     Fmax: float,
@@ -116,20 +115,19 @@ def atoms_to_lmdb_data(
     Returns:
         Dictionary with LMDB fields including force, y, and y_relaxed for all frames
     """
-
-    pos = atoms.get_positions().astype(np.float32)
-    pos_init = atoms_init.get_positions().astype(np.float32)
+    pos = atoms_init.get_positions().astype(np.float32)
+    pos_relaxed = atoms.get_positions().astype(np.float32)
     cell = atoms.get_cell().array.astype(np.float32)
 
     velocity = pbc_aware_delta(
-        delta=pos - pos_init,
+        delta=pos_relaxed - pos,
         cell=cell,
     )  # outputs a torch.Tensor
 
     data = {
         # Positions
         "pos": pos,
-        "pos_init": pos_init,
+        "pos_relaxed": pos_relaxed,
 
         # Velocity
         "velocity": velocity.cpu().numpy().astype(np.float32),
@@ -156,8 +154,8 @@ def atoms_to_lmdb_data(
 
         # Forces and energies for all frames
         "force": atoms.get_forces().astype(np.float32),
-        "y": float(atoms.get_potential_energy()),
-        "y_relaxed": float(atoms_relaxed.get_potential_energy()),
+        "y_init": float(atoms_init.get_potential_energy()),
+        "y_relaxed": float(atoms.get_potential_energy()),
     }
 
     return data
@@ -335,9 +333,7 @@ def process_single_tar(
 
             # Get initial structure (first frame)
             atoms_init = traj_atoms[0]
-            # Get relaxed structure (last frame)
-            atoms_relaxed = traj_atoms[-1]
-
+    
             # Extract selected frames
             for i, frame_idx in enumerate(frames_to_extract):
                 
@@ -352,7 +348,6 @@ def process_single_tar(
                 data = atoms_to_lmdb_data(
                     atoms=atoms,
                     atoms_init=atoms_init,
-                    atoms_relaxed=atoms_relaxed,
                     sid=sid,
                     frame_idx=frame_idx,
                     Fmax=Fmax,
