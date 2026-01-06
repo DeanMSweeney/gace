@@ -22,6 +22,7 @@ import bisect                       # for binary-search on cumulative lengths
 import pickle                       # for deserializing stored entries
 from typing import TYPE_CHECKING, TypeVar
 
+import logging 
 import lmdb                         # LMDB environment bindings
 import numpy as np                  # numeric operations
 import torch                        # PyTorch core
