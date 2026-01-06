@@ -162,19 +162,28 @@ def data_list_collater(
             logging.warning("Missing edge_index; set otf_graph=True")
     return dict(batch.items()) if to_dict else batch
 
+
 if __name__ == "__main__":
     from torch_geometric.loader import DataLoader
-    
-    # build trianing set 
-    t = "/workspace/datasets/mini/data_refined.lmdb"
+
+    # build trianing set
+    t = "/datasets/oc20/full/is2s_train_val_test_lmdbs/train"
     p = {"src": t}
     dataset = LazyLmdbDataset(p)
-    
+
     train_loader = DataLoader(
-            dataset, 
-            batch_size=1,
+            dataset,
+            batch_size=16,
+            shuffle=True,
         )
-    
-    for data in train_loader:
-        
-        print(data.y_relaxed)
+
+    # Write first 20 batches to file
+    with open("train_loader_sample.txt", "w") as f:
+        for i, data in enumerate(train_loader):
+            if i >= 20:
+                break
+
+            # Write batch info
+            f.write(str(data) + "\n\n")
+
+    print("Wrote first 20 batches to train_loader_sample.txt")

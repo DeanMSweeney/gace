@@ -8,8 +8,7 @@ Key features:
 - Iterates through .tar files by adsorbate number
 - For each adsorbate, processes all sids with that ads_num from the parquet
 - Each entry includes: positions, cell, fixed atoms, Fmax, dEmax, dSmax, sid, fid, pos_init
-- For the relaxed frame (dE=0): also includes potential energy and forces
-- For other frames: energy and forces are NOT included
+- All frames include potential energy and forces for consistent batching
 
 LMDB dataset fields:
 - pos: atomic positions (N, 3)
@@ -24,9 +23,9 @@ LMDB dataset fields:
 - dSmax: max position difference from parquet (scalar)
 - sid: system id (scalar)
 - fid: frame index (scalar)
-- force: forces on atoms (N, 3) - ONLY for relaxed frame (dE=0)
-- y: energy of current frame (scalar) - ONLY for relaxed frame (dE=0)
-- y_relaxed: relaxed energy from last frame (scalar) - ONLY for relaxed frame (dE=0)
+- force: forces on atoms (N, 3) - for all frames
+- y: energy of current frame (scalar) - for all frames
+- y_relaxed: relaxed energy from last frame (scalar) - for all frames
 """
 
 from __future__ import annotations
@@ -100,7 +99,6 @@ def atoms_to_lmdb_data(
     Fmax: float,
     dEmax: float,
     dSmax: float,
-    is_relaxed: bool = False,
 ) -> Dict:
     """
     Convert ASE Atoms object to LMDB-compatible dictionary.
@@ -114,10 +112,9 @@ def atoms_to_lmdb_data(
         Fmax: Maximum force from parquet
         dEmax: Energy difference from parquet (dE)
         dSmax: Max position difference from parquet
-        is_relaxed: Whether this is the relaxed frame (dE=0)
 
     Returns:
-        Dictionary with LMDB fields
+        Dictionary with LMDB fields including force, y, and y_relaxed for all frames
     """
 
     pos = atoms.get_positions().astype(np.float32)
@@ -156,13 +153,12 @@ def atoms_to_lmdb_data(
         # Metadata
         "sid": int(sid),
         "fid": int(frame_idx),
-    }
 
-    # Only include energy and forces for the relaxed frame
-    if is_relaxed:
-        data["force"] = atoms.get_forces().astype(np.float32)
-        data["y"] = float(atoms.get_potential_energy())
-        data["y_relaxed"] = float(atoms_relaxed.get_potential_energy())
+        # Forces and energies for all frames
+        "force": atoms.get_forces().astype(np.float32),
+        "y": float(atoms.get_potential_energy()),
+        "y_relaxed": float(atoms_relaxed.get_potential_energy()),
+    }
 
     return data
 
@@ -352,9 +348,6 @@ def process_single_tar(
                 dE = de_vals[i]
                 dSmax = dsmax_vals[i]
 
-                # Check if this is the relaxed frame (dE ≈ 0)
-                is_relaxed = abs(dE) < 1e-6
-
                 # Convert to LMDB format
                 data = atoms_to_lmdb_data(
                     atoms=atoms,
@@ -365,7 +358,6 @@ def process_single_tar(
                     Fmax=Fmax,
                     dEmax=dE,
                     dSmax=dSmax,
-                    is_relaxed=is_relaxed,
                 )
 
                 writer.add(data)
