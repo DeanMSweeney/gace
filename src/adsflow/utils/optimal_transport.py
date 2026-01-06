@@ -188,8 +188,6 @@ class OptTransport():
                cell=cell, 
                batch=batch, 
            )
-            
-
             return data, generated_mae, generated_dwt, generated_adwt, initial_mae, initial_dwt, initial_adwt
         else: 
             return data
