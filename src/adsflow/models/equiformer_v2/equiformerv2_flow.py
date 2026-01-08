@@ -414,8 +414,8 @@ class EquiformerV2_Flow(BaseModel):
         
         # extract energy and force metrics if included 
         if hasattr(data, "dE") and hasattr(data, "Fmax"):
-            dE = data.dE
-            Fmax = data.Fmax 
+            dE = data.dE[data.batch].unsqueeze(1) # (N,1)
+            Fmax = data.Fmax[data.batch].unsqueeze(1) # (N,1)
         
         # Build graph 
         (
@@ -495,7 +495,7 @@ class EquiformerV2_Flow(BaseModel):
         
         if hasattr(data, "dE") and hasattr(data, "Fmax"):
             x.embedding = x.embedding + energy_embeds.unsqueeze(1) + force_embeds.unsqueeze(1)
-
+    
         ###############################################################
         # Update spherical node embeddings
         ###############################################################
@@ -588,8 +588,3 @@ class EquiformerV2_Flow(BaseModel):
                     no_wd_list.append(global_parameter_name)
         return set(no_wd_list)
     
- 
-
-if __name__ == "__main__":
-    megatron = EquiformerV2_Flow()
-    print("Compiled EquiformerV2 for flow matching")
