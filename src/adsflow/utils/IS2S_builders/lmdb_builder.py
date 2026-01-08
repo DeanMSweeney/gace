@@ -95,7 +95,7 @@ def atoms_to_lmdb_data(
     sid: int,
     frame_idx: int,
     Fmax: float,
-    dEmax: float,
+    dE: float,
     dSmax: float,
 ) -> Dict:
     """
@@ -144,7 +144,7 @@ def atoms_to_lmdb_data(
 
         # Metrics from parquet
         "Fmax": float(Fmax),
-        "dEmax": float(dEmax),
+        "dE": float(dE),
         "dSmax": float(dSmax),
 
         # Metadata
@@ -349,7 +349,7 @@ def process_single_tar(
                     sid=sid,
                     frame_idx=frame_idx,
                     Fmax=Fmax,
-                    dEmax=dE,
+                    dE=dE,
                     dSmax=dSmax,
                 )
 
