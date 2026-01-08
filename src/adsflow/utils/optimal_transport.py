@@ -7,7 +7,7 @@ from torchdiffeq import odeint
 from typing import Optional, Literal, Union, Tuple
 
 from adsflow.utils.post_processing import config_DFT, write_strucs
-from adsflow.utils.invariance import pbc_aware_delta
+from adsflow.utils.invariance import pbc_aware_delta, hungarian
 from adsflow.utils.eval_metrics import ADwT
 
 
@@ -27,6 +27,7 @@ class OptTransport():
         # compute per atom loss
         with torch.no_grad():
             data = input_data
+            data.fixed = data.fixed.float()
             mask = (1 - data.fixed).unsqueeze(1) # # N, 1 -> e.g., [0, 0, ..., 0, 1, ..., 1] (0 <-> frozen, 1 <-> free)
         
             if alpha == 0: # weight all samples equally 
@@ -81,27 +82,46 @@ class OptTransport():
             data = input_data.clone()
 
             x1 = data.pos_relaxed # sample relaxed positions x1 ~ p(x) (final)
-
-            if variant == "Forge":
-                    x0 = torch.randn_like(x1) # sample noise 
-            else:
-                    x0 = data.pos # sample initial positions x0 ~ q(x) (initial)
-
+            
             t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device) # (batch_size, 1)
             t = t_per_graph[data.batch] # (num_atoms, 1)
+
+            if variant == "forge":              
+                    # partition adsorbate and catalyst
+                    adsorbate = (data.tags == 2)
+                    catalyst = (data.tags != 2)
+                    
+                    x0 = torch.randn_like(x1) # sample noise for atomic positions   
+                    x0[adsorbate] = data.pos[adsorbate] # specify adsorbate                     
+                    
+                    # find optimal alignment for catalysts in x0
+                    x0[catalyst] = hungarian(
+                        s0=x0[catalyst], 
+                        s1=x1[catalyst], 
+                        cell=data.cell,
+                        batch=data.batch,
+                    )
+                    
+                    # define and sample noise for atomic numbers
+                    z1 = data.atomic_number
+                    z1_hot = F.one_hot(z1, num_classes=55)
+                    z0 = torch.rand
+
+            elif variant == "refine":
+                x0 = data.pos # sample initial positions x0 ~ q(x) (initial)
         
-            if hasattr(data, "velocity"):
-                # load from data object
-                u = data.velocity
+                if hasattr(data, "velocity"):
+                    # load from data object
+                    u = data.velocity
                 
-            else: 
-                delta_xyz = x1 - x0
-                u = pbc_aware_delta(
-                    delta=delta_xyz,
-                    cell=data.cell,
-                    batch=data.batch,
-                    naive=naive,
-                )
+                else: 
+                    delta_xyz = x1 - x0
+                    u = pbc_aware_delta(
+                        delta=delta_xyz,
+                        cell=data.cell,
+                        batch=data.batch,
+                        naive=naive,
+                    )
 
             xt = x0 + t * u # x1 * t + (1-t) * x0
             data.pos = xt # reassign xt to pos 
