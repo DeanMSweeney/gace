@@ -17,7 +17,7 @@ POSCAR*
 *.gz
 *.sh
 core
-error.txt
+out-claude.txt
 
 # Folders
 '$HOME'/
