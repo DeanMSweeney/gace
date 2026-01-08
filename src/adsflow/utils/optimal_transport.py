@@ -7,7 +7,7 @@ from torchdiffeq import odeint
 from typing import Optional, Literal, Union, Tuple
 
 from adsflow.utils.post_processing import config_DFT, write_strucs
-from adsflow.utils.invariance import pbc_aware_delta, hungarian
+from adsflow.utils.invariance import pbc_aware_delta
 from adsflow.utils.eval_metrics import ADwT
 
 
@@ -107,7 +107,7 @@ class OptTransport():
                     z1_hot = F.one_hot(z1, num_classes=55)
                     z0 = torch.rand
 
-            elif variant == "refine":
+            else:
                 x0 = data.pos # sample initial positions x0 ~ q(x) (initial)
         
                 if hasattr(data, "velocity"):
@@ -123,10 +123,10 @@ class OptTransport():
                         naive=naive,
                     )
 
-            xt = x0 + t * u # x1 * t + (1-t) * x0
-            data.pos = xt # reassign xt to pos 
-            data.pos_init = x0
-            data.t = t
+                xt = x0 + t * u # x1 * t + (1-t) * x0
+                data.pos = xt # reassign xt to pos 
+                data.pos_init = x0
+                data.t = t
 
         return data, u 
   
