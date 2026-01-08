@@ -169,7 +169,10 @@ class EquiformerV2_Flow(BaseModel):
 
         weight_init='normal', 
         
-        time_n_freqs: int=16,
+        time_n_emb_freqs: int=16,
+        energy_n_emb_freqs: int=16,
+        force_n_emb_freqs: int=16,
+        
     ):
         super().__init__()
 
@@ -234,16 +237,32 @@ class EquiformerV2_Flow(BaseModel):
 
         # Precompute the frequency as multipliers as a buffer, register time_freq as an attribute
         self.register_buffer(
-            'time_freqs', 
-            torch.arange(1, time_n_freqs + 1) * torch.pi,
+            'time_emb_freqs', 
+            torch.arange(1, time_n_emb_freqs + 1) * torch.pi,
             persistent=False 
         ) 
+        
+        self.register_buffer(
+            'energy_emb_freqs', 
+            torch.arange(1, energy_n_emb_freqs + 1) * torch.pi,
+            persistent=False 
+        ) 
+        
+        self.register_buffer(
+            'force_emb_freqs', 
+            torch.arange(1, force_n_emb_freqs + 1) * torch.pi,
+            persistent=False 
+        ) 
+        
         
         # Weights for message initialization
         self.sphere_embedding = nn.Embedding(self.max_num_elements, self.sphere_channels_all)
         
         # Initialize time embedding 
-        self.time_emb = nn.Linear(2 * time_n_freqs, self.sphere_channels)
+        self.time_emb = nn.Linear(2 * time_n_emb_freqs, self.sphere_channels)
+        self.energy_emb = nn.Linear(2 * energy_n_emb_freqs, self.sphere_channels)
+        self.force_emb = nn.Linear(2 * force_n_emb_freqs, self.sphere_channels)
+        
 
         # Initialize the function used to measure the distances between atoms
         assert self.distance_function in [
@@ -373,14 +392,14 @@ class EquiformerV2_Flow(BaseModel):
         self.apply(self._init_weights)
         self.apply(self._uniform_init_rad_func_linear_weights)
     
-    def process_time_embeds(self, t:torch.Tensor):
+    def process_scalar_embeds(self, s: torch.Tensor, s_emb_freqs: torch.Tensor):
         """
         Convert t of shape [batch_size, 1] (or [batch_size]) into
-        a [batch_size, 2*time_n_freqs] vector of [cos, sin] features.
+        a [batch_size, 2*scalar_n_emb_freqs] vector of [cos, sin] features.
         """
-        t = self.time_freqs * t                     # (bz, self.time_n_freqs)
-        t = torch.cat((t.cos(), t.sin()), dim=-1)   # (bz, 2*self.time_n_freqs)
-        return t
+        s = s_emb_freqs * s                     # (bz, self.scalar_n_emb_freqs)
+        s = torch.cat((s.cos(), s.sin()), dim=-1)   # (bz, 2*self.scalar_n_emb_freqs)
+        return s
     
     @conditional_grad(torch.enable_grad())
     def forward(self, data):
@@ -392,7 +411,12 @@ class EquiformerV2_Flow(BaseModel):
         num_atoms = len(atomic_numbers)
         pos = data.pos
         t = data.t # extract time 
-
+        
+        # extract energy and force metrics if included 
+        if hasattr(data, "dE") and hasattr(data, "Fmax"):
+            dE = data.dE
+            Fmax = data.Fmax 
+        
         # Build graph 
         (
             edge_index,
@@ -431,7 +455,12 @@ class EquiformerV2_Flow(BaseModel):
         )
 
         # Time embedding 
-        time_embeds = self.time_emb(self.process_time_embeds(t))
+        time_embeds = self.time_emb(self.process_scalar_embeds(s=t, s_emb_freqs=self.time_emb_freqs))
+        
+        # enegry and force mebedding when necessayr 
+        if hasattr(data, "dE") and hasattr(data, "Fmax"):
+            energy_embeds = self.energy_emb(self.process_scalar_embeds(s=dE, s_emb_freqs=self.energy_emb_freqs))
+            force_embeds = self.force_emb(self.process_scalar_embeds(s=Fmax, s_emb_freqs=self.force_emb_freqs))
         
         offset_res = 0
         offset = 0
@@ -463,6 +492,9 @@ class EquiformerV2_Flow(BaseModel):
             edge_index)
         x.embedding = x.embedding + edge_degree.embedding 
         x.embedding = x.embedding + time_embeds.unsqueeze(1)
+        
+        if hasattr(data, "dE") and hasattr(data, "Fmax"):
+            x.embedding = x.embedding + energy_embeds.unsqueeze(1) + force_embeds.unsqueeze(1)
 
         ###############################################################
         # Update spherical node embeddings
