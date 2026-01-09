@@ -216,13 +216,33 @@ if __name__ == "__main__":
             shuffle=True,
         )
 
-    # Write first 20 batches to file
-    with open("train_loader_sample.txt", "w") as f:
-        for i, data in enumerate(train_loader):
-            if i >= 20:
-                break
+    # Collect all dE, Fmax, and dS values from the dataset
+    dE = []
+    Fmax = []
+    dS = []
 
-            # Write batch info
-            f.write(str(data) + "\n\n")
+    print("Collecting dE, Fmax, and dS values from dataset...")
+    for i, data in enumerate(train_loader):
+        if i % 100 == 0:
+            print(f"Processing batch {i}/{len(train_loader)}")
 
-    print("Wrote first 20 batches to train_loader_sample.txt")
+        # Collect values from batch
+        dE.append(data.dE)
+        Fmax.append(data.Fmax)
+        dS.append(data.dSmax)
+
+    # Concatenate lists into single tensors
+    dE_tensor = torch.cat(dE, dim=0)
+    Fmax_tensor = torch.cat(Fmax, dim=0)
+    dS_tensor = torch.cat(dS, dim=0)
+
+    # Save tensors to disk
+    print(f"\nSaving tensors with {len(dE_tensor)} samples...")
+    torch.save(dE_tensor, "dE_values.pt")
+    torch.save(Fmax_tensor, "Fmax_values.pt")
+    torch.save(dS_tensor, "dS_values.pt")
+
+    print(f"Saved tensors:")
+    print(f"  - dE_values.pt: shape={dE_tensor.shape}, mean={dE_tensor.mean():.4f}, std={dE_tensor.std():.4f}")
+    print(f"  - Fmax_values.pt: shape={Fmax_tensor.shape}, mean={Fmax_tensor.mean():.4f}, std={Fmax_tensor.std():.4f}")
+    print(f"  - dS_values.pt: shape={dS_tensor.shape}, mean={dS_tensor.mean():.4f}, std={dS_tensor.std():.4f}")
