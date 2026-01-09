@@ -56,9 +56,7 @@ def main():
 
     # Process tar files in parallel
     with Pool(processes=args.num_workers) as pool:
-        results = list(
-            pool.imap_unordered(process_single_tar_safe, process_args, chunksize=1)
-        )
+        results = pool.map(process_single_tar_safe, process_args)
 
     # Print summary
     print("\n=== Summary ===", flush=True)
