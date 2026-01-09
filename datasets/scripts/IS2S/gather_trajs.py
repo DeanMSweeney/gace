@@ -13,13 +13,24 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import traceback
 from multiprocessing import Pool
 from pathlib import Path
 
-from tqdm import tqdm
 from adsflow.utils.IS2S_builders.frame_metrics import process_single_tar
 
 SID_RE = re.compile(r"(?:sid[_\-]?|^)(\d+)(?:\D|$)", re.IGNORECASE)
+
+def process_single_tar_safe(args_tuple):
+    """Wrapper with error handling for worker processes."""
+    try:
+        result = process_single_tar(args_tuple)
+        return result
+    except Exception as e:
+        tar_path = args_tuple[0] if args_tuple else "unknown"
+        error_msg = f"ERROR processing {tar_path}: {str(e)}\n{traceback.format_exc()}"
+        print(error_msg, file=sys.stderr, flush=True)
+        return (str(tar_path), 0, 0, 0)
 
 def main():
     ap = argparse.ArgumentParser()
@@ -43,14 +54,11 @@ def main():
     # Prepare arguments for parallel processing
     process_args = [(tar_path, out_root, args.rows_per_shard) for tar_path in tar_paths]
 
-    # Process tar files in parallel with single progress bar
+    # Process tar files in parallel
     with Pool(processes=args.num_workers) as pool:
-        results = list(tqdm(
-            pool.imap_unordered(process_single_tar, process_args),
-            total=len(tar_paths),
-            desc="Processing adsorbates",
-            unit="file"
-        ))
+        results = list(
+            pool.imap_unordered(process_single_tar_safe, process_args, chunksize=1)
+        )
 
     # Print summary
     print("\n=== Summary ===", flush=True)
