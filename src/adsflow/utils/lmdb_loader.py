@@ -62,7 +62,7 @@ def dict_to_pyg_data(data_dict: dict) -> Data:
         fixed=torch.from_numpy(data_dict["fixed"]),
         tags=torch.from_numpy(data_dict["tags"]),
         Fmax=torch.tensor(data_dict["Fmax"]),
-        dE=torch.tensor(data_dict["dEmax"]),
+        dE=torch.tensor(data_dict["dE"]),
         dSmax=torch.tensor(data_dict["dSmax"]),
         sid=torch.tensor(data_dict["sid"]),
         fid=torch.tensor(data_dict["fid"]),
