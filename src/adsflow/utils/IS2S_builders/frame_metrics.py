@@ -118,16 +118,22 @@ def compute_frame_metrics(traj_atoms: List, sid: int, adsorbate: str) -> List[Di
     if nframes == 0:
         return []
 
-    # compute optimal frame stats (last frame = relaxed structure)
-    opt_frame = traj_atoms[-1]
-    opt_frame_idx = int(nframes - 1)
+    # Find frame with lowest maximum force (relaxed structure)
+    min_fmax = float('inf')
+    opt_frame_idx = 0
+    for idx, at in enumerate(traj_atoms):
+        F = at.get_forces()
+        Fmax = np.linalg.norm(F, axis=1).max()
+        if Fmax < min_fmax:
+            min_fmax = Fmax
+            opt_frame_idx = idx
+
+    opt_frame = traj_atoms[opt_frame_idx]
 
     E_opt = opt_frame.get_potential_energy()
     F_opt = opt_frame.get_forces()
     Fmax_opt = (np.linalg.norm(F_opt, axis=1)).max()
     pos_opt = opt_frame.get_positions()
-
-    eps = 1e-12
 
     # Compute per-frame stats and create one row per frame
     rows = []
@@ -140,7 +146,7 @@ def compute_frame_metrics(traj_atoms: List, sid: int, adsorbate: str) -> List[Di
         F = at.get_forces()  # (N,3)
         norms = np.linalg.norm(F, axis=1)  # (N,)
         mask = get_free_mask(at) # free, frozen => 1, 0
-        Fmax = float(np.max(norms * mask))
+        Fmax = float(np.max(norms))
         dFmax = abs(Fmax - Fmax_opt) 
 
         # Position MAE

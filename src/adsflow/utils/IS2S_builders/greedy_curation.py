@@ -5,14 +5,13 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
     
 def greedy_selection(
-    features, 
-    k, 
-    dSmax, 
-    must_include_idx=None, 
-    prev_selected_features=None, 
-    prev_selected_dSmax=None, 
-    frame_zero_dSmax=None, 
-    struc_tol=0.005, 
+    features,
+    k,
+    dSmax,
+    prev_selected_features=None,
+    prev_selected_dSmax=None,
+    init_frame_dSmax=None,
+    struc_tol=0.005,
     seed=None,
 ):
     """
@@ -22,10 +21,9 @@ def greedy_selection(
         features: Normalized feature array (num_frames, n_features)
         k: Number of samples to select
         dSmax: dSmax values for current bin
-        must_include_idx: Index that must be included (e.g., dSmax=0 frame)
         prev_selected_features: Features of previously selected frames from prior bins
         prev_selected_dSmax: dSmax values of previously selected frames from prior bins
-        frame_zero_dSmax: dSmax value of frame 0 (input frame) to enforce distance from
+        init_frame_dSmax: dSmax value of frame 0 (input frame) to enforce distance from
         struc_tol: Minimum dSmax difference threshold (default: 0.005)
         seed: Random seed for reproducibility (default: None)
 
@@ -38,11 +36,8 @@ def greedy_selection(
     num_frames = len(features)
     selected = []
 
-    # select the first frame in bin i
-    if must_include_idx is not None:
-        selected.append(must_include_idx)
-
-    elif prev_selected_features is not None and len(prev_selected_features) > 0:
+    # Select the first frame for this bin
+    if prev_selected_features is not None and len(prev_selected_features) > 0:
         # If we have previously selected frames, start by finding the frame
         # that maximizes distance from all previously selected frames
         max_min_dist = -1
@@ -50,7 +45,7 @@ def greedy_selection(
 
         for i in range(num_frames):
             # Check dSmax constraint against frame 0
-            if frame_zero_dSmax is not None and abs(dSmax[i] - frame_zero_dSmax) <= struc_tol:
+            if init_frame_dSmax is not None and abs(dSmax[i] - init_frame_dSmax) <= struc_tol:
                 continue
 
             # Check dSmax constraint against previously selected frames
@@ -85,7 +80,7 @@ def greedy_selection(
                 continue
 
             # Check dSmax constraint against frame 0
-            if frame_zero_dSmax is not None and abs(dSmax[i] - frame_zero_dSmax) <= struc_tol:
+            if init_frame_dSmax is not None and abs(dSmax[i] - init_frame_dSmax) <= struc_tol:
                 continue
 
             # Check dSmax constraint: all differences must be > struc_tol
@@ -152,11 +147,11 @@ def select_by_force(dE, Fmax, dSmax, frame_idx, bin_count, bins, struc_tol=0.005
     frame_zero_idx = np.where(frame_idx == 0)[0]
     if len(frame_zero_idx) > 0:
         frame_zero_idx = frame_zero_idx[0]
-        frame_zero_dSmax = dSmax[frame_zero_idx]
+        init_frame_dSmax = dSmax[frame_zero_idx]
     else:
         # If frame 0 doesn't exist, no constraint
         frame_zero_idx = None
-        frame_zero_dSmax = None
+        init_frame_dSmax = None
 
     # Normalize all features globally for consistent feature space across bins
     all_features = np.column_stack([dE, Fmax, dSmax])
@@ -167,37 +162,50 @@ def select_by_force(dE, Fmax, dSmax, frame_idx, bin_count, bins, struc_tol=0.005
     b1, b2, b3, b4 = bin_count
     bin_counts = [b1, b2, b3, b4]
 
-    selected_indices = []
-    bin_labels = []
+    # Find the opt_frame (lowest dSmax frame) - this is the optimized/relaxed structure
+    opt_frame_idx = np.argmin(dSmax)
 
-    # Track previously selected frames across all bins
-    prev_selected_features = []
-    prev_selected_dSmax = []
+    # Always select opt_frame first
+    selected_indices = [opt_frame_idx]
 
-    # Find the dSmax=0 frame (or closest to 0) - this is the optimized frame
-    dSmax_zero_idx = np.argmin(dSmax)
+    # Determine which bin opt_frame belongs to based on its Fmax value
+    opt_frame_fmax = Fmax[opt_frame_idx]
+    opt_frame_bin = None
+    for bin_num, (lower, upper) in enumerate(bins, start=1):
+        if lower <= opt_frame_fmax < upper:
+            opt_frame_bin = bin_num
+            break
+
+    # Initialize bin_labels with opt_frame's bin
+    bin_labels = [opt_frame_bin] if opt_frame_bin is not None else []
+
+    # Track previously selected frames across all bins (starting with opt_frame)
+    prev_selected_features = [all_features_norm[opt_frame_idx]]
+    prev_selected_dSmax = [dSmax[opt_frame_idx]]
 
     for bin_num, ((lower, upper), k) in enumerate(zip(bins, bin_counts), start=1):
         # Get indices in this bin
-        bin_mask = (Fmax >= lower) & (Fmax < upper)
-        bin_indices = np.where(bin_mask)[0]
+        bin_mask = (Fmax >= lower) & (Fmax < upper) # [0, 1, 1, 0, ..., 1]
+        bin_indices = np.where(bin_mask)[0] # return indicies
 
         # Exclude frame 0 from all bins (it's the input frame, not a training target)
         if frame_zero_idx is not None:
             bin_indices = bin_indices[bin_indices != frame_zero_idx]
 
+        # Exclude opt_frame from all bins (already selected)
+        bin_indices = bin_indices[bin_indices != opt_frame_idx]
+
         if len(bin_indices) == 0:
             continue
 
+        # If this is the bin where opt_frame belongs, reduce k by 1 since we already selected it
+        k_adjusted = k - 1 if bin_num == opt_frame_bin else k
+
+        if k_adjusted <= 0:
+            continue
+        
         # Select frames based on bin number
         if bin_num in (1, 2):
-
-            # Check if dSmax=0 frame is in this bin
-            if dSmax_zero_idx in bin_indices:
-                # Map to local bin index
-                local_zero_idx = np.where(bin_indices == dSmax_zero_idx)[0][0]
-            else:
-                local_zero_idx = None
 
             # Use globally normalized features for this bin
             features_norm = all_features_norm[bin_indices]
@@ -205,12 +213,11 @@ def select_by_force(dE, Fmax, dSmax, frame_idx, bin_count, bins, struc_tol=0.005
             # select frames
             local_selected = greedy_selection(
                 features=features_norm,
-                k=min(k, len(bin_indices)),
+                k=min(k_adjusted, len(bin_indices)),
                 dSmax=dSmax[bin_indices],
                 prev_selected_features=prev_selected_features,
                 prev_selected_dSmax=prev_selected_dSmax,
-                must_include_idx=local_zero_idx,
-                frame_zero_dSmax=frame_zero_dSmax,
+                init_frame_dSmax=init_frame_dSmax,
                 struc_tol=struc_tol / 2 if bin_num == 1 else struc_tol,
                 seed=seed,
             )
@@ -221,7 +228,7 @@ def select_by_force(dE, Fmax, dSmax, frame_idx, bin_count, bins, struc_tol=0.005
             feasible = []
             for i in bin_indices:
                 # Check against frame 0
-                if frame_zero_dSmax is not None and abs(dSmax[i] - frame_zero_dSmax) <= struc_tol:
+                if init_frame_dSmax is not None and abs(dSmax[i] - init_frame_dSmax) <= struc_tol:
                     continue
                 # Check against previously selected frames
                 if all(abs(dSmax[i] - ds) > struc_tol for ds in prev_selected_dSmax):
@@ -229,10 +236,10 @@ def select_by_force(dE, Fmax, dSmax, frame_idx, bin_count, bins, struc_tol=0.005
             feasible = np.array(feasible, dtype=int)
             if len(feasible) == 0:
                 continue
-            if len(feasible) <= k:
+            if len(feasible) <= k_adjusted:
                 selected = feasible
             else:
-                selected = np.random.choice(feasible, size=k, replace=False)
+                selected = np.random.choice(feasible, size=k_adjusted, replace=False)
 
         if len(selected) > 0:
             selected_indices.extend(selected)
