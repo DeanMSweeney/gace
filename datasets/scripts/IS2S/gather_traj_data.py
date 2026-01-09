@@ -34,19 +34,19 @@ def process_single_tar_safe(args_tuple):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--in_root", type=str, required=True, help="Directory containing per-adsorbate *.tar files")
+    ap.add_argument("--traj_root", type=str, required=True, help="Directory containing per-adsorbate *.tar files")
     ap.add_argument("--out_root", type=str, required=True, help="Directory containing to store new data")
     ap.add_argument("--rows_per_shard", type=int, default=2_000_000, help="Frames (rows) per parquet shard")
     ap.add_argument("--num_workers", type=int, default=16, help="Number of parallel workers")
     args = ap.parse_args()
 
-    in_root = Path(args.in_root)
+    traj_root = Path(args.traj_root)
     out_root = Path(args.out_root)
     out_root.mkdir(parents=True, exist_ok=True)
 
-    tar_paths = sorted(in_root.glob("*.tar"))
+    tar_paths = sorted(traj_root.glob("*.tar"))
     if not tar_paths:
-        print(f"No .tar files found in {in_root}", file=sys.stderr)
+        print(f"No .tar files found in {traj_root}", file=sys.stderr)
         sys.exit(1)
 
     print(f"Processing {len(tar_paths)} tar files with {args.num_workers} workers", flush=True)
