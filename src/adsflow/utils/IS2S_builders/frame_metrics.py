@@ -233,6 +233,9 @@ def process_single_tar(args_tuple: Tuple[Path, Path, int]) -> Tuple[str, int, in
             if sid is None:
                 n_traj_skip += 1
                 continue
+            
+            if n_members % 10 == 0:
+                print(f"Processing member {n_members} (sid={sid}, {member.name})", flush=True)
 
             traj_atoms = read_extxyz_xz_from_tar_member(tar, member)
             frame_rows = compute_frame_metrics(traj_atoms, sid=sid, adsorbate=adsorbate)
