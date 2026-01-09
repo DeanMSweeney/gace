@@ -21,16 +21,6 @@ from adsflow.utils.IS2S_builders.frame_metrics import process_single_tar
 
 SID_RE = re.compile(r"(?:sid[_\-]?|^)(\d+)(?:\D|$)", re.IGNORECASE)
 
-def process_single_tar_safe(args_tuple):
-    """Wrapper with error handling for worker processes."""
-    try:
-        result = process_single_tar(args_tuple)
-        return result
-    except Exception as e:
-        tar_path = args_tuple[0] if args_tuple else "unknown"
-        error_msg = f"ERROR processing {tar_path}: {str(e)}\n{traceback.format_exc()}"
-        print(error_msg, file=sys.stderr, flush=True)
-        return (str(tar_path), 0, 0, 0)
 
 def main():
     ap = argparse.ArgumentParser()
@@ -56,7 +46,7 @@ def main():
 
     # Process tar files in parallel
     with Pool(processes=args.num_workers) as pool:
-        results = pool.map(process_single_tar_safe, process_args)
+        results = pool.map(process_single_tar, process_args)
 
     # Print summary
     print("\n=== Summary ===", flush=True)
