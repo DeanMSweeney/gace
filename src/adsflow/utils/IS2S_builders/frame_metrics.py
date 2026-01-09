@@ -61,14 +61,16 @@ class ShardWriter:
     _shard_id: int = 0
 
     def __post_init__(self):
-        self.out_dir.mkdir(parents=True, exist_ok=True)
         self._rows = []
         self._shard_id = self._find_next_shard_id()
 
     def _find_next_shard_id(self) -> int:
         """
         Resume-friendly: if part-xxxxx.parquet already exists, continue after max id.
+        Only glob if directory exists to avoid filesystem contention during parallel init.
         """
+        if not self.out_dir.exists():
+            return 0
         existing = sorted(self.out_dir.glob("part-*.parquet"))
         if not existing:
             return 0
@@ -87,6 +89,10 @@ class ShardWriter:
     def flush(self) -> None:
         if not self._rows:
             return
+
+        # Create directory only when needed to reduce parallel filesystem contention
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+
         out_path = self.out_dir / f"part-{self._shard_id:05d}.parquet"
         df = pd.DataFrame(self._rows)
 
