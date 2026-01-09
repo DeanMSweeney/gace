@@ -18,6 +18,7 @@ POSCAR*
 *.sh
 core
 out-claude.txt
+selected_frames.parquet
 
 # Folders
 '$HOME'/
@@ -34,3 +35,4 @@ conf/
 0/
 trajs/
 dense/
+
