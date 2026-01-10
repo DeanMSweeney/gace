@@ -79,8 +79,6 @@ def main(traj_parquets: str, sid_root: str, bins: List[int], force_bins: List[Tu
                     c2_bin4 += np.sum(bin_labels == 4)
                     
                 c3 += len(frame_idx)
-            else:
-                print(f"SID in test/val sets")
 
 
     # Save selected frames to output file
