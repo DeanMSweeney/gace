@@ -218,7 +218,7 @@ def main():
     parser.add_argument(
         "--entries-per-shard",
         type=int,
-        default=10_000,
+        default=1_000_000,
         help="Number of entries per LMDB shard (default: 10000)"
     )
 
