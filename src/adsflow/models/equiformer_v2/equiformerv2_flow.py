@@ -462,6 +462,7 @@ class EquiformerV2_Flow(BaseModel):
         if hasattr(data, "dE") and hasattr(data, "Fmax"):
             energy_embeds = self.energy_emb(self.process_scalar_embeds(s=dE, s_emb_freqs=self.energy_emb_freqs))
             force_embeds = self.force_emb(self.process_scalar_embeds(s=Fmax, s_emb_freqs=self.force_emb_freqs))
+            print("Conditional generation")
         
         offset_res = 0
         offset = 0
@@ -496,6 +497,7 @@ class EquiformerV2_Flow(BaseModel):
         
         if hasattr(data, "dE") and hasattr(data, "Fmax"):
             x.embedding = x.embedding + energy_embeds.unsqueeze(1) + force_embeds.unsqueeze(1)
+            print("Conditional generation")
     
         ###############################################################
         # Update spherical node embeddings
