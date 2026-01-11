@@ -21,7 +21,6 @@ from adsflow.utils.IS2S_builders.frame_metrics import process_single_tar
 
 SID_RE = re.compile(r"(?:sid[_\-]?|^)(\d+)(?:\D|$)", re.IGNORECASE)
 
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--traj_dir", type=str, required=True, help="Directory containing per-adsorbate *.tar files")
