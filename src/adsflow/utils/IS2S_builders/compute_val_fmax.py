@@ -204,13 +204,13 @@ def main():
         description="Compute Fmax from forces and create data_is2s.lmdb"
     )
     parser.add_argument(
-        "--input",
+        "--input_file",
         type=str,
         required=True,
         help="Path to data_refined.lmdb file or directory containing LMDB files"
     )
     parser.add_argument(
-        "--output",
+        "--output_dir",
         type=str,
         required=True,
         help="Output directory where data_is2s.lmdb will be stored"
