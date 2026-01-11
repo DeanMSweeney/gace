@@ -117,6 +117,8 @@ class LightFlowMatch(LightningModule, OptTransport):
         
     
     def validation_step(self, data: Data, batch_idx):
+        if hasattr(data, "Fmax"):
+            data.dE = 0 
         loss, max_loss, _ = self._transport_loss(data)
         
         self.log(
