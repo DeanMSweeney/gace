@@ -118,7 +118,7 @@ class LightFlowMatch(LightningModule, OptTransport):
     
     def validation_step(self, data: Data, batch_idx):
         if hasattr(data, "Fmax"):
-            data.dE = torch.tensor(0.0) 
+            data.dE = torch.zeros_like(data.Fmax)
             print("Conditional generation")
         loss, max_loss, _ = self._transport_loss(data)
         
