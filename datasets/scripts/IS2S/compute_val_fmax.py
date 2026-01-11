@@ -224,8 +224,8 @@ def main():
 
     args = parser.parse_args()
 
-    input_path = Path(args.input)
-    output_dir = Path(args.output)
+    input_path = Path(args.input_file)
+    output_dir = Path(args.output_dir)
 
     # Validate input path
     if not input_path.exists():
