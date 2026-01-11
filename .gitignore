@@ -18,6 +18,7 @@ POSCAR*
 *.sh
 core
 out-claude.txt
+selected_frames-old.parquet
 selected_frames.parquet
 
 # Folders
