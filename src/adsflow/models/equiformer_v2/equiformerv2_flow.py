@@ -416,6 +416,7 @@ class EquiformerV2_Flow(BaseModel):
         if hasattr(data, "dE") and hasattr(data, "Fmax"):
             dE = data.dE[data.batch].unsqueeze(1) # (N,1)
             Fmax = data.Fmax[data.batch].unsqueeze(1) # (N,1)
+            print("Conditional generation")
         
         # Build graph 
         (
