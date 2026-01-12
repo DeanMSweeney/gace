@@ -5,6 +5,7 @@ from torch import Tensor
 from torch_geometric.data import Data
 from typing import Optional, Literal, Union, Tuple
 import itertools
+#from torch_linear_assignment import assignment_to_indices
 
 
 def pbc_aware_delta(
@@ -53,3 +54,27 @@ def pbc_aware_delta(
             return u_min.abs().mean(dim=1, keepdim=True) # N,3 -> N,1
         else: 
             return u_min
+"""
+def hungarian(
+    s0: Tensor,
+    s1: Tensor,
+    cell: Tensor,
+    batch: Tensor, 
+) -> Tensor: 
+ 
+    # compute pairwise cost matrix for atomic positions with minimum image convention 
+    C = s1.unsqueeze(0) - s0.unsqueeze(1) # (N, N, 3)
+    C = pbc_aware_delta(
+        cell=cell, 
+        delta=C.reshape(-1, 3), #(N*N, 3)
+        batch=batch,
+    ).reshape(s1.size(0), s1.size(0), 3) # N, N, 3
+    
+    C_l2 = torch.linalg.norm(C, dim=-1)
+
+    _, col_ind = assignment_to_indices(cost=C_l2)
+    s0_aligned = s0[col_ind]
+    
+    return s0_aligned
+
+"""      

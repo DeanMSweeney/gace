@@ -61,14 +61,16 @@ class ShardWriter:
     _shard_id: int = 0
 
     def __post_init__(self):
-        self.out_dir.mkdir(parents=True, exist_ok=True)
         self._rows = []
         self._shard_id = self._find_next_shard_id()
 
     def _find_next_shard_id(self) -> int:
         """
         Resume-friendly: if part-xxxxx.parquet already exists, continue after max id.
+        Only glob if directory exists to avoid filesystem contention during parallel init.
         """
+        if not self.out_dir.exists():
+            return 0
         existing = sorted(self.out_dir.glob("part-*.parquet"))
         if not existing:
             return 0
@@ -87,6 +89,10 @@ class ShardWriter:
     def flush(self) -> None:
         if not self._rows:
             return
+
+        # Create directory only when needed to reduce parallel filesystem contention
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+
         out_path = self.out_dir / f"part-{self._shard_id:05d}.parquet"
         df = pd.DataFrame(self._rows)
 
@@ -118,16 +124,22 @@ def compute_frame_metrics(traj_atoms: List, sid: int, adsorbate: str) -> List[Di
     if nframes == 0:
         return []
 
-    # compute optimal frame stats (last frame = relaxed structure)
-    opt_frame = traj_atoms[-1]
-    opt_frame_idx = int(nframes - 1)
+    # Find frame with lowest maximum force (relaxed structure)
+    min_fmax = float('inf')
+    opt_frame_idx = 0
+    for idx, at in enumerate(traj_atoms):
+        F = at.get_forces()
+        Fmax = np.linalg.norm(F, axis=1).max()
+        if Fmax < min_fmax:
+            min_fmax = Fmax
+            opt_frame_idx = idx
+
+    opt_frame = traj_atoms[opt_frame_idx]
 
     E_opt = opt_frame.get_potential_energy()
     F_opt = opt_frame.get_forces()
     Fmax_opt = (np.linalg.norm(F_opt, axis=1)).max()
     pos_opt = opt_frame.get_positions()
-
-    eps = 1e-12
 
     # Compute per-frame stats and create one row per frame
     rows = []
@@ -140,7 +152,7 @@ def compute_frame_metrics(traj_atoms: List, sid: int, adsorbate: str) -> List[Di
         F = at.get_forces()  # (N,3)
         norms = np.linalg.norm(F, axis=1)  # (N,)
         mask = get_free_mask(at) # free, frozen => 1, 0
-        Fmax = float(np.max(norms * mask))
+        Fmax = float(np.max(norms))
         dFmax = abs(Fmax - Fmax_opt) 
 
         # Position MAE
@@ -227,6 +239,9 @@ def process_single_tar(args_tuple: Tuple[Path, Path, int]) -> Tuple[str, int, in
             if sid is None:
                 n_traj_skip += 1
                 continue
+            
+            if n_members % 10 == 0:
+                print(f"Processing member {n_members} (sid={sid}, {member.name})", flush=True)
 
             traj_atoms = read_extxyz_xz_from_tar_member(tar, member)
             frame_rows = compute_frame_metrics(traj_atoms, sid=sid, adsorbate=adsorbate)

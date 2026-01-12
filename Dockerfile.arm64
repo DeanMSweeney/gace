@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir --upgrade pip
 
 # Install torch geometric dependecies 
 RUN pip install --no-cache-dir --no-build-isolation \
-    torch-scatter torch-sparse torch-cluster torch-spline-conv
+    pyg_lib torch-scatter torch-sparse torch-cluster torch-spline-conv
 
 # Install requriements and dependecies
 COPY requirements.txt .

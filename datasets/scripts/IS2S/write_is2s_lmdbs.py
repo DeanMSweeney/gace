@@ -34,7 +34,7 @@ def main():
         help="Path to selected_frames.parquet file"
     )
     ap.add_argument(
-        "--traj_tar_root",
+        "--traj_dir",
         type=str,
         required=True,
         help="Directory containing per-adsorbate *.tar files"
@@ -60,7 +60,7 @@ def main():
     args = ap.parse_args()
 
     parquet_file = Path(args.selected_frames_parquet)
-    tar_root = Path(args.traj_tar_root)
+    tar_dir = Path(args.traj_dir)
     out_dir = Path(args.out_dir)
 
     # Validate inputs
@@ -68,8 +68,8 @@ def main():
         print(f"Error: parquet file not found: {parquet_file}", file=sys.stderr)
         sys.exit(1)
 
-    if not tar_root.exists():
-        print(f"Error: tar_root not found: {tar_root}", file=sys.stderr)
+    if not tar_dir.exists():
+        print(f"Error: tar_dir not found: {tar_dir}", file=sys.stderr)
         sys.exit(1)
 
     # Read selected frames
@@ -85,9 +85,9 @@ def main():
     print(f"Mapped {len(sid_to_adsorbate)} unique sids to adsorbates", flush=True)
 
     # Get list of tar files
-    tar_paths = sorted(tar_root.glob("*.tar"))
+    tar_paths = sorted(tar_dir.glob("*.tar"))
     if not tar_paths:
-        print(f"Error: No .tar files found in {tar_root}", file=sys.stderr)
+        print(f"Error: No .tar files found in {tar_dir}", file=sys.stderr)
         sys.exit(1)
 
     print(f"Found {len(tar_paths)} tar files to process with {args.num_workers} workers", flush=True)

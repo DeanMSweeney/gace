@@ -91,6 +91,7 @@ def main(cfg: Config) -> None:
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
+            shuffle=True, 
         )
         
         val_loader = DataLoader(
@@ -113,6 +114,7 @@ def main(cfg: Config) -> None:
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             pin_memory=pin_memory,
+            shuffle=True, 
         )
         
         # build validation set 
@@ -161,6 +163,7 @@ def main(cfg: Config) -> None:
         gen_POS=cfg.gen_POS,
         rlxd_POS=cfg.rlxd_POS, 
         config_vasp=cfg.config_vasp,
+        threshold=cfg.threshold, 
         **cfg.optimizer_hparams,
     )
     

@@ -11,6 +11,7 @@ wandb
 torchdiffeq
 transformers
 scipy
+torch-linear-assignment # still need to add to image
 
 # Other required dependecies for fairchem 
 huggingface-hub>=0.27.1
