@@ -79,8 +79,6 @@ def main(traj_parquets: str, sid_root: str, bins: List[int], force_bins: List[Tu
                     c2_bin4 += np.sum(bin_labels == 4)
                     
                 c3 += len(frame_idx)
-            else:
-                print(f"SID in test/val sets")
 
 
     # Save selected frames to output file
@@ -106,7 +104,7 @@ def main(traj_parquets: str, sid_root: str, bins: List[int], force_bins: List[Tu
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--traj_parquets", type=str, required=True, help="Directory containing per-adsorbate *.parquet files")
-    ap.add_argument("--sid_root", type=str, required=True, help="Path to val/test system ids (sids)")
+    ap.add_argument("--sid_dir", type=str, required=True, help="Path to val/test system ids (sids)")
     ap.add_argument("--bins", type=int, nargs='+', default=[5, 3, 1, 1], help="Number of frames in each bin")
     ap.add_argument("--force_bins", type=float, nargs='+', default=[0.0, 0.05, 0.05, 0.10, 0.10, 0.30, 0.30, 0.60],
                     help="Force bin edges as pairs (lower, upper). Default: 0.0 0.05 0.05 0.10 0.10 0.30 0.30 0.60")
@@ -116,7 +114,7 @@ if __name__ == "__main__":
     args = ap.parse_args()
 
     traj_parquets = Path(args.traj_parquets)
-    sid_root = Path(args.sid_root)
+    sid_root = Path(args.sid_dir)
 
     # Added for future parallelization implmentation if needed 
     num_workers = args.num_workers

@@ -8,6 +8,7 @@ from typing import Optional, Literal, Union, Tuple
 
 from adsflow.utils.post_processing import config_DFT, write_strucs
 from adsflow.utils.invariance import pbc_aware_delta
+from adsflow.utils.eval_metrics import ADwT
 
 
 class OptTransport(): 
@@ -21,13 +22,14 @@ class OptTransport():
         a: Tensor,  # N, 3
         b: Tensor,  # N, 3
         alpha: float=0, # masked MSE
-        tune_adsorbate: bool=True,
+        tune_adsorbate: bool=False,
     ):  
         # compute per atom loss
         with torch.no_grad():
             data = input_data
+            data.fixed = data.fixed.float()
             mask = (1 - data.fixed).unsqueeze(1) # # N, 1 -> e.g., [0, 0, ..., 0, 1, ..., 1] (0 <-> frozen, 1 <-> free)
-            # compute weights with numerical stability
+        
             if alpha == 0: # weight all samples equally 
                 w = 1 / mask.sum().clamp_min(1e-8) # equal weighting, equivalent to L = 1/N * sum(l_per_atom), w = 1/N
             else:
@@ -80,32 +82,51 @@ class OptTransport():
             data = input_data.clone()
 
             x1 = data.pos_relaxed # sample relaxed positions x1 ~ p(x) (final)
-
-            if variant == "Forge":
-                    x0 = torch.randn_like(x1) # sample noise 
-            else:
-                    x0 = data.pos # sample initial positions x0 ~ q(x) (initial)
-
+            
             t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device) # (batch_size, 1)
             t = t_per_graph[data.batch] # (num_atoms, 1)
-        
-            if hasattr(data, "velocity"):
-                # load from data object
-                u = data.velocity
-                
-            else: 
-                delta_xyz = x1 - x0
-                u = pbc_aware_delta(
-                    delta=delta_xyz,
-                    cell=data.cell,
-                    batch=data.batch,
-                    naive=naive,
-                )
 
-            xt = x0 + t * u # x1 * t + (1-t) * x0
-            data.pos = xt # reassign xt to pos 
-            data.pos_init = x0
-            data.t = t
+            if variant == "forge":              
+                    # partition adsorbate and catalyst
+                    adsorbate = (data.tags == 2)
+                    catalyst = (data.tags != 2)
+                    
+                    x0 = torch.randn_like(x1) # sample noise for atomic positions   
+                    x0[adsorbate] = data.pos[adsorbate] # specify adsorbate                     
+                    
+                    # find optimal alignment for catalysts in x0
+                    x0[catalyst] = hungarian(
+                        s0=x0[catalyst], 
+                        s1=x1[catalyst], 
+                        cell=data.cell,
+                        batch=data.batch,
+                    )
+                    
+                    # define and sample noise for atomic numbers
+                    z1 = data.atomic_number
+                    z1_hot = F.one_hot(z1, num_classes=55)
+                    z0 = torch.rand
+
+            else:
+                x0 = data.pos # sample initial positions x0 ~ q(x) (initial)
+        
+                if hasattr(data, "velocity"):
+                    # load from data object
+                    u = data.velocity
+                
+                else: 
+                    delta_xyz = x1 - x0
+                    u = pbc_aware_delta(
+                        delta=delta_xyz,
+                        cell=data.cell,
+                        batch=data.batch,
+                        naive=naive,
+                    )
+
+                xt = x0 + t * u # x1 * t + (1-t) * x0
+                data.pos = xt # reassign xt to pos 
+                data.pos_init = x0
+                data.t = t
 
         return data, u 
   
@@ -113,6 +134,7 @@ class OptTransport():
             self, 
             input_data: Data,
             t: torch.Tensor,
+            threshold: float=0.20,
             
     ) -> Union[Data, Tuple[Data, torch.Tensor]]:
         
@@ -137,8 +159,8 @@ class OptTransport():
       
         data.pos = input_data.pos
         data.pos_generated = xt[-1]
-        mask = (data.fixed == 1)
-        data.pos_generated[mask] = data.pos[mask]
+        frozen_atoms = (data.fixed == 1)
+        data.pos_generated[frozen_atoms] = data.pos[frozen_atoms]
         
         if self.gen_POS:
                 write_strucs(
@@ -161,25 +183,32 @@ class OptTransport():
         # Save to current directory
         if hasattr(data, "pos_relaxed"):
             
-            e_gen = pbc_aware_delta(
-                delta=data.pos_generated - data.pos_relaxed, # write generate possitional coordinates to pos_gen attribute 
-                cell=data.cell,
-                batch=data.batch,
-        )
+            # collect data for analysis
+            mask = (1 - data.fixed).bool()
+            cell = data.cell 
+            batch = data.batch 
+            pos_init = data.pos 
+            pos_predicted = data.pos_generated
+            pos_target = data.pos_relaxed 
             
-            e_null = pbc_aware_delta(
-                delta=data.pos - data.pos_relaxed, # write generated possitional coordinates to pos_gen attribute 
-                cell=data.cell,
-                batch=data.batch,
-        )
+            generated_mae, generated_dwt, generated_adwt = ADwT(
+               pos_predicted=pos_predicted, 
+               pos_target=pos_target,
+               threshold=threshold,
+               fixed_atoms_mask=mask,
+               cell=cell, 
+               batch=batch, 
+           )
             
-            struc_mse,  _, _ = self.masked_loss(input_data=data, a=e_gen, b=torch.zeros_like(e_gen), mask=self.free_atoms)
-            struc_rmse = torch.sqrt(struc_mse)
-            
-            null_struc_mse, _, _ = self.masked_loss(input_data=data, a=e_null, b=torch.zeros_like(e_null), mask=self.free_atoms)
-            null_struc_rmse  = torch.sqrt(null_struc_mse)
-            
-            return data, struc_rmse, null_struc_rmse
+            initial_mae, initial_dwt, initial_adwt = ADwT(
+               pos_predicted=pos_init, 
+               pos_target=pos_target,
+               threshold=threshold,
+               fixed_atoms_mask=mask,
+               cell=cell, 
+               batch=batch, 
+           )
+            return data, generated_mae, generated_dwt, generated_adwt, initial_mae, initial_dwt, initial_adwt
         else: 
             return data
   

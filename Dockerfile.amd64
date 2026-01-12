@@ -16,7 +16,8 @@ RUN apt-get update && apt-get install -y \
 RUN pip install --upgrade pip
 
 # 5. Install PyG extensions (manually, not in requirements.txt)
-RUN pip install torch-scatter torch-sparse torch-cluster torch-spline-conv \
+RUN pip install torch_geometric
+RUN pip install pyg_lib torch-scatter torch-sparse torch-cluster torch-spline-conv \
   -f https://data.pyg.org/whl/torch-2.4.0+cu124.html
 
 # 6. Copy and install Python requirements (torch*, fairchem-core, etc. NOT included here)

@@ -17,7 +17,9 @@ POSCAR*
 *.gz
 *.sh
 core
-error.txt
+out-claude.txt
+selected_frames-old.parquet
+selected_frames.parquet
 
 # Folders
 '$HOME'/
@@ -34,3 +36,5 @@ conf/
 0/
 trajs/
 dense/
+old/
+l-*/
