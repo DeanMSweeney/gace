@@ -415,7 +415,9 @@ class EquiformerV2_Flow(BaseModel):
         # extract energy and force metrics if included 
         if hasattr(data, "dE") and hasattr(data, "Fmax"):
             dE = data.dE[data.batch].unsqueeze(1) # (N,1)
+            dE_log = torch.log(dE + 1e-6)
             Fmax = data.Fmax[data.batch].unsqueeze(1) # (N,1)
+            dFmax_log = torch.log(Fmax + 1e-6)
         
         # Build graph 
         (
@@ -459,8 +461,8 @@ class EquiformerV2_Flow(BaseModel):
         
         # enegry and force mebedding when necessayr 
         if hasattr(data, "dE") and hasattr(data, "Fmax"):
-            energy_embeds = self.energy_emb(self.process_scalar_embeds(s=dE, s_emb_freqs=self.energy_emb_freqs))
-            force_embeds = self.force_emb(self.process_scalar_embeds(s=Fmax, s_emb_freqs=self.force_emb_freqs))
+            energy_embeds = self.energy_emb(self.process_scalar_embeds(s=dE_log, s_emb_freqs=self.energy_emb_freqs))
+            force_embeds = self.force_emb(self.process_scalar_embeds(s=Fmax_log, s_emb_freqs=self.force_emb_freqs))
         
         offset_res = 0
         offset = 0
