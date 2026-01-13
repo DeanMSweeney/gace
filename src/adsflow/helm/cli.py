@@ -156,7 +156,6 @@ def main(cfg: Config) -> None:
         variant=cfg.variant, 
         mode=cfg.mode,
         track_grad_norms=cfg.track_grad_norms,
-        mask_frzn_atoms=cfg.mask_frzn_atoms,
         rtol=cfg.rtol, 
         atol=cfg.atol,
         ode_method=cfg.ode_method,
