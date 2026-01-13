@@ -63,7 +63,6 @@ class LightFlowMatch(LightningModule, XMatching):
             model,
             variant: str="refine",
             mode: str="debug",
-            mask_frzn_atoms: bool=True,
             rtol: float = 1e-7,
             atol: float = 1e-9,
             ode_method: str = "dopri5",
@@ -87,7 +86,6 @@ class LightFlowMatch(LightningModule, XMatching):
         self.variant = variant  # "refine" or "forge"
         self.mode = mode
         self.loss_fn = nn.MSELoss()  # Base loss function (not directly used, see criterion)
-        self.mask_frzn_atoms = mask_frzn_atoms
 
         # ODE solver configuration (for inference/testing)
         self.rtol = rtol

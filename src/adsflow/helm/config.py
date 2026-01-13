@@ -81,10 +81,6 @@ class OptimizerConfig:
     E.g., tao=2 means adsorbate atoms contribute 2x more to loss
     """
 
-    tune_adsorbate: bool = False
-    """Whether to focus training specifically on adsorbate prediction
-    (experimental feature for adsorbate-specific tuning)
-    """
     
 @dataclass
 class Config:
