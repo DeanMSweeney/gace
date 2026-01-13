@@ -12,7 +12,7 @@ from torch import Tensor
 from torch_geometric.data import Data
 from typing import Optional, Literal, Union, Tuple
 import itertools
-from torch_linear_assignment import assignment_to_indices
+#from torch_linear_assignment import assignment_to_indices
 
 
 def pbc_aware_delta(
@@ -155,6 +155,7 @@ def hungarian(
 
     # Compute pairwise cost matrix: C[i,j] = distance from s0[i] to s1[j]
     # Using minimum image convention for periodic boundaries
+    """
     C = s1.unsqueeze(0) - s0.unsqueeze(1)  # (N, N, 3) - all pairwise displacements
 
     # Apply PBC to get minimum image distances
@@ -174,6 +175,8 @@ def hungarian(
 
     # Apply optimal permutation to s0
     s0_aligned = s0[col_ind]  # (N, 3) - reordered to match s1
+    """
+    s0_aligned = 1 
 
     return s0_aligned
    

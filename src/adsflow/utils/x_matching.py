@@ -10,9 +10,6 @@ from adsflow.utils.post_processing import config_DFT, write_strucs
 from adsflow.utils.invariance import pbc_aware_delta, hungarian
 from adsflow.utils.eval_metrics import ADwT
 
-from adsflow.utils.loss_utils import loss_weighting
-
-
 class XMatching(): 
     """
     This Mixin supports image invariant interpolation paths and masked loss for frozen atoms 
