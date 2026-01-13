@@ -417,7 +417,7 @@ class EquiformerV2_Flow(BaseModel):
             dE = data.dE[data.batch].unsqueeze(1) # (N,1)
             dE_log = torch.log(dE + 1e-6)
             Fmax = data.Fmax[data.batch].unsqueeze(1) # (N,1)
-            dFmax_log = torch.log(Fmax + 1e-6)
+            Fmax_log = torch.log(Fmax + 1e-6)
         
         # Build graph 
         (
