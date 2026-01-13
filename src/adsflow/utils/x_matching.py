@@ -113,17 +113,15 @@ class XMatching():
 
             # Sample random interpolation time t for each graph in the batch
             t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device, dtype=torch.float32)
-            t = t_per_graph[data.batch] * 0.999  # Broadcast to atoms, clamp max to 0.999
+            t = t_per_graph[data.batch] * 0.999 if self.x_matching == "endpoint" else t_per_graph[data.batch]  # Broadcast to atoms, clamp max to 0.999
 
             # Define interpolation schedule: how to move from t to alpha_t
             if interpolant_schedule == "linear":
                 # Linear interpolation: alpha_t = t
                 alpha_t = t
                 alpha_t_grad = torch.tensor(1.0, device=t.device, dtype=torch.float32)
-                self.alpha_t_factor = 1 / (1 - t) if self.x_matching == "endpoint" \
-                else torch.tensor(1.0, device=t.device, dtype=torch.float32)
-                
-
+                self.alpha_t_factor = 1 / (1 - t) if self.x_matching == "endpoint" else torch.tensor(1.0, device=t.device, dtype=torch.float32)
+            
             elif interpolant_schedule == "cosine":
                 # Cosine interpolation: slower at start/end, faster in middle
                 # alpha_t = 1 - cos^2(t^v * pi/2)
@@ -154,10 +152,27 @@ class XMatching():
                         batch=data.batch,
                     )
 
+                    u = pbc_aware_delta(
+                        delta=x1 - x0,
+                        cell=data.cell.float(),
+                        batch=data.batch,
+                    )
+
+                    xt = x0 + alpha_t * u
+
+                    # Rescale velocity for cosine schedule (to account for d(alpha_t)/dt)
+                    u = alpha_t_grad * u # alpha_t' * (x1 - x0)
+
+                    # Store interpolated data
+                    data.pos = xt  # Current position (what model sees as input)
+
                     # Sample noise for atomic numbers (for conditional generation)
                     z1 = data.atomic_number
                     z1_hot = F.one_hot(z1, num_classes=55)
                     z0 = torch.rand_like(z1_hot, dtype=torch.float32)
+
+                    zt = z0 + alpha_t * (z1 - z0)
+
 
             elif self.variant == "refine":
                 # REFINE variant: refine from initial DFT positions to relaxed positions
