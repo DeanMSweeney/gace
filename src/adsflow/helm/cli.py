@@ -78,12 +78,13 @@ def main(cfg: Config) -> None:
     if cfg.num_workers is None: 
         cfg.num_workers = max(1, os.cpu_count() - 2) # leave 2 cores free 
 
-    if cfg.mode == "debug" and cfg.oc20_mini: 
-        declare(f">>> Activated Debug mode with OC20-mini: {cfg.oc20_mini} 🕷️") 
+    if cfg.mode == "debug" and cfg.oc20_train: 
+        declare(f">>> Activated Debug mode on the first 100 datapoints of OC20: {cfg.oc20_train} 🕷️") 
 
         # build trianing set 
-        p = {"src": cfg.oc20_mini}
+        p = {"src": cfg.oc20_train}
         dataset = LazyLmdbDataset(p)
+        dataset = Subset(dataset, indices=range(100))
         train_set, val_set = random_split(dataset, [0.80, 0.20])
 
         train_loader = DataLoader(
@@ -164,6 +165,8 @@ def main(cfg: Config) -> None:
         rlxd_POS=cfg.rlxd_POS, 
         config_vasp=cfg.config_vasp,
         threshold=cfg.threshold, 
+        x_matching=cfg.x_matching,
+        interpolant_schedule=cfg.interpolant_schedule,
         **cfg.optimizer_hparams,
     )
     
