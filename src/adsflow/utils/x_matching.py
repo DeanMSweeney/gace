@@ -33,6 +33,7 @@ class XMatching():
         # Force fp32 precision for all operations
         a = a.float()
         b = b.float()
+        tao=tao.float()
 
         # Compute mask (no gradient needed for mask creation)
         data = input_data
@@ -72,8 +73,8 @@ class XMatching():
 
         # Apply time-dependent weighting for cosine interpolation schedules
         # (helps stabilize training by reweighting loss based on interpolation time)
-        time_factor = torch.clamp(self.alpha_t_factor.float(), 0.005, 1.5) if self.interpolant_schedule == "cosine" \
-             else torch.tensor(1.0, device=L_per_atom.device, dtype=torch.float32)
+        time_factor = torch.clamp(self.alpha_t_factor, 0.005, 1.5) if self.interpolant_schedule == "cosine" \
+             else self.alpha_t_factor
 
         # Apply all weighting factors: frozen atom mask, adsorbate weight, time weight
         weighted_L_per_atom = L_per_atom * ads_mask_factor * time_factor  # N, 1
@@ -118,7 +119,11 @@ class XMatching():
             if interpolant_schedule == "linear":
                 # Linear interpolation: alpha_t = t
                 alpha_t = t
-                self.alpha_t_factor = torch.tensor(1.0, device=t.device, dtype=torch.float32)
+                alpha_t_grad = torch.tensor(1.0, device=t.device, dtype=torch.float32)
+                self.alpha_t_factor = 1 / (1 - t) if self.x_matching == "endpoint" \
+                else torch.tensor(1.0, device=t.device, dtype=torch.float32)
+                
+
             elif interpolant_schedule == "cosine":
                 # Cosine interpolation: slower at start/end, faster in middle
                 # alpha_t = 1 - cos^2(t^v * pi/2)
@@ -126,7 +131,7 @@ class XMatching():
                 # Compute d(alpha_t)/dt for velocity rescaling
                 alpha_t_grad = torch.pi * v * t ** (v - 1) * torch.cos(t ** v * torch.pi / 2) * torch.sin(t ** v * torch.pi / 2)
                 # Store for time-dependent loss weighting
-                self.alpha_t_factor = alpha_t_grad / (1 - alpha_t)
+                self.alpha_t_factor = alpha_t_grad / (1 - alpha_t).clamp_min(1e-8) # alpha_t'/ (1-alpha)
             else:
                 raise ValueError("Invalid interpolant schedule")
 
@@ -174,10 +179,7 @@ class XMatching():
                 xt = x0 + alpha_t * u
 
                 # Rescale velocity for cosine schedule (to account for d(alpha_t)/dt)
-                if interpolant_schedule == "cosine":
-                    self.u = alpha_t_grad * u
-                else:
-                    self.u = u
+                u = alpha_t_grad * u # alpha_t' * (x1 - x0)
 
                 # Store interpolated data
                 data.pos = xt  # Current position (what model sees as input)
@@ -186,7 +188,7 @@ class XMatching():
             else:
                 raise ValueError("Invalid model variant")
 
-        return data, self.u 
+        return data, u 
   
     def sample(
             self,
