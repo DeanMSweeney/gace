@@ -34,37 +34,38 @@ class XMatching():
         a = a.float()
         b = b.float()
 
-        # Compute per atom loss
+        # Compute mask (no gradient needed for mask creation)
+        data = input_data
         with torch.no_grad():
-            data = input_data
             data.fixed = data.fixed.float()
             # Create mask: 0 for frozen atoms, 1 for free atoms (N, 1)
             mask = (1 - data.fixed).unsqueeze(1)
 
-            # Compute position difference based on matching mode
-            if self.x_matching == "endpoint":
-                # Compute PBC-aware loss between predicted and target positions
-                # (handles periodic boundary conditions for crystalline structures)
-                diff = pbc_aware_delta(
-                    cell=data.cell.float(),
-                    delta=(a - b),
-                    batch=data.batch,
-                )
-            elif self.x_matching == "flow":
-                # Simple Euclidean difference (for flow-based methods)
-                diff = a - b
-            else:
-                raise ValueError("Invalid x_matching routine")
+        # Compute position difference based on matching mode (needs gradients!)
+        if self.x_matching == "endpoint":
+            # Compute PBC-aware loss between predicted and target positions
+            # (handles periodic boundary conditions for crystalline structures)
+            diff = pbc_aware_delta(
+                cell=data.cell.float(),
+                delta=(a - b),
+                batch=data.batch,
+            )
+        elif self.x_matching == "flow":
+            # Simple Euclidean difference (for flow-based methods)
+            diff = a - b
+        else:
+            raise ValueError("Invalid x_matching routine")
 
-            # Apply adsorbate weighting if tao > 0
-            if tao > 0:
-                # Identify adsorbate atoms (tags == 2)
+        # Apply adsorbate weighting if tao > 0 (needs gradients!)
+        if tao > 0:
+            # Identify adsorbate atoms (tags == 2)
+            with torch.no_grad():
                 ads = (data.tags == 2).float().unsqueeze(1)  # N, 1
-                # Upweight adsorbate atoms by factor tao: mask * (1 + ads * (tao - 1))
-                # e.g., if tao=2, adsorbate atoms weighted 2x more than catalyst
-                ads_mask_factor = mask * (1 + ads * (tao - 1))
-            else:
-                ads_mask_factor = mask
+            # Upweight adsorbate atoms by factor tao: mask * (1 + ads * (tao - 1))
+            # e.g., if tao=2, adsorbate atoms weighted 2x more than catalyst
+            ads_mask_factor = mask * (1 + ads * (tao - 1))
+        else:
+            ads_mask_factor = mask
 
         # Compute mean squared error per atom (averaged over xyz dimensions)
         L_per_atom = (diff ** 2).mean(dim=1, keepdim=True)  # N, 1
