@@ -33,7 +33,7 @@ class XMatching():
         # Force fp32 precision for all operations
         a = a.float()
         b = b.float()
-        tao=tao.float()
+        tao=torch.tensor(tao, device=a.device, dtype=torch.float32)
 
         # Compute mask (no gradient needed for mask creation)
         data = input_data
