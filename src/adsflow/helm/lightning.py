@@ -217,6 +217,7 @@ class LightFlowMatch(LightningModule, XMatching):
         """
         # Initialize energy difference if Fmax exists (for compatibility)
         if hasattr(data, "Fmax"):
+            data.Fmax = torch.ones_like(data.y_relaxed) * 0.03 
             data.dE = torch.zeros_like(data.Fmax)
 
         loss, max_loss, _ = self._transport_loss(data)
@@ -260,7 +261,7 @@ class LightFlowMatch(LightningModule, XMatching):
         # Compute training-style loss for comparison
 
         data.dE = torch.zeros_like(data.y_relaxed)
-        data.Fmax = torch.ones_like(data.y_relaxed) * 0.025
+        data.Fmax = torch.ones_like(data.y_relaxed) * 0.05
         loss, max_loss, max_loss_idx = self._transport_loss(data)
 
         if self.diagnostics:
@@ -297,7 +298,7 @@ class LightFlowMatch(LightningModule, XMatching):
             # Normal test mode: generate structures via ODE integration
             # Define time interval for IVP (Initial Value Problem): t ∈ [0, 1]
             # Use 100 time steps for accurate integration
-            t = torch.linspace(0., 1., 100, device=data.pos.device, dtype=data.pos.dtype)
+            t = torch.linspace(0., 0.90, 100, device=data.pos.device, dtype=data.pos.dtype)
 
             # Generate relaxed structure and compute metrics
             (

@@ -301,12 +301,17 @@ class XMatching():
             if self.x_matching == "endpoint":
                 x1_hat = self(data)
                 _, _, alpha_t_factor = self._interpolant_schedule(
-                    t=t,
+                    t=data.t,
                     schedule_type=self.schedule_type,
                     v=1,
                 )   
-                print(alpha_t_factor.size())
-                u = alpha_t_factor * (x1_hat - xt)
+                delta = pbc_aware_delta(
+                        delta=x1_hat - xt,
+                        cell=data.cell.float(),
+                        batch=data.batch,
+                    )
+                #alpha_t_factor = torch.clamp(alpha_t_factor, 0.005, 1.5)
+                u =  alpha_t_factor * delta
             else: 
                 u = self(data)  # Model predicts velocity field
             return u
