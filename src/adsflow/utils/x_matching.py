@@ -303,7 +303,7 @@ class XMatching():
                 _, _, self.alpha_t_factor = self._interpolant_schedule(
                     t=t,
                     schedule_type=self.schedule_type,
-                    v=self.v,
+                    v=1,
                 )   
                 u = alpha_t_factor * (x1_hat - xt)
             else: 
