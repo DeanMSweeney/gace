@@ -215,7 +215,7 @@ def main(cfg: Config) -> None:
         config_vasp=cfg.config_vasp,  # VASP configuration for relaxation
         threshold=cfg.threshold,  # Force convergence threshold
         x_matching=cfg.x_matching,  # Position matching strategy
-        interpolant_schedule=cfg.interpolant_schedule,  # Interpolant schedule type
+        schedule_type=cfg.interpolant_schedule,  # Interpolant schedule type
         **cfg.optimizer_hparams,  # Optimizer hyperparameters (lr, weight_decay, etc.)
     )
 
