@@ -10,10 +10,11 @@ from adsflow.utils.post_processing import config_DFT, write_strucs
 from adsflow.utils.invariance import pbc_aware_delta, hungarian
 from adsflow.utils.eval_metrics import ADwT
 
-class XMatching(): 
+class XMatching():
     """
-    This Mixin supports image invariant interpolation paths and masked loss for frozen atoms 
+    This Mixin supports image invariant interpolation paths and masked loss for frozen atoms
     """
+
     def criterion(
         self,
         input_data,
@@ -87,11 +88,48 @@ class XMatching():
             max_L_idx = torch.argmax(weighted_L_per_atom)
 
         return L, max_L, max_L_idx
+
+    def _interpolant_schedule(
+        self,
+        t: Tensor,
+        schedule_type: str,
+        v: float = 1,
+    ) -> Tuple[Tensor, Tensor, Tensor]:
+        """
+        Compute interpolation schedule parameters.
+
+        Args:
+            t: Interpolation time tensor
+            interpolant_schedule: "linear" or "cosine" schedule type
+            v: Exponent for cosine schedule (controls interpolation curvature)
+
+        Returns:
+            alpha_t: Interpolation parameter
+            alpha_t_grad: Gradient d(alpha_t)/dt for velocity rescaling
+            alpha_t_factor: Time-dependent factor for loss weighting
+        """
+        if schedule_type == "linear":
+            # Linear interpolation: alpha_t = t
+            alpha_t = t
+            alpha_t_grad = torch.tensor(1.0, device=t.device, dtype=torch.float32)
+            alpha_t_factor = 1 / (1 - t) if self.x_matching == "endpoint" else torch.tensor(1.0, device=t.device, dtype=torch.float32)
+
+        elif schedule_type == "cosine":
+            # Cosine interpolation: slower at start/end, faster in middle
+            # alpha_t = 1 - cos^2(t^v * pi/2)
+            alpha_t = 1 - (torch.cos(t ** v * torch.pi / 2)) ** 2
+            # Compute d(alpha_t)/dt for velocity rescaling
+            alpha_t_grad = torch.pi * v * t ** (v - 1) * torch.cos(t ** v * torch.pi / 2) * torch.sin(t ** v * torch.pi / 2)
+            # Store for time-dependent loss weighting
+            alpha_t_factor = alpha_t_grad / (1 - alpha_t).clamp_min(1e-8) # alpha_t'/ (1-alpha)
+        else:
+            raise ValueError("Invalid interpolant schedule")
+
+        return alpha_t, alpha_t_grad, alpha_t_factor
             
     def path(
         self,
         input_data: Data,
-        interpolant_schedule: str="linear",  # "linear" or "cosine" interpolation
         v: float=1,  # exponent for cosine schedule (controls interpolation curvature)
     ) -> Tuple[Data, Tensor]:
         """
@@ -113,25 +151,14 @@ class XMatching():
 
             # Sample random interpolation time t for each graph in the batch
             t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device, dtype=torch.float32)
-            t = t_per_graph[data.batch] * 0.999 if self.x_matching == "endpoint" else t_per_graph[data.batch]  # Broadcast to atoms, clamp max to 0.999
-
-            # Define interpolation schedule: how to move from t to alpha_t
-            if interpolant_schedule == "linear":
-                # Linear interpolation: alpha_t = t
-                alpha_t = t
-                alpha_t_grad = torch.tensor(1.0, device=t.device, dtype=torch.float32)
-                self.alpha_t_factor = 1 / (1 - t) if self.x_matching == "endpoint" else torch.tensor(1.0, device=t.device, dtype=torch.float32)
-            
-            elif interpolant_schedule == "cosine":
-                # Cosine interpolation: slower at start/end, faster in middle
-                # alpha_t = 1 - cos^2(t^v * pi/2)
-                alpha_t = 1 - (torch.cos(t ** v * torch.pi / 2)) ** 2
-                # Compute d(alpha_t)/dt for velocity rescaling
-                alpha_t_grad = torch.pi * v * t ** (v - 1) * torch.cos(t ** v * torch.pi / 2) * torch.sin(t ** v * torch.pi / 2)
-                # Store for time-dependent loss weighting
-                self.alpha_t_factor = alpha_t_grad / (1 - alpha_t).clamp_min(1e-8) # alpha_t'/ (1-alpha)
-            else:
-                raise ValueError("Invalid interpolant schedule")
+            # Broadcast to atoms, clamp max to 0.999
+            t = t_per_graph[data.batch] * 0.999 if self.x_matching == "endpoint" else t_per_graph[data.batch]
+            # Compute interpolation schedule parameters
+            alpha_t, alpha_t_grad, self.alpha_t_factor = self._interpolant_schedule(
+                t=t,
+                schedule_type=self.schedule_type,
+                v=v,
+            )
 
             if self.variant == "forge":
                     # FORGE variant: generate structures from noise + adsorbate positions
@@ -158,6 +185,7 @@ class XMatching():
                         batch=data.batch,
                     )
 
+                    # Interpolate: xt = x0 + alpha_t * u (position at time t)
                     xt = x0 + alpha_t * u
 
                     # Rescale velocity for cosine schedule (to account for d(alpha_t)/dt)
@@ -165,14 +193,47 @@ class XMatching():
 
                     # Store interpolated data
                     data.pos = xt  # Current position (what model sees as input)
+                    data.pos_init = x0  # Initial position (for reference)
+                    data.t = t  # Interpolation time
+
+
+                    """
+                    Define path for atomic numbers 
+                    """
 
                     # Sample noise for atomic numbers (for conditional generation)
                     z1 = data.atomic_number
                     z1_hot = F.one_hot(z1, num_classes=55)
                     z0 = torch.rand_like(z1_hot, dtype=torch.float32)
 
-                    zt = z0 + alpha_t * (z1 - z0)
+                    u_z = pbc_aware_delta(
+                        delta=z1_hot - z0,
+                        cell=data.cell.float(),
+                        batch=data.batch,
+                    )
 
+                    # Sample random interpolation time t for each graph in the batch
+                    t_z_per_graph = torch.rand(len(data.natoms), 1, device=x1.device, dtype=torch.float32)
+                    # Broadcast to atoms, clamp max to 0.999
+                    t_z = t_z_per_graph[data.batch] * 0.999
+                    # Compute interpolation schedule parameters
+                    alpha_t_z, alpha_t_grad_z, self.alpha_t_z_factor = self._interpolant_schedule(
+                        t=t_z,
+                        schedule_type=self.schedule_type,
+                        v=v,
+                    )
+
+                    zt = z0 + alpha_t_z * (z1 - z0)
+
+                    # Rescale velocity for cosine schedule (to account for d(alpha_t)/dt)
+                    u_z = alpha_t_grad_z * u_z # alpha_t' * (x1 - x0)
+
+                    # Store interpolated data
+                    data.atomic_number = zt  # Current position (what model sees as input)
+                    data.atomic_number_init = z0  # Initial position (for reference)
+                    data.t_z = t_z  # Interpolation time
+
+                    return data, u, u_z
 
             elif self.variant == "refine":
                 # REFINE variant: refine from initial DFT positions to relaxed positions
@@ -200,11 +261,13 @@ class XMatching():
                 data.pos = xt  # Current position (what model sees as input)
                 data.pos_init = x0  # Initial position (for reference)
                 data.t = t  # Interpolation time
+
+                return data, u 
+  
             else:
                 raise ValueError("Invalid model variant")
 
-        return data, u 
-  
+
     def sample(
             self,
             input_data: Data,
@@ -233,15 +296,25 @@ class XMatching():
             Wraps the PyTorch model to match torchdiffeq's expected signature.
             """
             data.pos = xt
-            data.t = t.view(1,1).expand(len(xt), -1)
-            u = self(data)  # Model predicts velocity field
+            data.t = t.view(1,1).expand(len(xt), -1) 
+
+            if self.x_matching == "endpoint":
+                x1_hat = self(data)
+                _, _, self.alpha_t_factor = self._interpolant_schedule(
+                    t=t,
+                    schedule_type=self.schedule_type,
+                    v=self.v,
+                )   
+                u = alpha_t_factor * (x1_hat - xt)
+            else: 
+                u = self(data)  # Model predicts velocity field
             return u
 
         # Integrate ODE from t=0 to t=1 to generate relaxed positions
         xt = odeint(
             func=dx_dt,
             y0=input_data.pos,  # Start from initial positions
-            t=t,  # Integration time points
+            t=t * 0.999,  # Integration time points
             rtol=self.rtol,  # Relative tolerance
             atol=self.atol,  # Absolute tolerance
             method=self.ode_method,  # ODE solver method (e.g., 'dopri5', 'euler')
