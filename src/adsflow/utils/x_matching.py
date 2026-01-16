@@ -300,7 +300,7 @@ class XMatching():
 
             if self.x_matching == "endpoint":
                 x1_hat = self(data)
-                _, _, self.alpha_t_factor = self._interpolant_schedule(
+                _, _, alpha_t_factor = self._interpolant_schedule(
                     t=t,
                     schedule_type=self.schedule_type,
                     v=1,
