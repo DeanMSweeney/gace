@@ -258,10 +258,10 @@ class LightFlowMatch(LightningModule, XMatching):
             loss: Test loss for this batch
         """
         # Compute training-style loss for comparison
-        loss, max_loss, max_loss_idx = self._transport_loss(data)
 
         data.dE = torch.zeros_like(data.y_relaxed)
-        data.Fmax = torch.ones_like(data.y_relaxed) * 0.02
+        data.Fmax = torch.ones_like(data.y_relaxed) * 0.025
+        loss, max_loss, max_loss_idx = self._transport_loss(data)
 
         if self.diagnostics:
             # Diagnostic mode: detailed loss analysis for problematic samples
