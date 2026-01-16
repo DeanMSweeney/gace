@@ -305,6 +305,7 @@ class XMatching():
                     schedule_type=self.schedule_type,
                     v=1,
                 )   
+                print(alpha_t_factor.size())
                 u = alpha_t_factor * (x1_hat - xt)
             else: 
                 u = self(data)  # Model predicts velocity field
