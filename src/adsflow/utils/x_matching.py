@@ -74,7 +74,7 @@ class XMatching():
 
         # Apply time-dependent weighting for cosine interpolation schedules
         # (helps stabilize training by reweighting loss based on interpolation time)
-        time_factor = torch.clamp(self.alpha_t_factor, 0.005, 1.5) if self.interpolant_schedule == "cosine" \
+        time_factor = torch.clamp(self.alpha_t_factor, 0.005, 1.5) if self.schedule_type== "cosine" \
              else self.alpha_t_factor
 
         # Apply all weighting factors: frozen atom mask, adsorbate weight, time weight
@@ -100,7 +100,7 @@ class XMatching():
 
         Args:
             t: Interpolation time tensor
-            interpolant_schedule: "linear" or "cosine" schedule type
+            schedule_type: "linear" or "cosine" schedule type
             v: Exponent for cosine schedule (controls interpolation curvature)
 
         Returns:
