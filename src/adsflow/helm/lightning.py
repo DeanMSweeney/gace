@@ -73,7 +73,7 @@ class LightFlowMatch(LightningModule, XMatching):
             config_vasp: bool=False,
             threshold: float=0.20,
             x_matching: Literal["flow", "endpoint"]="flow",
-            interpolant_schedule: Literal["linear", "cosine"]="linear",
+            schedule_type: Literal["linear", "cosine"]="linear",
             **kwargs,
         ):
 
@@ -102,7 +102,7 @@ class LightFlowMatch(LightningModule, XMatching):
 
         # Flow matching configuration
         self.x_matching = x_matching  # "flow" or "endpoint"
-        self.interpolant_schedule = interpolant_schedule  # "linear" or "cosine"
+        self.schedule_type = schedule_type  # "linear" or "cosine"
 
         # =============================================================================
         # Diagnostic mode: detailed loss analysis for model development
@@ -143,7 +143,7 @@ class LightFlowMatch(LightningModule, XMatching):
         """
         # Generate interpolated training data at random time t
         # data.pos = x(t), u = target velocity dx/dt
-        data, u = self.path(input_data=input_data, interpolant_schedule=self.interpolant_schedule)
+        data, u = self.path(input_data=input_data) 
 
         # Model predicts velocity field (or positions if endpoint matching)
         f = self(data)
