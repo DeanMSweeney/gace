@@ -260,8 +260,8 @@ class LightFlowMatch(LightningModule, XMatching):
         """
         # Compute training-style loss for comparison
 
-        #data.dE = torch.zeros_like(data.y_relaxed)
-        #data.Fmax = torch.ones_like(data.y_relaxed) * 0.05
+        data.dE = torch.zeros_like(data.y_relaxed)
+        data.Fmax = torch.ones_like(data.y_relaxed) * 0.02
         loss, max_loss, max_loss_idx = self._transport_loss(data)
 
         if self.diagnostics:
@@ -298,7 +298,8 @@ class LightFlowMatch(LightningModule, XMatching):
             # Normal test mode: generate structures via ODE integration
             # Define time interval for IVP (Initial Value Problem): t ∈ [0, 1]
             # Use 100 time steps for accurate integration
-            t = torch.linspace(0., 0.90, 100, device=data.pos.device, dtype=data.pos.dtype)
+            t = torch.linspace(0., 1, 2, device=data.pos.device, dtype=data.pos.dtype)
+            print(t)
 
             # Generate relaxed structure and compute metrics
             (

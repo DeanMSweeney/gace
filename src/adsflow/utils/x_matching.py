@@ -320,7 +320,7 @@ class XMatching():
         xt = odeint(
             func=dx_dt,
             y0=input_data.pos,  # Start from initial positions
-            t=t * 0.999,  # Integration time points
+            t=t * 0.999 if self.x_matching == "endpoint" else t,  # Integration time points
             rtol=self.rtol,  # Relative tolerance
             atol=self.atol,  # Absolute tolerance
             method=self.ode_method,  # ODE solver method (e.g., 'dopri5', 'euler')
