@@ -61,7 +61,7 @@ class LightFlowMatch(LightningModule, XMatching):
     def __init__(
             self,
             model,
-            variant: str="refine",
+            variant: str="relax",
             mode: str="debug",
             rtol: float = 1e-7,
             atol: float = 1e-9,
