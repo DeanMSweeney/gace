@@ -172,6 +172,7 @@ class EquiformerV2_Flow(BaseModel):
         time_n_emb_freqs: int=16,
         energy_n_emb_freqs: int=16,
         force_n_emb_freqs: int=16,
+        energy_force_conditioning: bool=False,
         
     ):
         super().__init__()
@@ -234,6 +235,7 @@ class EquiformerV2_Flow(BaseModel):
         
         self.regress_forces=True
         self.direct_forces=True
+        self.energy_force_conditioning = energy_force_conditioning
 
         # Precompute the frequency as multipliers as a buffer, register time_freq as an attribute
         self.register_buffer(
@@ -260,7 +262,6 @@ class EquiformerV2_Flow(BaseModel):
         
         # Initialize time embedding 
         self.time_emb = nn.Linear(2 * time_n_emb_freqs, self.sphere_channels)
-        self.energy_force_conditioning = False
         if self.energy_force_conditioning: 
             self.energy_emb = nn.Linear(2 * energy_n_emb_freqs, self.sphere_channels)
             self.force_emb = nn.Linear(2 * force_n_emb_freqs, self.sphere_channels)
