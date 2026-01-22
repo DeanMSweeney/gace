@@ -83,10 +83,10 @@ def pbc_aware_delta(
 
     if norm:
         # Return L1 norm (mean absolute value across xyz)
-        return u_min.abs().mean(dim=1, keepdim=True)  # (N, 1)
+        return u_mic.abs().mean(dim=1, keepdim=True)  # (N, 1)
     else:
         # Return full minimum image vector
-        return u_min
+        return u_mic
 
 def hungarian(
     set0: Tensor,

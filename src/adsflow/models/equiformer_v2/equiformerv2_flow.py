@@ -260,7 +260,7 @@ class EquiformerV2_Flow(BaseModel):
         
         # Initialize time embedding 
         self.time_emb = nn.Linear(2 * time_n_emb_freqs, self.sphere_channels)
-        self.energy_force_conditioning = True
+        self.energy_force_conditioning = False
         if self.energy_force_conditioning: 
             self.energy_emb = nn.Linear(2 * energy_n_emb_freqs, self.sphere_channels)
             self.force_emb = nn.Linear(2 * force_n_emb_freqs, self.sphere_channels)
