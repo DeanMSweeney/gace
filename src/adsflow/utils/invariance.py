@@ -74,37 +74,12 @@ def pbc_aware_delta(
 
     # Find nearest lattice translation (integer cell translations)
     n0 = torch.round(u_f)
-
-    if naive:
-        # Fast method: just round to nearest integer
-        # This gives the approximate minimum image
-        u_f_min = u_f - n0
-    else:
-        # Exact method: search 27 neighboring cells (3^3 combinations)
-        # This guarantees finding the true minimum distance
-
-        # Compute metric tensor G = A @ A^T (encodes cell geometry)
-        G = A @ A.transpose(1,2)  # (N, 3, 3)
-
-        # Generate all 27 neighboring cell offsets: {-1, 0, 1}^3
-        D = torch.tensor(list(itertools.product([-1, 0, 1], repeat=3)), dtype=torch.int, device=n0.device)  # (27, 3)
-
-        # Test all 27 neighboring cells
-        n = n0.unsqueeze(1) + D.unsqueeze(0)  # (N, 1, 3) + (1, 27, 3) = (N, 27, 3)
-
-        # Compute fractional displacement for each candidate
-        U_f_n = u_f.unsqueeze(1) - n  # (N, 1, 3) - (N, 27, 3) = (N, 27, 3)
-
-        # Compute squared distance in real space: |u|^2 = u_f^T @ G @ u_f
-        W = U_f_n @ G  # (N, 27, 3)
-        u_f2 = (W * U_f_n).sum(dim=-1)  # (N, 27) - squared distances
-
-        # Select minimum distance candidate
-        k_min = u_f2.argmin(dim=1)  # (N,)
-        u_f_min = U_f_n[torch.arange(delta.size(0)), k_min]  # (N, 3)
+    # Fast method: just round to nearest integer
+    # This gives the approximate minimum image
+    u_f_mic = u_f - n0 
 
     # Convert back to Cartesian coordinates: u_min = A @ u_f_min
-    u_min = torch.bmm(u_f_min.unsqueeze(1), A).squeeze(1)  # (N, 3)
+    u_mic = torch.bmm(u_f_mic.unsqueeze(1), A).squeeze(1)  # (N, 3)
 
     if norm:
         # Return L1 norm (mean absolute value across xyz)
@@ -114,10 +89,10 @@ def pbc_aware_delta(
         return u_min
 
 def hungarian(
-    s0: Tensor,
-    s1: Tensor,
-    cell: Tensor,
-    batch: Tensor,
+    set0: Tensor,
+    set1: Tensor,
+    batch: Optional[Tensor]=None,
+    cell: Optional[Tensor]=None,
 ) -> Tensor:
     """
     Find optimal atom permutation between two structures using Hungarian algorithm.
@@ -153,30 +128,31 @@ def hungarian(
         Typically called per atom type (e.g., separately for C, O, H atoms).
     """
 
+    N = set0.size(0)
+
     # Compute pairwise cost matrix: C[i,j] = distance from s0[i] to s1[j]
-    # Using minimum image convention for periodic boundaries
-    
-    C = s1.unsqueeze(0) - s0.unsqueeze(1)  # (N, N, 3) - all pairwise displacements
+    C = set1.unsqueeze(0) - set0.unsqueeze(1)  # (N, N, 3)
+
+    # Expand batch indices for all N*N pairwise distances
+    # Each row i uses cell from batch[i]
+    batch_expanded = batch.unsqueeze(1).expand(-1, N).reshape(-1)  # (N*N,)
 
     # Apply PBC to get minimum image distances
-    C = pbc_aware_delta(
-        cell=cell,
-        delta=C.reshape(-1, 3),  # Flatten to (N*N, 3) for vectorized computation
-        batch=batch,
-    ).reshape(s1.size(0), s1.size(0), 3)  # Reshape back to (N, N, 3)
+    if cell: 
+        C = pbc_aware_delta(
+            delta=C.reshape(-1, 3),  # (N*N, 3)
+            cell=cell,
+            batch=batch_expanded,
+        ).reshape(N, N, 3) # (N, N, 3)
 
     # Compute L2 distance matrix (cost matrix for Hungarian algorithm)
     C_l2 = torch.linalg.norm(C, dim=-1)  # (N, N)
 
     # Solve linear assignment problem using Hungarian algorithm
-    # Returns row and column indices of optimal assignment
-    # row_ind[i] matches to col_ind[i], where col_ind gives permutation of s0
     _, col_ind = assignment_to_indices(cost=C_l2)
 
-    # Apply optimal permutation to s0
-    s0_aligned = s0[col_ind]  # (N, 3) - reordered to match s1
-    
-    s0_aligned = 1 
+    # Apply optimal permutation to t0
+    set0_aligned = set0[col_ind]
 
-    return s0_aligned
+    return set0_aligned
    

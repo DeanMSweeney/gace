@@ -93,7 +93,8 @@ class XMatching():
         self,
         t: Tensor,
         schedule_type: str,
-        v: float = 1,
+        v_x: float = 1,
+        v_z: float = 1,
     ) -> Tuple[Tensor, Tensor, Tensor]:
         """
         Compute interpolation schedule parameters.
@@ -131,6 +132,7 @@ class XMatching():
         self,
         input_data: Data,
         v: float=1,  # exponent for cosine schedule (controls interpolation curvature)
+        initial_dist: str="noisy, fixed",
     ) -> Tuple[Data, Tensor]:
         """
         Generate interpolated training data along a path from initial to relaxed positions.
@@ -149,6 +151,35 @@ class XMatching():
             # x1 = final relaxed positions (target)
             x1 = data.pos_relaxed.float()
 
+             # REFINE variant: refine from initial DFT positions to relaxed positions
+            if initial_dist == "fixed":
+                x0 = data.pos.float() # Initial (unrelaxed) positions
+                u = data.velocity.float() # x1 - x0 
+
+            elif initial_dist == "noisy":
+                adsorbate = (data.tags == 2)
+                catalyst = (data.tags != 2)
+
+                # x0 = initial positions (noise for catalyst, actual for adsorbate)
+                x0 = torch.randn_like(x1, dtype=torch.float32)
+                x0[adsorbate] = data.pos[adsorbate].float() # Use actual adsorbate positions
+
+                # Use Hungarian algorithm to optimally align catalyst atoms
+                # (finds permutation that minimizes distance to target)
+                x0[catalyst] = hungarian(
+                    set0=x0[catalyst],
+                    set1=x1[catalyst],
+                    cell=data.cell.float(),
+                    batch=data.batch,
+                )
+
+                delta_xyz = x1 - x0
+                u = pbc_aware_delta(
+                    delta=delta_xyz,
+                    cell=data.cell.float(),
+                    batch=data.batch,
+                )
+
             # Sample random interpolation time t for each graph in the batch
             t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device, dtype=torch.float32)
             # Broadcast to atoms, clamp max to 0.999
@@ -157,111 +188,67 @@ class XMatching():
             alpha_t, alpha_t_grad, self.alpha_t_factor = self._interpolant_schedule(
                 t=t,
                 schedule_type=self.schedule_type,
-                v=v,
+                v=v_x,
             )
 
+            # Interpolate: xt = x0 + alpha_t * u (position at time t)
+            xt = x0 + alpha_t * u
+
+            # Rescale velocity for cosine schedule (to account for d(alpha_t)/dt)
+            u = alpha_t_grad * u # alpha_t' * (x1 - x0)
+
+            # Store interpolated data
+            data.pos = xt  # Current position (what model sees as input)
+            data.pos_init = x0  # Initial position (for reference)
+            data.t = t  # Interpolation time
+
+
             if self.variant == "forge":
-                    # FORGE variant: generate structures from noise + adsorbate positions
-                    # Partition atoms into adsorbate (tags==2) and catalyst (tags!=2)
-                    adsorbate = (data.tags == 2)
-                    catalyst = (data.tags != 2)
+                # Sample  atomic numbers (for conditional generation)
+                z1 = data.atomic_number # N 
 
-                    # x0 = initial positions (noise for catalyst, actual for adsorbate)
-                    x0 = torch.randn_like(x1, dtype=torch.float32)
-                    x0[adsorbate] = data.pos[adsorbate].float()  # Use actual adsorbate positions
+                z1_hot = F.one_hot(z1, num_classes=55) # N , 55
+                
+                # Sample noise by defining initial one-hot-encoded vectors 
+                z0_hot = torch.zeros_like(z1_hot, dtype=torch.float32) # N , 55
+                z0_row_idx = torch.arange(z0_hot.size(0), device=x1.device)
+                z0_rand_int = torch.randint(low=0, high=55, size=(z0_hot.size(0),), device=x1.device) # N
+                z0_hot[z0_row_idx, z0_rand_int] = 1 # randomly replace one element in each row with 1 
+                z0_hot[adsorbate] = z1_hot[adsorbate] # reassign adsorabte atom types to match target
 
-                    # Use Hungarian algorithm to optimally align catalyst atoms
-                    # (finds permutation that minimizes distance to target)
-                    x0[catalyst] = hungarian(
-                        s0=x0[catalyst],
-                        s1=x1[catalyst],
-                        cell=data.cell.float(),
-                        batch=data.batch,
-                    )
+                z0_hot[catalyst] = hungarian(
+                    set0=z0_hot[catalyst],
+                    set1=z1_hot[catalyst],
+                    batch=data.batch,
+                )
 
-                    u = pbc_aware_delta(
-                        delta=x1 - x0,
-                        cell=data.cell.float(),
-                        batch=data.batch,
-                    )
+                # compute velocity field for atomic numbers 
+                u_z = z1_hot - z0_hot
 
-                    # Interpolate: xt = x0 + alpha_t * u (position at time t)
-                    xt = x0 + alpha_t * u
+                # Sample random interpolation time t for each graph in the batch
+                t_z_per_graph = torch.rand(len(data.natoms), 1, device=x1.device, dtype=torch.float32)
+                # Broadcast to atoms, clamp max to 0.999
+                t_z = t_z_per_graph[data.batch] * 0.999 if self.x_matching == "endpoint" else t_z_per_graph[data.batch]
+                # Compute interpolation schedule parameters
+                alpha_t_z, alpha_t_grad_z, self.alpha_t_z_factor = self._interpolant_schedule(
+                    t=t_z,
+                    schedule_type=self.schedule_type,
+                    v=v_z,
+                )
 
-                    # Rescale velocity for cosine schedule (to account for d(alpha_t)/dt)
-                    u = alpha_t_grad * u # alpha_t' * (x1 - x0)
-
-                    # Store interpolated data
-                    data.pos = xt  # Current position (what model sees as input)
-                    data.pos_init = x0  # Initial position (for reference)
-                    data.t = t  # Interpolation time
-
-
-                    """
-                    Define path for atomic numbers 
-                    """
-
-                    # Sample noise for atomic numbers (for conditional generation)
-                    z1 = data.atomic_number
-                    z1_hot = F.one_hot(z1, num_classes=55)
-                    z0 = torch.rand_like(z1_hot, dtype=torch.float32)
-
-                    u_z = pbc_aware_delta(
-                        delta=z1_hot - z0,
-                        cell=data.cell.float(),
-                        batch=data.batch,
-                    )
-
-                    # Sample random interpolation time t for each graph in the batch
-                    t_z_per_graph = torch.rand(len(data.natoms), 1, device=x1.device, dtype=torch.float32)
-                    # Broadcast to atoms, clamp max to 0.999
-                    t_z = t_z_per_graph[data.batch] * 0.999
-                    # Compute interpolation schedule parameters
-                    alpha_t_z, alpha_t_grad_z, self.alpha_t_z_factor = self._interpolant_schedule(
-                        t=t_z,
-                        schedule_type=self.schedule_type,
-                        v=v,
-                    )
-
-                    zt = z0 + alpha_t_z * (z1 - z0)
-
-                    # Rescale velocity for cosine schedule (to account for d(alpha_t)/dt)
-                    u_z = alpha_t_grad_z * u_z # alpha_t' * (x1 - x0)
-
-                    # Store interpolated data
-                    data.atomic_number = zt  # Current position (what model sees as input)
-                    data.atomic_number_init = z0  # Initial position (for reference)
-                    data.t_z = t_z  # Interpolation time
-
-                    return data, u, u_z
-
-            elif self.variant == "refine":
-                # REFINE variant: refine from initial DFT positions to relaxed positions
-                x0 = data.pos.float()  # Initial (unrelaxed) positions
-
-                if hasattr(data, "velocity"):
-                    # Use precomputed velocity if available (e.g., from optimal transport)
-                    u = data.velocity.float()
-                else:
-                    # Compute PBC-aware velocity: u = x1 - x0 (with periodic boundaries)
-                    delta_xyz = x1 - x0
-                    u = pbc_aware_delta(
-                        delta=delta_xyz,
-                        cell=data.cell.float(),
-                        batch=data.batch,
-                    )
-
-                # Interpolate: xt = x0 + alpha_t * u (position at time t)
-                xt = x0 + alpha_t * u
+                zt_hot = z0_hot + alpha_t_z * (z1_hot - z0_hot)
 
                 # Rescale velocity for cosine schedule (to account for d(alpha_t)/dt)
-                u = alpha_t_grad * u # alpha_t' * (x1 - x0)
+                u_z = alpha_t_grad_z * u_z # alpha_t' * (x1 - x0)
 
                 # Store interpolated data
-                data.pos = xt  # Current position (what model sees as input)
-                data.pos_init = x0  # Initial position (for reference)
-                data.t = t  # Interpolation time
+                data.atomic_number = zt_hot  # Current position (what model sees as input)
+                data.atomic_number_init = z0_hot  # Initial position (for reference)
+                data.t_z = t_z  # Interpolation time
 
+                return data, u, u_z
+
+            elif self.variant == "relax":
                 return data, u 
   
             else:
