@@ -99,7 +99,6 @@ def config_DFT(
             # Submit the .sh file in each directory
             os.chdir(sim_path)
             subprocess.run(["potcar.sh"])
-            #subprocess.run(["sbatch", "VASP.sh"])
             os.chdir(original_dir)
             
         # Move and rename files to their respective directories
@@ -117,6 +116,15 @@ def config_DFT(
     finally:
         # Always return to the original directory
         os.chdir(original_dir)
+
+def config_MLFF(
+    data: Data,
+    gen_POS: str,
+    in_POS: Optional[str]=None, 
+    rlxd_POS: Optional[str]=None,
+):
+    pass 
+
 
 
 DS0 = []

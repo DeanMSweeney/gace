@@ -352,38 +352,43 @@ class XMatching():
 
         # Compute evaluation metrics if ground truth relaxed positions available
         if hasattr(data, "pos_relaxed"):
-
-            # Prepare data for metric computation
-            mask = (1 - data.fixed).bool()  # Mask for free (non-frozen) atoms
-            cell = data.cell
-            batch = data.batch
-            pos_init = data.pos
-            pos_predicted = data.pos_generated
-            pos_target = data.pos_relaxed
-
             # Compute metrics for generated structure:
             # - MAE: Mean Absolute Error
             # - DwT: Distance within Threshold (% atoms within threshold)
             # - ADwT: Adsorbate Distance within Threshold
-            generated_mae, generated_dwt, generated_adwt = ADwT(
-               pos_predicted=pos_predicted,
-               pos_target=pos_target,
-               threshold=threshold,
-               fixed_atoms_mask=mask,
-               cell=cell,
-               batch=batch,
-           )
+            (
+                generated_mae, 
+                generated_dwt, 
+                generated_adwt, 
+                generated_ads_mae, 
+                generated_ads_dwt, 
+                generated_ads_adwt
+            ) = ADwT(data=data, pos_predicted=data.pos_generated, threshold=threshold)
+            (
+                initial_mae,
+                initial_dwt, 
+                initial_adwt, 
+                initial_ads_mae, 
+                initial_ads_dwt, 
+                initial_ads_adwt
+            ) = ADwT(data=data, pos_predicted=data.pos, threshold=threshold)
 
-            # Compute baseline metrics for initial structure (before refinement)
-            initial_mae, initial_dwt, initial_adwt = ADwT(
-               pos_predicted=pos_init,
-               pos_target=pos_target,
-               threshold=threshold,
-               fixed_atoms_mask=mask,
-               cell=cell,
-               batch=batch,
-           )
-            return data, generated_mae, generated_dwt, generated_adwt, initial_mae, initial_dwt, initial_adwt
+            eval_metrics = (
+                generated_mae, 
+                generated_dwt, 
+                generated_adwt, 
+                generated_ads_mae, 
+                generated_ads_dwt, 
+                generated_ads_adwt, 
+                initial_mae, 
+                initial_dwt, 
+                initial_adwt, 
+                initial_ads_mae, 
+                initial_ads_dwt, 
+                initial_ads_adwt
+            )
+
+            return data, *eval_metrics
         else:
             return data
   
