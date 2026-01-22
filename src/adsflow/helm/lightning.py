@@ -110,6 +110,11 @@ class LightFlowMatch(LightningModule, XMatching):
         self.diagnostics = False
         self.bad_iter, self.good_ter, self.iter = 0, 0, 0
        # ==============================================================================
+
+       # ==================== Test metrics ====================
+        self.test_metrics = True
+       # =====================================================
+  
        
     def forward(self, data):
         """
@@ -147,8 +152,7 @@ class LightFlowMatch(LightningModule, XMatching):
 
         # Model predicts velocity field (or positions if endpoint matching)
         f = self(data)
-
-        if self.variant == "refine":
+        if self.variant == "relax":
             # Compute loss between predicted and target
             # For flow matching: loss = |f - u|^2 (velocity matching)
             # For endpoint matching: loss = |f - x1|^2 (position matching)
@@ -264,6 +268,15 @@ class LightFlowMatch(LightningModule, XMatching):
         data.Fmax = torch.ones_like(data.y_relaxed) * 0.02
         loss, max_loss, max_loss_idx = self._transport_loss(data)
 
+        # compute test test metrics 
+        if self.test_metrics and not hasattr(self, "generated_mae_list"):
+            self.generated_mae_list = []
+            self.generated_dwt_list = []
+            self.generated_adwt_list = []
+            self.initial_mae_list = []
+            self.initial_dwt_list = []
+            self.initial_adwt_list = []
+  
         if self.diagnostics:
             # Diagnostic mode: detailed loss analysis for problematic samples
             if loss > 0.001:
@@ -298,8 +311,7 @@ class LightFlowMatch(LightningModule, XMatching):
             # Normal test mode: generate structures via ODE integration
             # Define time interval for IVP (Initial Value Problem): t ∈ [0, 1]
             # Use 100 time steps for accurate integration
-            t = torch.linspace(0., 1, 2, device=data.pos.device, dtype=data.pos.dtype)
-            print(t)
+            t = torch.linspace(0., 1, 100, device=data.pos.device, dtype=data.pos.dtype)
 
             # Generate relaxed structure and compute metrics
             (
@@ -312,9 +324,18 @@ class LightFlowMatch(LightningModule, XMatching):
                 initial_adwt,       # ADwT for initial structure
             ) = self.sample(input_data=data, t=t, threshold=self.threshold)
 
+            if self.test_metrics and hasattr(self, "generated_mae_list"):
+                self.generated_mae_list.append(generated_mae)
+                self.generated_dwt_list.append(generated_dwt)
+                self.generated_adwt_list.append(generated_adwt)
+                self.initial_mae_list.append(initial_mae)
+                self.initial_dwt_list.append(initial_dwt)
+                self.initial_adwt_list.append(initial_adwt)
+
         # ==================== Log Test Metrics ====================
 
         # Loss metrics (training-style loss for comparison)
+        
         self.log(
             "test/loss",
             loss,
@@ -421,6 +442,40 @@ class LightFlowMatch(LightningModule, XMatching):
             np.save("distance-max",              unwrap(DS5))   # maximum distance error
             np.save("distance-max_loss",         unwrap(DS6))   # maximum loss value
             np.save("avg_distance",              unwrap(DS7))   # average distance error
+
+        if self.test_metrics: 
+            # Create output directory if it doesn't exist
+            output_dir = './test_metrics'
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # Convert lists to numpy arrays and save
+            np.save(
+                os.path.join(output_dir, 'generated_mae.npy'),
+                np.array(self.generated_mae_list)
+            )
+            np.save(
+                os.path.join(output_dir, 'generated_dwt.npy'),
+                np.array(self.generated_dwt_list)
+            )
+            np.save(
+                os.path.join(output_dir, 'generated_adwt.npy'),
+                np.array(self.generated_adwt_list)
+            )
+            np.save(
+                os.path.join(output_dir, 'initial_mae.npy'),
+                np.array(self.initial_mae_list)
+            )
+            np.save(
+                os.path.join(output_dir, 'initial_dwt.npy'),
+                np.array(self.initial_dwt_list)
+            )
+            np.save(
+                os.path.join(output_dir, 'initial_adwt.npy'),
+                np.array(self.initial_adwt_list)
+            )
+            
+            print(f"Saved metrics to {output_dir}")
+            print(f"Total samples: {len(self.generated_mae_list)}")
 
 
     # ==================== Optimizer Configuration ====================

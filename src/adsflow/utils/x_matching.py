@@ -131,8 +131,9 @@ class XMatching():
     def path(
         self,
         input_data: Data,
-        v: float=1,  # exponent for cosine schedule (controls interpolation curvature)
-        initial_dist: str="noisy, fixed",
+        v_x: float=1,  # exponent for cosine schedule (controls interpolation curvature)
+        v_z: float=1,  # exponent for cosine schedule (controls interpolation curvature)
+        initial_dist: Literal["noisy", "fixed"] = "fixed",
     ) -> Tuple[Data, Tensor]:
         """
         Generate interpolated training data along a path from initial to relaxed positions.
@@ -154,7 +155,15 @@ class XMatching():
              # REFINE variant: refine from initial DFT positions to relaxed positions
             if initial_dist == "fixed":
                 x0 = data.pos.float() # Initial (unrelaxed) positions
-                u = data.velocity.float() # x1 - x0 
+
+                if hasattr(data, "velocity"):
+                    u = data.velocity.float() # x1 - x0 
+                else:
+                    u = pbc_aware_delta(
+                        delta=x1 - x0,
+                        cell=data.cell.float(),
+                        batch=data.batch,
+                    )
 
             elif initial_dist == "noisy":
                 adsorbate = (data.tags == 2)
@@ -188,7 +197,7 @@ class XMatching():
             alpha_t, alpha_t_grad, self.alpha_t_factor = self._interpolant_schedule(
                 t=t,
                 schedule_type=self.schedule_type,
-                v=v_x,
+                v_x=v_x,
             )
 
             # Interpolate: xt = x0 + alpha_t * u (position at time t)
