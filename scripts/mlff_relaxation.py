@@ -226,7 +226,7 @@ def main():
     # Load dataset
     print(f"Loading dataset from {args.data_path}")
     dataset = LazyLmdbDataset({"src": args.data_path})
-
+    dataset = Subset(dataset, indices=range(1000))
     num_samples = len(dataset)
     print(f"Processing {num_samples} structures")
 

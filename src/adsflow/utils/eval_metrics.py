@@ -39,7 +39,6 @@ def ADwT(
     # assign properties 
     batch = data.batch
     cell = data.cell
-    pos_predicted = data.pos_generated
     pos_target = data.pos_relaxed
     free_atoms = (1 - data.fixed).bool()  # Mask for free (non-frozen) atoms
     adsorbate_mask = (data.tags == 2)
