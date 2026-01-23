@@ -169,7 +169,7 @@ def main():
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="./mlff_relaxed",
+        default="./mlff_val_data",
         help="Directory to save relaxed structures",
     )
     parser.add_argument(
