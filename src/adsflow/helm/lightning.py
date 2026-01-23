@@ -304,7 +304,7 @@ class LightFlowMatch(LightningModule, XMatching):
             # Generate relaxed structure and compute metrics
             opt_graph, eval_metrics = self.sample(input_data=data, t=t, threshold=self.threshold)
 
-            if self.test_metrics and hasattr(self, "eval_metrics_lists"):
+            if hasattr(self, "eval_metrics_lists"):
                 for name, value in eval_metrics.items():
                     self.eval_metrics_lists[name].append(value)
 
