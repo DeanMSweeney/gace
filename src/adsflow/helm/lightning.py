@@ -379,7 +379,7 @@ class LightFlowMatch(LightningModule, XMatching):
             np.save("distance-max_loss",         unwrap(DS6))   # maximum loss value
             np.save("avg_distance",              unwrap(DS7))   # average distance error
 
-        if self.test_metrics and hasattr(self, "eval_metrics_lists"):
+        if hasattr(self, "eval_metrics_lists"):
             output_dir = './test_metrics'
             os.makedirs(output_dir, exist_ok=True)
 
