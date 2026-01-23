@@ -246,6 +246,7 @@ def main():
         model_name=args.checkpoint,
         local_cache="./ocp_checkpoints",
         cpu=(args.device == "cpu"),
+        seed=42,
     )
 
     # Storage for metrics as lists
