@@ -110,11 +110,6 @@ class LightFlowMatch(LightningModule, XMatching):
         self.diagnostics = False
         self.bad_iter, self.good_ter, self.iter = 0, 0, 0
        # ==============================================================================
-
-       # ==================== Test metrics ====================
-        self.test_metrics = True
-       # =====================================================
-  
        
     def forward(self, data):
         """
@@ -268,20 +263,16 @@ class LightFlowMatch(LightningModule, XMatching):
         data.Fmax = torch.ones_like(data.y_relaxed) * 0.02
         loss, max_loss, max_loss_idx = self._transport_loss(data)
 
-        # compute test test metrics 
-        if self.test_metrics and not hasattr(self, "generated_mae_list"):
-            self.generated_mae_list = []
-            self.generated_dwt_list = []
-            self.generated_adwt_list = []
-            self.generated_ads_mae_list = []
-            self.generated_ads_dwt_list = []
-            self.generated_ads_adwt_list = []
-            self.initial_mae_list = []
-            self.initial_dwt_list = []
-            self.initial_adwt_list = []
-            self.initial_ads_mae_list = []
-            self.initial_ads_dwt_list = []
-            self.initial_ads_adwt_list = []
+        # compute test metrics
+        if not hasattr(self, "eval_metrics_lists"):
+            self.eval_metrics_lists = {
+                name: [] for name in [
+                    "generated_mae", "generated_dwt", "generated_adwt",
+                    "generated_ads_mae", "generated_ads_dwt", "generated_ads_adwt",
+                    "initial_mae", "initial_dwt", "initial_adwt",
+                    "initial_ads_mae", "initial_ads_dwt", "initial_ads_adwt",
+                ]
+            }
   
         if self.diagnostics:
             # Diagnostic mode: detailed loss analysis for problematic samples
@@ -303,53 +294,19 @@ class LightFlowMatch(LightningModule, XMatching):
                     bad_iter=self.bad_iter,
                 )
             # Skip ODE integration in diagnostics mode
-            (
-                opt_graph,
-                generated_mae,
-                generated_dwt,
-                generated_adwt,
-                initial_mae,
-                initial_dwt,
-                initial_adwt,
-            ) = 0, 0, 0, 0, 0, 0, 0
+            eval_metrics = {name: 0 for name in self.eval_metrics_lists.keys()} if hasattr(self, "eval_metrics_lists") else {}
 
         else:
             # Normal test mode: generate structures via ODE integration
             # Define time interval for IVP (Initial Value Problem): t ∈ [0, 1]
-            # Use 100 time steps for accurate integration
             t = torch.linspace(0., 1, 2, device=data.pos.device, dtype=data.pos.dtype)
 
             # Generate relaxed structure and compute metrics
-            (
-                opt_graph,          # Optimized structure data
-                generated_mae,      # Mean Absolute Error (generated)
-                generated_dwt,      # Distance within Threshold (generated)
-                generated_adwt,     # Adsorbate Distance within Threshold (generated)
-                generated_ads_mae, 
-                generated_ads_dwt, 
-                generated_ads_adwt,
-                initial_mae,        # MAE for initial structure (baseline)
-                initial_dwt,        # DwT for initial structure
-                initial_adwt,       # ADwT for initial structure
-                initial_ads_mae, 
-                initial_ads_dwt, 
-                initial_ads_adwt,
+            opt_graph, eval_metrics = self.sample(input_data=data, t=t, threshold=self.threshold)
 
-            ) = self.sample(input_data=data, t=t, threshold=self.threshold)
-
-            if self.test_metrics and hasattr(self, "generated_mae_list"):
-                self.generated_mae_list.append(generated_mae)
-                self.generated_dwt_list.append(generated_dwt)
-                self.generated_adwt_list.append(generated_adwt)
-                self.generated_ads_mae_list.append(generated_ads_mae)
-                self.generated_ads_dwt_list.append(generated_ads_dwt)
-                self.generated_ads_adwt_list.append(generated_ads_adwt)
-                self.initial_mae_list.append(initial_mae)
-                self.initial_dwt_list.append(initial_dwt)
-                self.initial_adwt_list.append(initial_adwt)
-                self.initial_ads_mae_list.append(initial_ads_mae)
-                self.initial_ads_dwt_list.append(initial_ads_dwt)
-                self.initial_ads_adwt_list.append(initial_ads_adwt)
+            if self.test_metrics and hasattr(self, "eval_metrics_lists"):
+                for name, value in eval_metrics.items():
+                    self.eval_metrics_lists[name].append(value)
 
         # ==================== Log Test Metrics ====================
 
@@ -371,104 +328,16 @@ class LightFlowMatch(LightningModule, XMatching):
             sync_dist=True,
         )
 
-        # Structural metrics: Mean Absolute Error (Angstroms)
-        self.log(
-            "test/generated_mae",  # Error of generated structure
-            generated_mae,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-
-        self.log(
-            "test/initial_mae",  # Error of initial structure (baseline)
-            initial_mae,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-
-        # Distance within Threshold (% of atoms within threshold distance)
-        self.log(
-            "test/generated_dwt",
-            generated_dwt,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-
-        self.log(
-            "test/initial_dwt",
-            initial_dwt,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-
-        # Adsorbate Distance within Threshold (ADwT metric, adsorbate-specific)
-        self.log(
-            "test/generated_adwt",
-            generated_adwt,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-
-        self.log(
-            "test/initial_adwt",
-            initial_adwt,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-
-        self.log(
-            "test/generated_ads_mae",
-            generated_ads_mae,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-
-        self.log(
-            "test/initial_ads_mae",
-            initial_ads_mae,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-
-        self.log(
-            "test/generated_ads_dwt",
-            generated_ads_dwt,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-
-        self.log(
-            "test/initial_ads_dwt",
-            initial_ads_dwt,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-
-        self.log(
-            "test/generated_ads_adwt",
-            generated_ads_adwt,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-
-        self.log(
-            "test/initial_ads_adwt",
-            initial_ads_adwt,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
+        # Log all evaluation metrics
+        if not self.diagnostics:
+            for name, value in eval_metrics.items():
+                self.log(
+                    f"test/{name}",
+                    value,
+                    prog_bar=True,
+                    batch_size=len(data.natoms),
+                    sync_dist=True,
+                )
 
         # Ensure output directory exists for saving structures
         out_dir = self.trainer.default_root_dir
@@ -510,60 +379,12 @@ class LightFlowMatch(LightningModule, XMatching):
             np.save("distance-max_loss",         unwrap(DS6))   # maximum loss value
             np.save("avg_distance",              unwrap(DS7))   # average distance error
 
-        if self.test_metrics: 
-            # Create output directory if it doesn't exist
+        if self.test_metrics and hasattr(self, "eval_metrics_lists"):
             output_dir = './test_metrics'
             os.makedirs(output_dir, exist_ok=True)
-            
-            # Convert lists to numpy arrays and save
-            np.save(
-                os.path.join(output_dir, 'generated_mae.npy'),
-                np.array(self.generated_mae_list)
-            )
-            np.save(
-                os.path.join(output_dir, 'generated_dwt.npy'),
-                np.array(self.generated_dwt_list)
-            )
-            np.save(
-                os.path.join(output_dir, 'generated_adwt.npy'),
-                np.array(self.generated_adwt_list)
-            )
-            np.save(
-                os.path.join(output_dir, 'initial_mae.npy'),
-                np.array(self.initial_mae_list)
-            )
-            np.save(
-                os.path.join(output_dir, 'initial_dwt.npy'),
-                np.array(self.initial_dwt_list)
-            )
-            np.save(
-                os.path.join(output_dir, 'initial_adwt.npy'),
-                np.array(self.initial_adwt_list)
-            )
-            np.save(
-                os.path.join(output_dir, 'generated_ads_mae.npy'),
-                np.array(self.generated_ads_mae_list)
-            )
-            np.save(
-                os.path.join(output_dir, 'generated_ads_dwt.npy'),
-                np.array(self.generated_ads_dwt_list)
-            )
-            np.save(
-                os.path.join(output_dir, 'generated_ads_adwt.npy'),
-                np.array(self.generated_ads_adwt_list)
-            )
-            np.save(
-                os.path.join(output_dir, 'initial_ads_mae.npy'),
-                np.array(self.initial_ads_mae_list)
-            )
-            np.save(
-                os.path.join(output_dir, 'initial_ads_dwt.npy'),
-                np.array(self.initial_ads_dwt_list)
-            )
-            np.save(
-                os.path.join(output_dir, 'initial_ads_adwt.npy'),
-                np.array(self.initial_ads_adwt_list)
-            )
+
+            for name, values in self.eval_metrics_lists.items():
+                np.save(os.path.join(output_dir, f'{name}.npy'), np.array(values))
 
 
     # ==================== Optimizer Configuration ====================

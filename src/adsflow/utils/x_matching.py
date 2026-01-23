@@ -356,39 +356,26 @@ class XMatching():
             # - MAE: Mean Absolute Error
             # - DwT: Distance within Threshold (% atoms within threshold)
             # - ADwT: Adsorbate Distance within Threshold
-            (
-                generated_mae, 
-                generated_dwt, 
-                generated_adwt, 
-                generated_ads_mae, 
-                generated_ads_dwt, 
-                generated_ads_adwt
-            ) = ADwT(data=data, pos_predicted=data.pos_generated, threshold=threshold)
-            (
-                initial_mae,
-                initial_dwt, 
-                initial_adwt, 
-                initial_ads_mae, 
-                initial_ads_dwt, 
-                initial_ads_adwt
-            ) = ADwT(data=data, pos_predicted=data.pos, threshold=threshold)
+            gen_metrics = ADwT(data=data, pos_predicted=data.pos_generated, threshold=threshold)
+            init_metrics = ADwT(data=data, pos_predicted=data.pos, threshold=threshold)
 
-            eval_metrics = (
-                generated_mae, 
-                generated_dwt, 
-                generated_adwt, 
-                generated_ads_mae, 
-                generated_ads_dwt, 
-                generated_ads_adwt, 
-                initial_mae, 
-                initial_dwt, 
-                initial_adwt, 
-                initial_ads_mae, 
-                initial_ads_dwt, 
-                initial_ads_adwt
-            )
+            # Return metrics as a dictionary for cleaner handling
+            eval_metrics = {
+                "generated_mae": gen_metrics[0],
+                "generated_dwt": gen_metrics[1],
+                "generated_adwt": gen_metrics[2],
+                "generated_ads_mae": gen_metrics[3],
+                "generated_ads_dwt": gen_metrics[4],
+                "generated_ads_adwt": gen_metrics[5],
+                "initial_mae": init_metrics[0],
+                "initial_dwt": init_metrics[1],
+                "initial_adwt": init_metrics[2],
+                "initial_ads_mae": init_metrics[3],
+                "initial_ads_dwt": init_metrics[4],
+                "initial_ads_adwt": init_metrics[5],
+            }
 
-            return data, *eval_metrics
+            return data, eval_metrics
         else:
             return data
   
