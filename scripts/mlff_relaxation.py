@@ -22,11 +22,23 @@ from ase.optimize import BFGS, LBFGS, FIRE
 from ase.io import write as ase_write
 
 from torch_geometric.loader import DataLoader
+from torch.utils.data import Subset # Add this import!
 
 from fairchem.core import OCPCalculator
 
 from adsflow.utils.lmdb_loader import LazyLmdbDataset
 from adsflow.utils.eval_metrics import ADwT
+
+import random
+
+def set_seed(seed: int = 42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    # Ensure deterministic behavior in CuDNN
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 def data_to_atoms(data) -> Atoms:
@@ -136,8 +148,9 @@ def compute_initial_metrics(data, threshold: float = 0.5) -> tuple:
 
     return ADwT(data=data, pos_predicted=data.pos_generated, threshold=threshold)
 
-
 def main():
+
+    set_seed(42)
     parser = argparse.ArgumentParser(
         description="Relax structures using EquiformerV2 MLFF"
     )
@@ -178,12 +191,7 @@ def main():
         choices=["BFGS", "LBFGS", "FIRE"],
         help="ASE optimizer to use (default: BFGS)",
     )
-    parser.add_argument(
-        "--num_samples",
-        type=int,
-        default=None,
-        help="Number of samples to process (default: all)",
-    )
+
     parser.add_argument(
         "--save_structures",
         default=False,
@@ -193,7 +201,7 @@ def main():
     parser.add_argument(
         "--threshold",
         type=float,
-        default=0.5,
+        default=0.20,
         help="Distance threshold for DwT/ADwT metrics in Angstroms (default: 0.5)",
     )
     parser.add_argument(
@@ -218,10 +226,7 @@ def main():
     # Load dataset
     print(f"Loading dataset from {args.data_path}")
     dataset = LazyLmdbDataset({"src": args.data_path})
-
-    # Subset dataset if num_samples specified
-    if args.num_samples is not None:
-        dataset = torch.utils.data.Subset(dataset, range(args.num_samples))
+    dataset = Subset(dataset, indices=range(2))
 
     num_samples = len(dataset)
     print(f"Processing {num_samples} structures")
