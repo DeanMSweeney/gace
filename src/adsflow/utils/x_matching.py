@@ -242,7 +242,7 @@ class XMatching():
                 alpha_t_z, alpha_t_grad_z, self.alpha_t_z_factor = self._interpolant_schedule(
                     t=t_z,
                     schedule_type=self.schedule_type,
-                    v=v_z,
+                    v_z=v_z,
                 )
 
                 zt_hot = z0_hot + alpha_t_z * (z1_hot - z0_hot)
