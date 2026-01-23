@@ -299,7 +299,7 @@ class XMatching():
                 _, _, alpha_t_factor = self._interpolant_schedule(
                     t=data.t,
                     schedule_type=self.schedule_type,
-                    v=1,
+                    v_x=1,
                 )   
                 delta = pbc_aware_delta(
                         delta=x1_hat - xt,
