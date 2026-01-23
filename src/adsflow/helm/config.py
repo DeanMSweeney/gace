@@ -222,10 +222,10 @@ class Config:
 
     # ==================== Model Run Mode ====================
 
-    variant: Literal["refine", "forge"] = "refine"
+    variant: Literal["relax", "forge"] = "relax"
     """
     Flow matching variant:
-    - "refine": learn x0 → x1 (initial to relaxed structure)
+    - "relax": learn x0 → x1 (initial to relaxed structure)
     - "forge": learn noise/random → x1 (generative modeling from scratch)
     """
 

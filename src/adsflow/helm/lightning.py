@@ -61,7 +61,7 @@ class LightFlowMatch(LightningModule, XMatching):
     def __init__(
             self,
             model,
-            variant: str="refine",
+            variant: str="relax",
             mode: str="debug",
             rtol: float = 1e-7,
             atol: float = 1e-9,
@@ -73,7 +73,7 @@ class LightFlowMatch(LightningModule, XMatching):
             config_vasp: bool=False,
             threshold: float=0.20,
             x_matching: Literal["flow", "endpoint"]="flow",
-            interpolant_schedule: Literal["linear", "cosine"]="linear",
+            schedule_type: Literal["linear", "cosine"]="linear",
             **kwargs,
         ):
 
@@ -102,7 +102,7 @@ class LightFlowMatch(LightningModule, XMatching):
 
         # Flow matching configuration
         self.x_matching = x_matching  # "flow" or "endpoint"
-        self.interpolant_schedule = interpolant_schedule  # "linear" or "cosine"
+        self.schedule_type = schedule_type  # "linear" or "cosine"
 
         # =============================================================================
         # Diagnostic mode: detailed loss analysis for model development
@@ -143,12 +143,11 @@ class LightFlowMatch(LightningModule, XMatching):
         """
         # Generate interpolated training data at random time t
         # data.pos = x(t), u = target velocity dx/dt
-        data, u = self.path(input_data=input_data, interpolant_schedule=self.interpolant_schedule)
+        data, u = self.path(input_data=input_data) 
 
         # Model predicts velocity field (or positions if endpoint matching)
         f = self(data)
-
-        if self.variant == "refine":
+        if self.variant == "relax":
             # Compute loss between predicted and target
             # For flow matching: loss = |f - u|^2 (velocity matching)
             # For endpoint matching: loss = |f - x1|^2 (position matching)
@@ -217,6 +216,7 @@ class LightFlowMatch(LightningModule, XMatching):
         """
         # Initialize energy difference if Fmax exists (for compatibility)
         if hasattr(data, "Fmax"):
+            data.Fmax = torch.ones_like(data.y_relaxed) * 0.03 
             data.dE = torch.zeros_like(data.Fmax)
 
         loss, max_loss, _ = self._transport_loss(data)
@@ -258,8 +258,22 @@ class LightFlowMatch(LightningModule, XMatching):
             loss: Test loss for this batch
         """
         # Compute training-style loss for comparison
+
+        data.dE = torch.zeros_like(data.y_relaxed)
+        data.Fmax = torch.ones_like(data.y_relaxed) * 0.02
         loss, max_loss, max_loss_idx = self._transport_loss(data)
 
+        # compute test metrics
+        if not hasattr(self, "eval_metrics_lists"):
+            self.eval_metrics_lists = {
+                name: [] for name in [
+                    "generated_mae", "generated_dwt", "generated_adwt",
+                    "generated_ads_mae", "generated_ads_dwt", "generated_ads_adwt",
+                    "initial_mae", "initial_dwt", "initial_adwt",
+                    "initial_ads_mae", "initial_ads_dwt", "initial_ads_adwt",
+                ]
+            }
+  
         if self.diagnostics:
             # Diagnostic mode: detailed loss analysis for problematic samples
             if loss > 0.001:
@@ -280,36 +294,24 @@ class LightFlowMatch(LightningModule, XMatching):
                     bad_iter=self.bad_iter,
                 )
             # Skip ODE integration in diagnostics mode
-            (
-                opt_graph,
-                generated_mae,
-                generated_dwt,
-                generated_adwt,
-                initial_mae,
-                initial_dwt,
-                initial_adwt,
-            ) = 0, 0, 0, 0, 0, 0, 0
+            eval_metrics = {name: 0 for name in self.eval_metrics_lists.keys()} if hasattr(self, "eval_metrics_lists") else {}
 
         else:
             # Normal test mode: generate structures via ODE integration
             # Define time interval for IVP (Initial Value Problem): t ∈ [0, 1]
-            # Use 100 time steps for accurate integration
-            t = torch.linspace(0., 1., 100, device=data.pos.device, dtype=data.pos.dtype)
+            t = torch.linspace(0., 1, 2, device=data.pos.device, dtype=data.pos.dtype)
 
             # Generate relaxed structure and compute metrics
-            (
-                opt_graph,          # Optimized structure data
-                generated_mae,      # Mean Absolute Error (generated)
-                generated_dwt,      # Distance within Threshold (generated)
-                generated_adwt,     # Adsorbate Distance within Threshold (generated)
-                initial_mae,        # MAE for initial structure (baseline)
-                initial_dwt,        # DwT for initial structure
-                initial_adwt,       # ADwT for initial structure
-            ) = self.sample(input_data=data, t=t, threshold=self.threshold)
+            opt_graph, eval_metrics = self.sample(input_data=data, t=t, threshold=self.threshold)
+
+            if hasattr(self, "eval_metrics_lists"):
+                for name, value in eval_metrics.items():
+                    self.eval_metrics_lists[name].append(value)
 
         # ==================== Log Test Metrics ====================
 
         # Loss metrics (training-style loss for comparison)
+        
         self.log(
             "test/loss",
             loss,
@@ -326,56 +328,16 @@ class LightFlowMatch(LightningModule, XMatching):
             sync_dist=True,
         )
 
-        # Structural metrics: Mean Absolute Error (Angstroms)
-        self.log(
-            "test/generated_mae",  # Error of generated structure
-            generated_mae,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-
-        self.log(
-            "test/initial_mae",  # Error of initial structure (baseline)
-            initial_mae,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-
-        # Distance within Threshold (% of atoms within threshold distance)
-        self.log(
-            "test/generated_dwt",
-            generated_dwt,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-
-        self.log(
-            "test/initial_dwt",
-            initial_dwt,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-
-        # Adsorbate Distance within Threshold (ADwT metric, adsorbate-specific)
-        self.log(
-            "test/generated_adwt",
-            generated_adwt,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-
-        self.log(
-            "test/initial_adwt",
-            initial_adwt,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
+        # Log all evaluation metrics
+        if not self.diagnostics:
+            for name, value in eval_metrics.items():
+                self.log(
+                    f"test/{name}",
+                    value,
+                    prog_bar=True,
+                    batch_size=len(data.natoms),
+                    sync_dist=True,
+                )
 
         # Ensure output directory exists for saving structures
         out_dir = self.trainer.default_root_dir
@@ -416,6 +378,13 @@ class LightFlowMatch(LightningModule, XMatching):
             np.save("distance-max",              unwrap(DS5))   # maximum distance error
             np.save("distance-max_loss",         unwrap(DS6))   # maximum loss value
             np.save("avg_distance",              unwrap(DS7))   # average distance error
+
+        if hasattr(self, "eval_metrics_lists"):
+            output_dir = './test_metrics'
+            os.makedirs(output_dir, exist_ok=True)
+
+            for name, values in self.eval_metrics_lists.items():
+                np.save(os.path.join(output_dir, f'{name}.npy'), np.array(values))
 
 
     # ==================== Optimizer Configuration ====================

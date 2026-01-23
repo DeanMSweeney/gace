@@ -10,10 +10,11 @@ from adsflow.utils.post_processing import config_DFT, write_strucs
 from adsflow.utils.invariance import pbc_aware_delta, hungarian
 from adsflow.utils.eval_metrics import ADwT
 
-class XMatching(): 
+class XMatching():
     """
-    This Mixin supports image invariant interpolation paths and masked loss for frozen atoms 
+    This Mixin supports image invariant interpolation paths and masked loss for frozen atoms
     """
+
     def criterion(
         self,
         input_data,
@@ -73,7 +74,7 @@ class XMatching():
 
         # Apply time-dependent weighting for cosine interpolation schedules
         # (helps stabilize training by reweighting loss based on interpolation time)
-        time_factor = torch.clamp(self.alpha_t_factor, 0.005, 1.5) if self.interpolant_schedule == "cosine" \
+        time_factor = torch.clamp(self.alpha_t_factor, 0.005, 1.5) if self.schedule_type== "cosine" \
              else self.alpha_t_factor
 
         # Apply all weighting factors: frozen atom mask, adsorbate weight, time weight
@@ -87,12 +88,52 @@ class XMatching():
             max_L_idx = torch.argmax(weighted_L_per_atom)
 
         return L, max_L, max_L_idx
+
+    def _interpolant_schedule(
+        self,
+        t: Tensor,
+        schedule_type: str,
+        v_x: float = 1,
+        v_z: float = 1,
+    ) -> Tuple[Tensor, Tensor, Tensor]:
+        """
+        Compute interpolation schedule parameters.
+
+        Args:
+            t: Interpolation time tensor
+            schedule_type: "linear" or "cosine" schedule type
+            v: Exponent for cosine schedule (controls interpolation curvature)
+
+        Returns:
+            alpha_t: Interpolation parameter
+            alpha_t_grad: Gradient d(alpha_t)/dt for velocity rescaling
+            alpha_t_factor: Time-dependent factor for loss weighting
+        """
+        if schedule_type == "linear":
+            # Linear interpolation: alpha_t = t
+            alpha_t = t
+            alpha_t_grad = torch.tensor(1.0, device=t.device, dtype=torch.float32)
+            alpha_t_factor = 1 / (1 - t) if self.x_matching == "endpoint" else torch.tensor(1.0, device=t.device, dtype=torch.float32)
+
+        elif schedule_type == "cosine":
+            # Cosine interpolation: slower at start/end, faster in middle
+            # alpha_t = 1 - cos^2(t^v * pi/2)
+            alpha_t = 1 - (torch.cos(t ** v_x * torch.pi / 2)) ** 2
+            # Compute d(alpha_t)/dt for velocity rescaling
+            alpha_t_grad = torch.pi * v_x * t ** (v_x - 1) * torch.cos(t ** v_x * torch.pi / 2) * torch.sin(t ** v_x * torch.pi / 2)
+            # Store for time-dependent loss weighting
+            alpha_t_factor = alpha_t_grad / (1 - alpha_t).clamp_min(1e-8) # alpha_t'/ (1-alpha)
+        else:
+            raise ValueError("Invalid interpolant schedule")
+
+        return alpha_t, alpha_t_grad, alpha_t_factor
             
     def path(
         self,
         input_data: Data,
-        interpolant_schedule: str="linear",  # "linear" or "cosine" interpolation
-        v: float=1,  # exponent for cosine schedule (controls interpolation curvature)
+        v_x: float=1,  # exponent for cosine schedule (controls interpolation curvature)
+        v_z: float=1,  # exponent for cosine schedule (controls interpolation curvature)
+        initial_dist: Literal["noisy", "fixed"] = "fixed",
     ) -> Tuple[Data, Tensor]:
         """
         Generate interpolated training data along a path from initial to relaxed positions.
@@ -111,85 +152,118 @@ class XMatching():
             # x1 = final relaxed positions (target)
             x1 = data.pos_relaxed.float()
 
-            # Sample random interpolation time t for each graph in the batch
-            t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device, dtype=torch.float32)
-            t = t_per_graph[data.batch] * 0.999  # Broadcast to atoms, clamp max to 0.999
-
-            # Define interpolation schedule: how to move from t to alpha_t
-            if interpolant_schedule == "linear":
-                # Linear interpolation: alpha_t = t
-                alpha_t = t
-                alpha_t_grad = torch.tensor(1.0, device=t.device, dtype=torch.float32)
-                self.alpha_t_factor = 1 / (1 - t) if self.x_matching == "endpoint" \
-                else torch.tensor(1.0, device=t.device, dtype=torch.float32)
-                
-
-            elif interpolant_schedule == "cosine":
-                # Cosine interpolation: slower at start/end, faster in middle
-                # alpha_t = 1 - cos^2(t^v * pi/2)
-                alpha_t = 1 - (torch.cos(t ** v * torch.pi / 2)) ** 2
-                # Compute d(alpha_t)/dt for velocity rescaling
-                alpha_t_grad = torch.pi * v * t ** (v - 1) * torch.cos(t ** v * torch.pi / 2) * torch.sin(t ** v * torch.pi / 2)
-                # Store for time-dependent loss weighting
-                self.alpha_t_factor = alpha_t_grad / (1 - alpha_t).clamp_min(1e-8) # alpha_t'/ (1-alpha)
-            else:
-                raise ValueError("Invalid interpolant schedule")
-
-            if self.variant == "forge":
-                    # FORGE variant: generate structures from noise + adsorbate positions
-                    # Partition atoms into adsorbate (tags==2) and catalyst (tags!=2)
-                    adsorbate = (data.tags == 2)
-                    catalyst = (data.tags != 2)
-
-                    # x0 = initial positions (noise for catalyst, actual for adsorbate)
-                    x0 = torch.randn_like(x1, dtype=torch.float32)
-                    x0[adsorbate] = data.pos[adsorbate].float()  # Use actual adsorbate positions
-
-                    # Use Hungarian algorithm to optimally align catalyst atoms
-                    # (finds permutation that minimizes distance to target)
-                    x0[catalyst] = hungarian(
-                        s0=x0[catalyst],
-                        s1=x1[catalyst],
-                        cell=data.cell.float(),
-                        batch=data.batch,
-                    )
-
-                    # Sample noise for atomic numbers (for conditional generation)
-                    z1 = data.atomic_number
-                    z1_hot = F.one_hot(z1, num_classes=55)
-                    z0 = torch.rand_like(z1_hot, dtype=torch.float32)
-
-            elif self.variant == "refine":
-                # REFINE variant: refine from initial DFT positions to relaxed positions
-                x0 = data.pos.float()  # Initial (unrelaxed) positions
+             # REFINE variant: refine from initial DFT positions to relaxed positions
+            if initial_dist == "fixed":
+                x0 = data.pos.float() # Initial (unrelaxed) positions
 
                 if hasattr(data, "velocity"):
-                    # Use precomputed velocity if available (e.g., from optimal transport)
-                    u = data.velocity.float()
+                    u = data.velocity.float() # x1 - x0 
                 else:
-                    # Compute PBC-aware velocity: u = x1 - x0 (with periodic boundaries)
-                    delta_xyz = x1 - x0
                     u = pbc_aware_delta(
-                        delta=delta_xyz,
+                        delta=x1 - x0,
                         cell=data.cell.float(),
                         batch=data.batch,
                     )
 
-                # Interpolate: xt = x0 + alpha_t * u (position at time t)
-                xt = x0 + alpha_t * u
+            elif initial_dist == "noisy":
+                adsorbate = (data.tags == 2)
+                catalyst = (data.tags != 2)
+
+                # x0 = initial positions (noise for catalyst, actual for adsorbate)
+                x0 = torch.randn_like(x1, dtype=torch.float32)
+                x0[adsorbate] = data.pos[adsorbate].float() # Use actual adsorbate positions
+
+                # Use Hungarian algorithm to optimally align catalyst atoms
+                # (finds permutation that minimizes distance to target)
+                x0[catalyst] = hungarian(
+                    set0=x0[catalyst],
+                    set1=x1[catalyst],
+                    cell=data.cell.float(),
+                    batch=data.batch,
+                )
+
+                delta_xyz = x1 - x0
+                u = pbc_aware_delta(
+                    delta=delta_xyz,
+                    cell=data.cell.float(),
+                    batch=data.batch,
+                )
+
+            # Sample random interpolation time t for each graph in the batch
+            t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device, dtype=torch.float32)
+            # Broadcast to atoms, clamp max to 0.999
+            t = t_per_graph[data.batch] * 0.999 if self.x_matching == "endpoint" else t_per_graph[data.batch]
+            # Compute interpolation schedule parameters
+            alpha_t, alpha_t_grad, self.alpha_t_factor = self._interpolant_schedule(
+                t=t,
+                schedule_type=self.schedule_type,
+                v_x=v_x,
+            )
+
+            # Interpolate: xt = x0 + alpha_t * u (position at time t)
+            xt = x0 + alpha_t * u
+
+            # Rescale velocity for cosine schedule (to account for d(alpha_t)/dt)
+            u = alpha_t_grad * u # alpha_t' * (x1 - x0)
+
+            # Store interpolated data
+            data.pos = xt  # Current position (what model sees as input)
+            data.pos_init = x0  # Initial position (for reference)
+            data.t = t  # Interpolation time
+
+
+            if self.variant == "forge":
+                # Sample  atomic numbers (for conditional generation)
+                z1 = data.atomic_number # N 
+
+                z1_hot = F.one_hot(z1, num_classes=55) # N , 55
+                
+                # Sample noise by defining initial one-hot-encoded vectors 
+                z0_hot = torch.zeros_like(z1_hot, dtype=torch.float32) # N , 55
+                z0_row_idx = torch.arange(z0_hot.size(0), device=x1.device)
+                z0_rand_int = torch.randint(low=0, high=55, size=(z0_hot.size(0),), device=x1.device) # N
+                z0_hot[z0_row_idx, z0_rand_int] = 1 # randomly replace one element in each row with 1 
+                z0_hot[adsorbate] = z1_hot[adsorbate] # reassign adsorabte atom types to match target
+
+                z0_hot[catalyst] = hungarian(
+                    set0=z0_hot[catalyst],
+                    set1=z1_hot[catalyst],
+                    batch=data.batch,
+                )
+
+                # compute velocity field for atomic numbers 
+                u_z = z1_hot - z0_hot
+
+                # Sample random interpolation time t for each graph in the batch
+                t_z_per_graph = torch.rand(len(data.natoms), 1, device=x1.device, dtype=torch.float32)
+                # Broadcast to atoms, clamp max to 0.999
+                t_z = t_z_per_graph[data.batch] * 0.999 if self.x_matching == "endpoint" else t_z_per_graph[data.batch]
+                # Compute interpolation schedule parameters
+                alpha_t_z, alpha_t_grad_z, self.alpha_t_z_factor = self._interpolant_schedule(
+                    t=t_z,
+                    schedule_type=self.schedule_type,
+                    v_z=v_z,
+                )
+
+                zt_hot = z0_hot + alpha_t_z * (z1_hot - z0_hot)
 
                 # Rescale velocity for cosine schedule (to account for d(alpha_t)/dt)
-                u = alpha_t_grad * u # alpha_t' * (x1 - x0)
+                u_z = alpha_t_grad_z * u_z # alpha_t' * (x1 - x0)
 
                 # Store interpolated data
-                data.pos = xt  # Current position (what model sees as input)
-                data.pos_init = x0  # Initial position (for reference)
-                data.t = t  # Interpolation time
+                data.atomic_number = zt_hot  # Current position (what model sees as input)
+                data.atomic_number_init = z0_hot  # Initial position (for reference)
+                data.t_z = t_z  # Interpolation time
+
+                return data, u, u_z
+
+            elif self.variant == "relax":
+                return data, u 
+  
             else:
                 raise ValueError("Invalid model variant")
 
-        return data, u 
-  
+
     def sample(
             self,
             input_data: Data,
@@ -218,15 +292,31 @@ class XMatching():
             Wraps the PyTorch model to match torchdiffeq's expected signature.
             """
             data.pos = xt
-            data.t = t.view(1,1).expand(len(xt), -1)
-            u = self(data)  # Model predicts velocity field
+            data.t = t.view(1,1).expand(len(xt), -1) 
+
+            if self.x_matching == "endpoint":
+                x1_hat = self(data)
+                _, _, alpha_t_factor = self._interpolant_schedule(
+                    t=data.t,
+                    schedule_type=self.schedule_type,
+                    v_x=1,
+                )   
+                delta = pbc_aware_delta(
+                        delta=x1_hat - xt,
+                        cell=data.cell.float(),
+                        batch=data.batch,
+                    )
+                #alpha_t_factor = torch.clamp(alpha_t_factor, 0.005, 1.5)
+                u =  alpha_t_factor * delta
+            else: 
+                u = self(data)  # Model predicts velocity field
             return u
 
         # Integrate ODE from t=0 to t=1 to generate relaxed positions
         xt = odeint(
             func=dx_dt,
             y0=input_data.pos,  # Start from initial positions
-            t=t,  # Integration time points
+            t=t * 0.999 if self.x_matching == "endpoint" else t,  # Integration time points
             rtol=self.rtol,  # Relative tolerance
             atol=self.atol,  # Absolute tolerance
             method=self.ode_method,  # ODE solver method (e.g., 'dopri5', 'euler')
@@ -262,38 +352,30 @@ class XMatching():
 
         # Compute evaluation metrics if ground truth relaxed positions available
         if hasattr(data, "pos_relaxed"):
-
-            # Prepare data for metric computation
-            mask = (1 - data.fixed).bool()  # Mask for free (non-frozen) atoms
-            cell = data.cell
-            batch = data.batch
-            pos_init = data.pos
-            pos_predicted = data.pos_generated
-            pos_target = data.pos_relaxed
-
             # Compute metrics for generated structure:
             # - MAE: Mean Absolute Error
             # - DwT: Distance within Threshold (% atoms within threshold)
             # - ADwT: Adsorbate Distance within Threshold
-            generated_mae, generated_dwt, generated_adwt = ADwT(
-               pos_predicted=pos_predicted,
-               pos_target=pos_target,
-               threshold=threshold,
-               fixed_atoms_mask=mask,
-               cell=cell,
-               batch=batch,
-           )
+            gen_metrics = ADwT(data=data, pos_predicted=data.pos_generated, threshold=threshold)
+            init_metrics = ADwT(data=data, pos_predicted=data.pos, threshold=threshold)
 
-            # Compute baseline metrics for initial structure (before refinement)
-            initial_mae, initial_dwt, initial_adwt = ADwT(
-               pos_predicted=pos_init,
-               pos_target=pos_target,
-               threshold=threshold,
-               fixed_atoms_mask=mask,
-               cell=cell,
-               batch=batch,
-           )
-            return data, generated_mae, generated_dwt, generated_adwt, initial_mae, initial_dwt, initial_adwt
+            # Return metrics as a dictionary for cleaner handling
+            eval_metrics = {
+                "generated_mae": gen_metrics[0],
+                "generated_dwt": gen_metrics[1],
+                "generated_adwt": gen_metrics[2],
+                "generated_ads_mae": gen_metrics[3],
+                "generated_ads_dwt": gen_metrics[4],
+                "generated_ads_adwt": gen_metrics[5],
+                "initial_mae": init_metrics[0],
+                "initial_dwt": init_metrics[1],
+                "initial_adwt": init_metrics[2],
+                "initial_ads_mae": init_metrics[3],
+                "initial_ads_dwt": init_metrics[4],
+                "initial_ads_adwt": init_metrics[5],
+            }
+
+            return data, eval_metrics
         else:
             return data
   
