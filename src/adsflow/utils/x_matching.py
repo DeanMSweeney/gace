@@ -118,9 +118,9 @@ class XMatching():
         elif schedule_type == "cosine":
             # Cosine interpolation: slower at start/end, faster in middle
             # alpha_t = 1 - cos^2(t^v * pi/2)
-            alpha_t = 1 - (torch.cos(t ** v * torch.pi / 2)) ** 2
+            alpha_t = 1 - (torch.cos(t ** v_x * torch.pi / 2)) ** 2
             # Compute d(alpha_t)/dt for velocity rescaling
-            alpha_t_grad = torch.pi * v * t ** (v - 1) * torch.cos(t ** v * torch.pi / 2) * torch.sin(t ** v * torch.pi / 2)
+            alpha_t_grad = torch.pi * v_x * t ** (v_x - 1) * torch.cos(t ** v_x * torch.pi / 2) * torch.sin(t ** v_x * torch.pi / 2)
             # Store for time-dependent loss weighting
             alpha_t_factor = alpha_t_grad / (1 - alpha_t).clamp_min(1e-8) # alpha_t'/ (1-alpha)
         else:
