@@ -177,7 +177,7 @@ def main(cfg: Config) -> None:
         declare(f">>> Activated Evaluation mode with OC20-test: {cfg.oc20_test} 🦉")
         ptst = {"src": cfg.oc20_test}
         test_set = LazyLmdbDataset(ptst)
-        test_set = Subset(test_set, indices=range(100))
+        test_set = Subset(test_set, indices=range(1000))
         test_loader = DataLoader(
             dataset=test_set,
             batch_size=cfg.batch_size,
@@ -215,7 +215,7 @@ def main(cfg: Config) -> None:
         config_vasp=cfg.config_vasp,  # VASP configuration for relaxation
         threshold=cfg.threshold,  # Force convergence threshold
         x_matching=cfg.x_matching,  # Position matching strategy
-        interpolant_schedule=cfg.interpolant_schedule,  # Interpolant schedule type
+        schedule_type=cfg.interpolant_schedule,  # Interpolant schedule type
         **cfg.optimizer_hparams,  # Optimizer hyperparameters (lr, weight_decay, etc.)
     )
 

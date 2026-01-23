@@ -172,6 +172,7 @@ class EquiformerV2_Flow(BaseModel):
         time_n_emb_freqs: int=16,
         energy_n_emb_freqs: int=16,
         force_n_emb_freqs: int=16,
+        energy_force_conditioning: bool=False,
         
     ):
         super().__init__()
@@ -234,6 +235,7 @@ class EquiformerV2_Flow(BaseModel):
         
         self.regress_forces=True
         self.direct_forces=True
+        self.energy_force_conditioning = energy_force_conditioning
 
         # Precompute the frequency as multipliers as a buffer, register time_freq as an attribute
         self.register_buffer(
@@ -260,9 +262,10 @@ class EquiformerV2_Flow(BaseModel):
         
         # Initialize time embedding 
         self.time_emb = nn.Linear(2 * time_n_emb_freqs, self.sphere_channels)
-        self.energy_emb = nn.Linear(2 * energy_n_emb_freqs, self.sphere_channels)
-        self.force_emb = nn.Linear(2 * force_n_emb_freqs, self.sphere_channels)
-        
+        if self.energy_force_conditioning: 
+            self.energy_emb = nn.Linear(2 * energy_n_emb_freqs, self.sphere_channels)
+            self.force_emb = nn.Linear(2 * force_n_emb_freqs, self.sphere_channels)
+            
 
         # Initialize the function used to measure the distances between atoms
         assert self.distance_function in [
@@ -413,7 +416,7 @@ class EquiformerV2_Flow(BaseModel):
         t = data.t # extract time 
         
         # extract energy and force metrics if included 
-        if hasattr(data, "dE") and hasattr(data, "Fmax"):
+        if self.energy_force_conditioning:
             dE = data.dE[data.batch].unsqueeze(1) # (N,1)
             dE_log = torch.log(dE + 1e-6)
             Fmax = data.Fmax[data.batch].unsqueeze(1) # (N,1)
@@ -460,7 +463,7 @@ class EquiformerV2_Flow(BaseModel):
         time_embeds = self.time_emb(self.process_scalar_embeds(s=t, s_emb_freqs=self.time_emb_freqs))
         
         # enegry and force mebedding when necessayr 
-        if hasattr(data, "dE") and hasattr(data, "Fmax"):
+        if self.energy_force_conditioning:
             energy_embeds = self.energy_emb(self.process_scalar_embeds(s=dE_log, s_emb_freqs=self.energy_emb_freqs))
             force_embeds = self.force_emb(self.process_scalar_embeds(s=Fmax_log, s_emb_freqs=self.force_emb_freqs))
         
@@ -495,7 +498,7 @@ class EquiformerV2_Flow(BaseModel):
         x.embedding = x.embedding + edge_degree.embedding 
         x.embedding = x.embedding + time_embeds.unsqueeze(1)
         
-        if hasattr(data, "dE") and hasattr(data, "Fmax"):
+        if self.energy_force_conditioning:
             x.embedding = x.embedding + energy_embeds.unsqueeze(1) + force_embeds.unsqueeze(1)
     
         ###############################################################
