@@ -13,7 +13,7 @@ def ADwT(
     threshold: float = 0.5,
     threshold_min: float = 0.01,
     threshold_step: float = 0.001,
-) -> Tuple[float, float, float]:
+) -> Tuple[float, float, float, float, float, float, float, float]:
     """
     Calculate Distance within Threshold (DwT) and Average DwT (ADwT).
 
@@ -34,7 +34,8 @@ def ADwT(
         threshold_step: Step size for thresholds in Angstroms (default: 0.001)
 
     Returns:
-        Tuple of (overall MAE, DwT at threshold, ADwT from threshold_min to threshold)
+        Tuple of (overall MAE, DwT, ADwT, overall ads MAE, ads DwT, ads ADwT,
+                  system mean error, adsorbate mean error)
     """
     # assign properties 
     batch = data.batch
@@ -43,26 +44,32 @@ def ADwT(
     free_atoms = (1 - data.fixed).bool()  # Mask for free (non-frozen) atoms
     adsorbate_mask = (data.tags == 2)
     # Calculate PBC-aware per-atom distances once
-    per_atom_mae = pbc_aware_delta(
+    per_atom_error = pbc_aware_delta(
         delta=pos_predicted - pos_target,
         cell=cell,
         batch=batch,
-        norm=True,
+        norm=False
     )
-    
-    ads_atom_mae = pbc_aware_delta(
+    per_atom_mae = per_atom_error.abs().mean(dim=1, keepdim=True)  # (N, 1)
+    per_atom_me = per_atom_error.mean(dim=1, keepdim=True)  # (N, 1)
+
+    ads_atom_error = pbc_aware_delta(
         delta=pos_predicted[adsorbate_mask] - pos_target[adsorbate_mask],
         cell=cell,
         batch=batch[adsorbate_mask],
-        norm=True,
+        norm=False,
     )
+    ads_atom_mae = ads_atom_error.abs().mean(dim=1, keepdim=True)  # (N, 1)
+    ads_atom_me = ads_atom_error.mean(dim=1, keepdim=True)  # (N, 1)
 
     # Include only free atoms, mask frozen atoms
     if free_atoms is not None:
         per_atom_mae = per_atom_mae[free_atoms]
+        per_atom_me = per_atom_me[free_atoms]
         batch_filtered = batch[free_atoms]
         batch_ads_filtered = batch[adsorbate_mask]
         ads_atom_mae = ads_atom_mae # all adsorabte atoms are free atoms by definition
+        ads_atom_me = ads_atom_me # all adsorabte atoms are free atoms by definition
     else:
         batch_filtered = batch
 
@@ -70,6 +77,8 @@ def ADwT(
     num_structures = batch_filtered.max().item() + 1
     mae_per_structure = []
     ads_mae_per_structure = []
+    me_per_structure = []
+    ads_me_per_structure = []
 
     for struct_idx in range(num_structures):
         struct_mask = batch_filtered == struct_idx
@@ -77,15 +86,26 @@ def ADwT(
         if struct_mask.any():
             mae = per_atom_mae[struct_mask].mean().item()
             mae_per_structure.append(mae)
+
+            me = per_atom_me[struct_mask].mean().item()
+            me_per_structure.append(me)
+
             ads_mae = ads_atom_mae[ads_mask].mean().item()
             ads_mae_per_structure.append(ads_mae)
 
+            ads_me = ads_atom_me[ads_mask].mean().item()
+            ads_me_per_structure.append(ads_me)
+
     mae_per_structure = torch.tensor(mae_per_structure)
     ads_mae_per_structure = torch.tensor(ads_mae_per_structure)
+    me_per_structure = torch.tensor(me_per_structure)
+    ads_me_per_structure = torch.tensor(ads_me_per_structure)
 
     # Overall MAE across all atoms
     overall_mae = per_atom_mae.mean().item()
     overall_ads_mae = ads_atom_mae.mean().item()
+    overall_me = per_atom_me.mean().item()
+    overall_ads_me = ads_atom_me.mean().item()
 
     # Calculate DwT values across all thresholds from threshold_min to threshold
     thresholds = torch.arange(threshold_min, threshold + threshold_step, threshold_step)
@@ -109,4 +129,4 @@ def ADwT(
     adwt = sum(dwt_values) / len(dwt_values)
     ads_adwt = sum(ads_dwt_values) / len(ads_dwt_values)
 
-    return overall_mae, dwt, adwt, overall_ads_mae, ads_dwt, ads_adwt
+    return overall_mae, dwt, adwt, overall_ads_mae, ads_dwt, ads_adwt, overall_me, overall_ads_me
