@@ -367,12 +367,16 @@ class XMatching():
                 "generated_ads_mae": gen_metrics[3],
                 "generated_ads_dwt": gen_metrics[4],
                 "generated_ads_adwt": gen_metrics[5],
+                "generated_me": gen_metrics[6],
+                "generated_ads_me": gen_metrics[7],
                 "initial_mae": init_metrics[0],
                 "initial_dwt": init_metrics[1],
                 "initial_adwt": init_metrics[2],
                 "initial_ads_mae": init_metrics[3],
                 "initial_ads_dwt": init_metrics[4],
                 "initial_ads_adwt": init_metrics[5],
+                "initial_me": init_metrics[6],
+                "initial_ads_me": init_metrics[7],  
             }
 
             return data, eval_metrics

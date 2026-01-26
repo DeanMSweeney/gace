@@ -268,9 +268,11 @@ class LightFlowMatch(LightningModule, XMatching):
             self.eval_metrics_lists = {
                 name: [] for name in [
                     "generated_mae", "generated_dwt", "generated_adwt",
-                    "generated_ads_mae", "generated_ads_dwt", "generated_ads_adwt",
+                    "generated_ads_mae", "generated_ads_dwt", "generated_ads_adwt", 
+                    "generated_me", "generated_ads_me",
                     "initial_mae", "initial_dwt", "initial_adwt",
                     "initial_ads_mae", "initial_ads_dwt", "initial_ads_adwt",
+                    "initial_me", "initial_ads_me",
                 ]
             }
   
