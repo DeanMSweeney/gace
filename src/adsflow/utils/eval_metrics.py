@@ -44,12 +44,11 @@ def ADwT(
     free_atoms = (1 - data.fixed).bool()  # Mask for free (non-frozen) atoms
     adsorbate_mask = (data.tags == 2)
     catalyst_mask = (data.tags == 1)
-    print(catalyst_mask.sum() + adsorbate_mask.sum(), free_atoms.sum(), flush=True)
     # Calculate PBC-aware per-atom distances once
     per_atom_error = pbc_aware_delta(
-        delta=pos_predicted - pos_target,
+        delta=pos_predicted[catalyst_mask] - pos_target[catalyst_mask],
         cell=cell,
-        batch=batch,
+        batch=batch[catalyst_mask],
         norm=False
     )
     per_atom_mae = per_atom_error.abs().mean(dim=1, keepdim=True)  # (N, 1)
