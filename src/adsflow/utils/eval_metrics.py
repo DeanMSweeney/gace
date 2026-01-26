@@ -65,9 +65,9 @@ def ADwT(
 
     # Include only free atoms, mask frozen atoms
     if free_atoms is not None:
-        per_atom_mae = per_atom_mae[free_atoms]
-        per_atom_me = per_atom_me[free_atoms]
-        batch_filtered = batch[free_atoms]
+        per_atom_mae = per_atom_mae
+        per_atom_me = per_atom_me
+        batch_filtered = batch
         batch_ads_filtered = batch[adsorbate_mask]
         ads_atom_mae = ads_atom_mae # all adsorabte atoms are free atoms by definition
         ads_atom_me = ads_atom_me # all adsorabte atoms are free atoms by definition
