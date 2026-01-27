@@ -20,6 +20,7 @@ core
 out-claude.txt
 selected_frames-old.parquet
 selected_frames.parquet
+.DS_Store
 
 # Folders
 '$HOME'/
@@ -39,3 +40,4 @@ dense/
 old/
 l-*/
 ocp_checkpoints/
+plots/
