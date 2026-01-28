@@ -367,8 +367,8 @@ class XMatching():
             # Compute metrics for generated structure:
 
             # compute velocity field on input struc for logging
-            u = data.pos_relaxed[(frozen_atoms - 1)] - data.pos[(frozen_atoms - 1)]
-            u_hat = self(data)[(frozen_atoms - 1)]
+            u = data.pos_relaxed[(data.fixed - 1).bool()] - data.pos[(data.fixed - 1).bool()]
+            u_hat = self(data)[(data.fixed - 1).bool()]
 
             gen_metrics = ADwT(data=data, pos_predicted=data.pos_generated, threshold=threshold)
             init_metrics = ADwT(data=data, pos_predicted=data.pos, threshold=threshold)
