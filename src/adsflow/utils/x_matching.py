@@ -157,9 +157,9 @@ class XMatching():
                 x0 = data.pos.float() # Initial (unrelaxed) positions
 
                 if hasattr(data, "velocity"):
-                    u = data.velocity.float() # x1 - x0 
+                    u_x = data.velocity.float() # x1 - x0 
                 else:
-                    u = pbc_aware_delta(
+                    u_x = pbc_aware_delta(
                         delta=x1 - x0,
                         cell=data.cell.float(),
                         batch=data.batch,
@@ -183,36 +183,47 @@ class XMatching():
                 )
 
                 delta_xyz = x1 - x0
-                u = pbc_aware_delta(
+                u_x = pbc_aware_delta(
                     delta=delta_xyz,
                     cell=data.cell.float(),
                     batch=data.batch,
                 )
 
             # Sample random interpolation time t for each graph in the batch
-            t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device, dtype=torch.float32)
+            t_x_per_graph = torch.rand(len(data.natoms), 1, device=x1.device, dtype=torch.float32)
             # Broadcast to atoms, clamp max to 0.999
-            t = t_per_graph[data.batch] * 0.999 if self.x_matching == "endpoint" else t_per_graph[data.batch]
+            t_x = t_x_per_graph[data.batch] * 0.999 if self.x_matching == "endpoint" else t_x_per_graph[data.batch]
             # Compute interpolation schedule parameters
-            alpha_t, alpha_t_grad, self.alpha_t_factor = self._interpolant_schedule(
-                t=t,
+            alpha_t_x, alpha_t_x_grad, self.alpha_t_x_factor = self._interpolant_schedule(
+                t=t_x,
                 schedule_type=self.schedule_type,
                 v_x=v_x,
             )
 
-            # Interpolate: xt = x0 + alpha_t * u (position at time t)
-            xt = x0 + alpha_t * u
+            # Interpolate: xt = x0 + alpha_t * u_x(position at time t)
+            xt = x0 + alpha_t_x * u_x
 
             # Rescale velocity for cosine schedule (to account for d(alpha_t)/dt)
-            u = alpha_t_grad * u # alpha_t' * (x1 - x0)
+            u_x = alpha_t_x_grad * u_x# alpha_t' * (x1 - x0)
 
             # Store interpolated data
             data.pos = xt  # Current position (what model sees as input)
             data.pos_init = x0  # Initial position (for reference)
-            data.t = t  # Interpolation time
+            data.t = t_x  # Interpolation time
 
+            """
+            # convert u_x to fractional coordinates
+            u_x = pbc_aware_delta(
+                delta=u_x,
+                cell=data.cell.float(),
+                batch=data.batch,
+                cartesian_to_fractional=True, 
+            )
+            """
+            if self.variant == "relax":
+                return data, u_x
 
-            if self.variant == "forge":
+            elif self.variant == "forge":
                 # Sample  atomic numbers (for conditional generation)
                 z1 = data.atomic_number # N 
 
@@ -239,7 +250,7 @@ class XMatching():
                 # Broadcast to atoms, clamp max to 0.999
                 t_z = t_z_per_graph[data.batch] * 0.999 if self.x_matching == "endpoint" else t_z_per_graph[data.batch]
                 # Compute interpolation schedule parameters
-                alpha_t_z, alpha_t_grad_z, self.alpha_t_z_factor = self._interpolant_schedule(
+                alpha_t_z, alpha_t_z_grad, self.alpha_t_z_factor = self._interpolant_schedule(
                     t=t_z,
                     schedule_type=self.schedule_type,
                     v_z=v_z,
@@ -248,17 +259,14 @@ class XMatching():
                 zt_hot = z0_hot + alpha_t_z * (z1_hot - z0_hot)
 
                 # Rescale velocity for cosine schedule (to account for d(alpha_t)/dt)
-                u_z = alpha_t_grad_z * u_z # alpha_t' * (x1 - x0)
+                u_z = alpha_t_z_grad * u_z # alpha_t' * (x1 - x0)
 
                 # Store interpolated data
                 data.atomic_number = zt_hot  # Current position (what model sees as input)
                 data.atomic_number_init = z0_hot  # Initial position (for reference)
                 data.t_z = t_z  # Interpolation time
 
-                return data, u, u_z
-
-            elif self.variant == "relax":
-                return data, u 
+                return data, u_x, u_z
   
             else:
                 raise ValueError("Invalid model variant")
@@ -307,9 +315,9 @@ class XMatching():
                         batch=data.batch,
                     )
                 #alpha_t_factor = torch.clamp(alpha_t_factor, 0.005, 1.5)
-                u =  alpha_t_factor * delta
+                u_x=  alpha_t_factor * delta
             else: 
-                u = self(data)  # Model predicts velocity field
+                u_x= self(data)  # Model predicts velocity field
             return u
 
         # Integrate ODE from t=0 to t=1 to generate relaxed positions
@@ -359,7 +367,7 @@ class XMatching():
             # Compute metrics for generated structure:
 
             # compute velocity field on input struc for logging
-            u = data.pos_relaxed - data.pos
+            u_x= data.pos_relaxed - data.pos
             u_hat = self(data)
 
             gen_metrics = ADwT(data=data, pos_predicted=data.pos_generated, threshold=threshold)
