@@ -74,8 +74,8 @@ class XMatching():
 
         # Apply time-dependent weighting for cosine interpolation schedules
         # (helps stabilize training by reweighting loss based on interpolation time)
-        time_factor = torch.clamp(self.alpha_t_factor, 0.005, 1.5) if self.schedule_type== "cosine" \
-             else self.alpha_t_factor
+        time_factor = torch.clamp(self.alpha_t_x_factor, 0.005, 1.5) if self.schedule_type== "cosine" \
+             else self.alpha_t_x_factor
 
         # Apply all weighting factors: frozen atom mask, adsorbate weight, time weight
         weighted_L_per_atom = L_per_atom * ads_mask_factor * time_factor  # N, 1
@@ -360,15 +360,15 @@ class XMatching():
 
         # Compute evaluation metrics if ground truth relaxed positions available
         if hasattr(data, "pos_relaxed"):
-            # Compute metrics for generated structure:
+            # Compute metrics for generated strucure:
             # - MAE: Mean Absolute Error
             # - DwT: Distance within Threshold (% atoms within threshold)
             # - ADwT: Adsorbate Distance within Threshold
             # Compute metrics for generated structure:
 
             # compute velocity field on input struc for logging
-            u_x= data.pos_relaxed - data.pos
-            u_hat = self(data)
+            u = data.pos_relaxed[(frozen_atoms - 1)] - data.pos[(frozen_atoms - 1)]
+            u_hat = self(data)[(frozen_atoms - 1)]
 
             gen_metrics = ADwT(data=data, pos_predicted=data.pos_generated, threshold=threshold)
             init_metrics = ADwT(data=data, pos_predicted=data.pos, threshold=threshold)
@@ -393,6 +393,7 @@ class XMatching():
                 "initial_ads_me": init_metrics[7],
                 "u": u.detach().cpu().numpy(),  # Nx3 ground truth velocity field
                 "u_hat": u_hat.detach().cpu().numpy(),  # Nx3 predicted velocity field
+                "tags": data.tags[(frozen_atoms - 1)].cpu().numpy(),  # N, 1 atom tags
             }
 
             return data, eval_metrics
