@@ -315,10 +315,10 @@ class XMatching():
                         batch=data.batch,
                     )
                 #alpha_t_factor = torch.clamp(alpha_t_factor, 0.005, 1.5)
-                u_x=  alpha_t_factor * delta
+                u_x =  alpha_t_factor * delta
             else: 
-                u_x= self(data)  # Model predicts velocity field
-            return u
+                u_x = self(data)  # Model predicts velocity field
+            return u_x
 
         # Integrate ODE from t=0 to t=1 to generate relaxed positions
         xt = odeint(
