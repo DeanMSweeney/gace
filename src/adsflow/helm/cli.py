@@ -118,15 +118,18 @@ def main(cfg: Config) -> None:
         cfg.num_workers = max(1, os.cpu_count() - 2)
 
     # --- Debug Mode ---
-    # Use first 100 samples for quick iteration during development
-    if cfg.mode == "debug" and cfg.oc20_train:
-        declare(f">>> Activated Debug mode on the first 100 datapoints of OC20: {cfg.oc20_train} 🕷️")
-
+    # Use X samples for quick iteration during development
+    if cfg.mode == "debug" and cfg.oc20_train and cfg.oc20_val:
+        declare(f">>> Activated Debug mode with portions of OC20 train/val: {cfg.oc20_train} 🕷️")
+    
         # Load small subset and split into train/val
-        p = {"src": cfg.oc20_train}
-        dataset = LazyLmdbDataset(p)
-        dataset = Subset(dataset, indices=range(100))
-        train_set, val_set = random_split(dataset, [0.80, 0.20])
+        pt = {"src": cfg.oc20_train}
+        train_set = LazyLmdbDataset(pt)
+
+        # Load permutations 
+        g = torch.Generator().manual_seed(seed=cfg.seed)
+        indices = torch.randperm(len(train_set), generator=g)[:cfg.num_debug_samples].tolist()
+        train_set = Subset(train_set, indices=indices)
 
         train_loader = DataLoader(
             train_set,
@@ -136,6 +139,8 @@ def main(cfg: Config) -> None:
             shuffle=True,
         )
 
+        pv = {"src": cfg.oc20_val}
+        val_set = LazyLmdbDataset(pv)
         val_loader = DataLoader(
             val_set,
             batch_size=cfg.batch_size,

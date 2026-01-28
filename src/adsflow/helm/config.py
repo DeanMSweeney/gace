@@ -308,3 +308,6 @@ class Config:
 
     seed: int = 42
     """Random seed for reproducibility (affects PyTorch, NumPy, Python RNGs)""" 
+    
+    num_debug_samples: int = 50_000
+    """Number of samples to use for debugging"""
