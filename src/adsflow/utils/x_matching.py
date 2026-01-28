@@ -356,6 +356,12 @@ class XMatching():
             # - MAE: Mean Absolute Error
             # - DwT: Distance within Threshold (% atoms within threshold)
             # - ADwT: Adsorbate Distance within Threshold
+            # Compute metrics for generated structure:
+
+            # compute velocity field on input struc for logging
+            u = data.pos_relaxed - data.pos
+            u_hat = self(data)
+
             gen_metrics = ADwT(data=data, pos_predicted=data.pos_generated, threshold=threshold)
             init_metrics = ADwT(data=data, pos_predicted=data.pos, threshold=threshold)
 
@@ -376,7 +382,9 @@ class XMatching():
                 "initial_ads_dwt": init_metrics[4],
                 "initial_ads_adwt": init_metrics[5],
                 "initial_me": init_metrics[6],
-                "initial_ads_me": init_metrics[7],  
+                "initial_ads_me": init_metrics[7],
+                "u": u.detach().cpu().numpy(),  # Nx3 ground truth velocity field
+                "u_hat": u_hat.detach().cpu().numpy(),  # Nx3 predicted velocity field
             }
 
             return data, eval_metrics

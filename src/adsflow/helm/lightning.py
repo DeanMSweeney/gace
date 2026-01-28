@@ -268,13 +268,15 @@ class LightFlowMatch(LightningModule, XMatching):
             self.eval_metrics_lists = {
                 name: [] for name in [
                     "generated_mae", "generated_dwt", "generated_adwt",
-                    "generated_ads_mae", "generated_ads_dwt", "generated_ads_adwt", 
+                    "generated_ads_mae", "generated_ads_dwt", "generated_ads_adwt",
                     "generated_me", "generated_ads_me",
                     "initial_mae", "initial_dwt", "initial_adwt",
                     "initial_ads_mae", "initial_ads_dwt", "initial_ads_adwt",
                     "initial_me", "initial_ads_me",
                 ]
             }
+            # Separate lists for array metrics (Nx3 matrices)
+            self.array_metrics_lists = {"u": [], "u_hat": []}
   
         if self.diagnostics:
             # Diagnostic mode: detailed loss analysis for problematic samples
@@ -308,7 +310,12 @@ class LightFlowMatch(LightningModule, XMatching):
 
             if hasattr(self, "eval_metrics_lists"):
                 for name, value in eval_metrics.items():
-                    self.eval_metrics_lists[name].append(value)
+                    if name in self.array_metrics_lists:
+                        # Array metrics (u, u_hat) - append numpy arrays
+                        self.array_metrics_lists[name].append(value)
+                    else:
+                        # Scalar metrics
+                        self.eval_metrics_lists[name].append(value)
 
         # ==================== Log Test Metrics ====================
 
@@ -330,9 +337,11 @@ class LightFlowMatch(LightningModule, XMatching):
             sync_dist=True,
         )
 
-        # Log all evaluation metrics
+        # Log all evaluation metrics (skip array metrics like u, u_hat)
         if not self.diagnostics:
             for name, value in eval_metrics.items():
+                if name in ("u", "u_hat"):
+                    continue  # Skip array metrics, they are saved to .npy files
                 self.log(
                     f"test/{name}",
                     value,
@@ -387,6 +396,12 @@ class LightFlowMatch(LightningModule, XMatching):
 
             for name, values in self.eval_metrics_lists.items():
                 np.save(os.path.join(output_dir, f'{name}.npy'), np.array(values))
+
+            # Save array metrics (u, u_hat) - concatenate along first axis
+            if hasattr(self, "array_metrics_lists"):
+                for name, arrays in self.array_metrics_lists.items():
+                    if arrays:
+                        np.save(os.path.join(output_dir, f'{name}.npy'), np.concatenate(arrays, axis=0))
 
 
     # ==================== Optimizer Configuration ====================
