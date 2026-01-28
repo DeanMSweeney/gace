@@ -276,7 +276,7 @@ class LightFlowMatch(LightningModule, XMatching):
                 ]
             }
             # Separate lists for array metrics (Nx3 matrices)
-            self.array_metrics_lists = {"u": [], "u_hat": []}
+            self.array_metrics_lists = {"u": [], "u_hat": [], "tags": []}
   
         if self.diagnostics:
             # Diagnostic mode: detailed loss analysis for problematic samples
@@ -340,7 +340,7 @@ class LightFlowMatch(LightningModule, XMatching):
         # Log all evaluation metrics (skip array metrics like u, u_hat)
         if not self.diagnostics:
             for name, value in eval_metrics.items():
-                if name in ("u", "u_hat"):
+                if name in ("u", "u_hat", "tags"):
                     continue  # Skip array metrics, they are saved to .npy files
                 self.log(
                     f"test/{name}",
