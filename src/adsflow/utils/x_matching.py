@@ -393,7 +393,7 @@ class XMatching():
                 "initial_ads_me": init_metrics[7],
                 "u": u.detach().cpu().numpy(),  # Nx3 ground truth velocity field
                 "u_hat": u_hat.detach().cpu().numpy(),  # Nx3 predicted velocity field
-                "tags": data.tags[(frozen_atoms - 1)].cpu().numpy(),  # N, 1 atom tags
+                "tags": data.tags[(data.fixed - 1).bool()].cpu().numpy(),  # N, 1 atom tags
             }
 
             return data, eval_metrics
