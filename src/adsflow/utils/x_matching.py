@@ -368,12 +368,13 @@ class XMatching():
 
             # compute velocity field on input struc for logging
             
-            diff = data.pos_relaxed[(data.fixed - 1).bool()] - data.pos[(data.fixed - 1).bool()]
+            diff = data.pos_relaxed - data.pos
             u = pbc_aware_delta(
                         delta=diff,
                         cell=data.cell.float(),
                         batch=data.batch,
                     )
+            u = u[(data.fixed - 1).bool()]
             u_hat = self(data)[(data.fixed - 1).bool()]
 
             gen_metrics = ADwT(data=data, pos_predicted=data.pos_generated, threshold=threshold)
