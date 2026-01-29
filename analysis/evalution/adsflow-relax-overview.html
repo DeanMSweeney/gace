@@ -1,0 +1,1040 @@
+<!DOCTYPE html>
+<!-- saved from url=(0030)http://localhost:4404/#summary -->
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+
+<meta name="generator" content="quarto-1.8.27">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>AdsFlow: Diagnostic Analysis of Flow Matching for Adsorbate Structure Relaxation</title>
+<style class="anchorjs"></style><style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="./adsflow-relax-overview_files/clipboard.min.js"></script>
+<script src="./adsflow-relax-overview_files/quarto.js" type="module"></script>
+<script src="./adsflow-relax-overview_files/tabsets.js" type="module"></script>
+<script src="./adsflow-relax-overview_files/axe-check.js" type="module"></script>
+<script src="./adsflow-relax-overview_files/popper.min.js"></script>
+<script src="./adsflow-relax-overview_files/tippy.umd.min.js"></script>
+<script src="./adsflow-relax-overview_files/anchor.min.js"></script>
+<link href="./adsflow-relax-overview_files/tippy.css" rel="stylesheet">
+<link href="./adsflow-relax-overview_files/quarto-syntax-highlighting-ed96de9b727972fe78a7b5d16c58bf87.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="./adsflow-relax-overview_files/bootstrap.min.js"></script>
+<link href="./adsflow-relax-overview_files/bootstrap-icons.css" rel="stylesheet">
+<link href="./adsflow-relax-overview_files/bootstrap-d6a003b94517c951b2d65075d42fb01b.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+
+
+<style>.ansi-display{font-family:monospace;white-space:pre-wrap;--ansiBlack: #000000;--ansiRed: #cd3131;--ansiGreen: #00BC00;--ansiYellow: #949800;--ansiBlue: #0451a5;--ansiMagenta: #bc05bc;--ansiCyan: #0598bc;--ansiWhite: #555555;--ansiBrightBlack: #666666;--ansiBrightRed: #cd3131;--ansiBrightGreen: #14CE14;--ansiBrightYellow: #b5ba00;--ansiBrightBlue: #0451a5;--ansiBrightMagenta: #bc05bc;--ansiBrightCyan: #0598bc;--ansiBrightWhite: #a5a5a5}.dark-mode .ansi-display{--ansiBlack: #000000;--ansiRed: #cd3131;--ansiGreen: #0DBC79;--ansiYellow: #e5e510;--ansiBlue: #2472c8;--ansiMagenta: #bc3fbc;--ansiCyan: #11a8cd;--ansiWhite: #e5e5e5;--ansiBrightBlack: #666666;--ansiBrightRed: #f14c4c;--ansiBrightGreen: #23d18b;--ansiBrightYellow: #f5f543;--ansiBrightBlue: #3b8eea;--ansiBrightMagenta: #d670d6;--ansiBrightCyan: #29b8db;--ansiBrightWhite: #e5e5e5}@keyframes ansi-displaly-run-blink{50%{opacity:0}}.fui-FluentProvider h2{border-bottom:none;padding-bottom:0}</style><style data-make-styles-bucket="d" data-priority="0"></style><style id="fui-FluentProviderr0"></style></head>
+
+<body class="fullcontent quarto-light" data-tabster="{&quot;root&quot;:{}}" data-new-gr-c-s-check-loaded="14.1270.0" data-gr-ext-installed="">
+
+<i tabindex="0" role="none" data-tabster-dummy="" aria-hidden="true" style="position: fixed; height: 1px; width: 1px; opacity: 0.001; z-index: -1; content-visibility: hidden; top: 0px; left: 0px;"></i><div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">AdsFlow: Diagnostic Analysis of Flow Matching for Adsorbate Structure Relaxation</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<div id="06b7dc7c" class="cell" data-execution_count="1">
+<details class="code-fold">
+<summary>Show code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb1"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb1-1"><a href="http://localhost:4404/#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> numpy <span class="im">as</span> np </span>
+<span id="cb1-2"><a href="http://localhost:4404/#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pandas <span class="im">as</span> pd </span>
+<span id="cb1-3"><a href="http://localhost:4404/#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> matplotlib <span class="im">import</span> pyplot <span class="im">as</span> plt </span>
+<span id="cb1-4"><a href="http://localhost:4404/#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> scipy <span class="im">import</span> stats</span>
+<span id="cb1-5"><a href="http://localhost:4404/#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> sklearn.metrics. pairwise <span class="im">import</span> cosine_similarity</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
+</div>
+<section id="summary" class="level2">
+<h2 class="anchored" data-anchor-id="summary">Summary<a class="anchorjs-link " aria-label="Anchor" data-anchorjs-icon="" href="http://localhost:4404/#summary" style="font: 1em / 1 anchorjs-icons; margin-left: 0.1875em; padding-right: 0.1875em; padding-left: 0.1875em;"></a></h2>
+<p>This report presents a comprehensive diagnostic analysis of AdsFlow, a flow matching model for predicting relaxed adsorbate-catalyst structures. The key findings are:</p>
+<ol type="1">
+<li><p><strong>Baseline Performance</strong>: State-of-the-art MLFF methods (EquiformerV2) achieve excellent overall structural relaxation (MAE = 0.05 Å) but struggle with adsorbate placement (MAE = 0.15 Å), motivating the need for generative approaches.</p></li>
+<li><p><strong>Model Selection</strong>: EquiformerV2 outperforms GemNet-OC despite having fewer parameters (53M vs 89M), with GemNet-OC showing overfitting tendencies.</p></li>
+<li><p><strong>AdsFlow Performance</strong>: On the OC20 Val-OOD-Both dataset, AdsFlow reduces initial structure MAE by 0.08 Å to a final MAE of 0.12 Å. Adsorbate atoms show higher error, which correlates with their larger required displacements during relaxation.</p></li>
+<li><p><strong>Velocity Field Analysis</strong>: The model correctly predicts the direction of atomic displacement vectors (high cosine similarity) but systematically underestimates the magnitude, particularly for adsorbate atoms -&gt; this was unclear from structural MAE analyses. This represents the primary avenue for model improvement.</p></li>
+</ol>
+</section>
+<section id="mlff-benchmark---equiformerv2" class="level1">
+<h1>MLFF Benchmark - EquiformerV2</h1>
+<p>We begin this analysis by examining the performance of state-of-the-art machine learning force field (MLFF) methods for structural relaxations. This establishes a baseline for comparison with our generative approach.</p>
+<div id="d7d036fa" class="cell" data-execution_count="2">
+<details class="code-fold">
+<summary>Show code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb2"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb2-1"><a href="http://localhost:4404/#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Load test set metrics</span></span>
+<span id="cb2-2"><a href="http://localhost:4404/#cb2-2" aria-hidden="true" tabindex="-1"></a>mlff_mae <span class="op">=</span> np.load(<span class="st">'mlff_val_data/generated_mae.npy'</span>)</span>
+<span id="cb2-3"><a href="http://localhost:4404/#cb2-3" aria-hidden="true" tabindex="-1"></a>mlff_ads_mae <span class="op">=</span> np.load(<span class="st">'mlff_val_data/generated_ads_mae.npy'</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
+</div>
+<p><strong>Observations:</strong> - The MLFF achieves excellent overall relaxation performance with an MAE of 0.05 Å. - However, adsorbate placement remains challenging, with an adsorbate-specific MAE of 0.15 Å (3× higher than overall). - This performance gap motivates our generative modeling approach: AdsFlow specifically targets the adsorbate placement challenge. When combined with MLFF, it should improve adsorbate positioning accuracy.</p>
+<div id="2f9493a6" class="cell" data-execution_count="3">
+<details class="code-fold">
+<summary>Show code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb3"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb3-1"><a href="http://localhost:4404/#cb3-1" aria-hidden="true" tabindex="-1"></a>plt.figure()</span>
+<span id="cb3-2"><a href="http://localhost:4404/#cb3-2" aria-hidden="true" tabindex="-1"></a>plt.hist(mlff_mae, bins<span class="op">=</span><span class="dv">30</span>,  density<span class="op">=</span><span class="va">True</span>, label<span class="op">=</span><span class="ss">f'Overall MAE = </span><span class="sc">{</span>mlff_mae<span class="sc">.</span>mean()<span class="sc">:.2f}</span><span class="ss"> $</span><span class="er">\</span><span class="ss">AA$'</span>, color<span class="op">=</span><span class="st">"#087F91"</span>)</span>
+<span id="cb3-3"><a href="http://localhost:4404/#cb3-3" aria-hidden="true" tabindex="-1"></a>plt.hist(mlff_ads_mae, bins<span class="op">=</span><span class="dv">30</span>,  density<span class="op">=</span><span class="va">True</span>, label<span class="op">=</span><span class="ss">f'Adsorbate MAE = </span><span class="sc">{</span>mlff_ads_mae<span class="sc">.</span>mean()<span class="sc">:.2f}</span><span class="ss"> $</span><span class="er">\</span><span class="ss">AA$'</span>, color<span class="op">=</span><span class="st">"#F5563D"</span>)</span>
+<span id="cb3-4"><a href="http://localhost:4404/#cb3-4" aria-hidden="true" tabindex="-1"></a>plt.xlabel(<span class="st">"MAE $</span><span class="er">\</span><span class="st">AA$"</span>)</span>
+<span id="cb3-5"><a href="http://localhost:4404/#cb3-5" aria-hidden="true" tabindex="-1"></a>plt.ylabel(<span class="st">"Density"</span>)</span>
+<span id="cb3-6"><a href="http://localhost:4404/#cb3-6" aria-hidden="true" tabindex="-1"></a>plt.title(<span class="st">"MLFF Structural MAE on OOD-both validation"</span>)</span>
+<span id="cb3-7"><a href="http://localhost:4404/#cb3-7" aria-hidden="true" tabindex="-1"></a>plt.legend()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
+<div class="cell-output cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="./adsflow-relax-overview_files/cell-4-output-1.png" width="585" height="451" class="figure-img"></p>
+</figure>
+</div>
+</div>
+</div>
+</section>
+<section id="model-training" class="level1">
+<h1>Model training</h1>
+<p>We trained two flow matching models using different neural network architectures: GemNet-OC and EquiformerV2. Both architectures respect system symmetries, periodic boundary conditions (PBC), and E(3) invariances/equivariances.</p>
+<div id="7bf258ba" class="cell" data-execution_count="4">
+<details class="code-fold">
+<summary>Show code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb4"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><a href="http://localhost:4404/#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Read the loss data</span></span>
+<span id="cb4-2"><a href="http://localhost:4404/#cb4-2" aria-hidden="true" tabindex="-1"></a>df <span class="op">=</span> pd.read_csv(<span class="st">'gemnet_equv2_loss.csv'</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
+</div>
+<p><strong>Observations:</strong> - EquiformerV2 outperforms GemNet-OC despite having fewer parameters (53M vs 89M). - GemNet-OC exhibits overfitting behavior, as evidenced by the divergence between training and validation loss. - Based on these results, all subsequent analysis focuses exclusively on the EquiformerV2-based model.</p>
+<div id="ad2f91a3" class="cell" data-execution_count="5">
+<details class="code-fold">
+<summary>Show code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb5"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb5-1"><a href="http://localhost:4404/#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Extract columns</span></span>
+<span id="cb5-2"><a href="http://localhost:4404/#cb5-2" aria-hidden="true" tabindex="-1"></a>steps <span class="op">=</span> df[<span class="st">'trainer/global_step'</span>]</span>
+<span id="cb5-3"><a href="http://localhost:4404/#cb5-3" aria-hidden="true" tabindex="-1"></a>equiformer_train_loss <span class="op">=</span> df[<span class="st">'equiformer-base - train/loss_epoch'</span>]</span>
+<span id="cb5-4"><a href="http://localhost:4404/#cb5-4" aria-hidden="true" tabindex="-1"></a>equiformer_val_loss <span class="op">=</span> df[<span class="st">'equiformer-base - val/loss'</span>]</span>
+<span id="cb5-5"><a href="http://localhost:4404/#cb5-5" aria-hidden="true" tabindex="-1"></a>gemnet_train_loss <span class="op">=</span> df[<span class="st">'gemnet-oc - train/loss_epoch'</span>]</span>
+<span id="cb5-6"><a href="http://localhost:4404/#cb5-6" aria-hidden="true" tabindex="-1"></a>gemnet_val_loss <span class="op">=</span> df[<span class="st">'gemnet-oc - val/loss'</span>]</span>
+<span id="cb5-7"><a href="http://localhost:4404/#cb5-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-8"><a href="http://localhost:4404/#cb5-8" aria-hidden="true" tabindex="-1"></a><span class="co"># Find last valid index for equiformer data</span></span>
+<span id="cb5-9"><a href="http://localhost:4404/#cb5-9" aria-hidden="true" tabindex="-1"></a>last_valid_idx <span class="op">=</span> equiformer_train_loss.last_valid_index()</span>
+<span id="cb5-10"><a href="http://localhost:4404/#cb5-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-11"><a href="http://localhost:4404/#cb5-11" aria-hidden="true" tabindex="-1"></a><span class="co"># Plot training and validation loss curves</span></span>
+<span id="cb5-12"><a href="http://localhost:4404/#cb5-12" aria-hidden="true" tabindex="-1"></a>plt.figure()</span>
+<span id="cb5-13"><a href="http://localhost:4404/#cb5-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-14"><a href="http://localhost:4404/#cb5-14" aria-hidden="true" tabindex="-1"></a><span class="co"># Validation losses (dashed lines)</span></span>
+<span id="cb5-15"><a href="http://localhost:4404/#cb5-15" aria-hidden="true" tabindex="-1"></a>plt.plot(steps[:last_valid_idx<span class="op">+</span><span class="dv">1</span>], equiformer_val_loss[:last_valid_idx<span class="op">+</span><span class="dv">1</span>], label<span class="op">=</span><span class="st">'Equiformer Val'</span>, color<span class="op">=</span><span class="st">'steelblue'</span>, linewidth<span class="op">=</span><span class="dv">4</span>, alpha<span class="op">=</span><span class="fl">0.7</span>)</span>
+<span id="cb5-16"><a href="http://localhost:4404/#cb5-16" aria-hidden="true" tabindex="-1"></a>plt.plot(steps[:last_valid_idx<span class="op">+</span><span class="dv">1</span>], gemnet_val_loss[:last_valid_idx<span class="op">+</span><span class="dv">1</span>], label<span class="op">=</span><span class="st">'GemNet Val'</span>, color<span class="op">=</span><span class="st">'seagreen'</span>, linewidth<span class="op">=</span><span class="dv">4</span>, alpha<span class="op">=</span><span class="fl">0.7</span>)</span>
+<span id="cb5-17"><a href="http://localhost:4404/#cb5-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-18"><a href="http://localhost:4404/#cb5-18" aria-hidden="true" tabindex="-1"></a>plt.yscale(<span class="st">'log'</span>)</span>
+<span id="cb5-19"><a href="http://localhost:4404/#cb5-19" aria-hidden="true" tabindex="-1"></a>plt.yticks([<span class="fl">0.005</span>, <span class="fl">0.01</span>, <span class="fl">0.02</span>, <span class="fl">0.05</span>, <span class="fl">0.1</span>, <span class="fl">0.2</span>])</span>
+<span id="cb5-20"><a href="http://localhost:4404/#cb5-20" aria-hidden="true" tabindex="-1"></a>plt.gca().yaxis.set_major_formatter(</span>
+<span id="cb5-21"><a href="http://localhost:4404/#cb5-21" aria-hidden="true" tabindex="-1"></a>    plt.FuncFormatter(<span class="kw">lambda</span> x, _: <span class="ss">f'</span><span class="sc">{</span>x<span class="sc">:.3f}</span><span class="ss">'</span>))</span>
+<span id="cb5-22"><a href="http://localhost:4404/#cb5-22" aria-hidden="true" tabindex="-1"></a>plt.xlabel(<span class="st">'Training Steps'</span>, fontsize<span class="op">=</span><span class="dv">14</span>)</span>
+<span id="cb5-23"><a href="http://localhost:4404/#cb5-23" aria-hidden="true" tabindex="-1"></a>plt.ylabel(<span class="st">'Loss'</span>, fontsize<span class="op">=</span><span class="dv">14</span>)</span>
+<span id="cb5-24"><a href="http://localhost:4404/#cb5-24" aria-hidden="true" tabindex="-1"></a>plt.legend(fontsize<span class="op">=</span><span class="dv">14</span>)</span>
+<span id="cb5-25"><a href="http://localhost:4404/#cb5-25" aria-hidden="true" tabindex="-1"></a>plt.tick_params(axis<span class="op">=</span><span class="st">'both'</span>, labelsize<span class="op">=</span><span class="dv">14</span>)</span>
+<span id="cb5-26"><a href="http://localhost:4404/#cb5-26" aria-hidden="true" tabindex="-1"></a>plt.title(<span class="st">"Model loss vs training steps "</span>)</span>
+<span id="cb5-27"><a href="http://localhost:4404/#cb5-27" aria-hidden="true" tabindex="-1"></a>plt.tight_layout()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
+<div class="cell-output cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="./adsflow-relax-overview_files/cell-6-output-1.png" width="662" height="469" class="figure-img"></p>
+</figure>
+</div>
+</div>
+</div>
+</section>
+<section id="ood-both-validation-performance" class="level1">
+<h1>OOD-Both Validation performance</h1>
+<p>We evaluate AdsFlow performance using the OC20 validation dataset, specifically the Val-OOD-Both split, which contains out-of-distribution samples for both adsorbate and catalyst compositions.</p>
+<div id="de970954" class="cell" data-execution_count="6">
+<details class="code-fold">
+<summary>Show code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb6"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb6-1"><a href="http://localhost:4404/#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Load test set metrics</span></span>
+<span id="cb6-2"><a href="http://localhost:4404/#cb6-2" aria-hidden="true" tabindex="-1"></a>initial_mae <span class="op">=</span> np.load(<span class="st">'val_ood_both_base-metrics/initial_mae.npy'</span>)</span>
+<span id="cb6-3"><a href="http://localhost:4404/#cb6-3" aria-hidden="true" tabindex="-1"></a>generated_mae <span class="op">=</span> np.load(<span class="st">'val_ood_both_base-metrics/generated_mae.npy'</span>)</span>
+<span id="cb6-4"><a href="http://localhost:4404/#cb6-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-5"><a href="http://localhost:4404/#cb6-5" aria-hidden="true" tabindex="-1"></a><span class="co"># Load test set metrics</span></span>
+<span id="cb6-6"><a href="http://localhost:4404/#cb6-6" aria-hidden="true" tabindex="-1"></a>initial_ads_mae <span class="op">=</span> np.load(<span class="st">'val_ood_both_base-metrics/initial_ads_mae.npy'</span>)</span>
+<span id="cb6-7"><a href="http://localhost:4404/#cb6-7" aria-hidden="true" tabindex="-1"></a>generated_ads_mae <span class="op">=</span> np.load(<span class="st">'val_ood_both_base-metrics/generated_ads_mae.npy'</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
+</div>
+<p><strong>Observations:</strong> - AdsFlow reduces the MAE of initial structures by 0.08 Å, achieving a total MAE of 0.12 Å across all structures. - Adsorbate atoms exhibit higher MAE than the overall average, which is expected given that adsorbates undergo the largest displacements during relaxation (as indicated by the initial MAE distribution). - The central diagnostic question is whether the elevated adsorbate error reflects (1) a limitation in the model’s ability to learn adsorbate velocity fields, or (2) an inherent dataset imbalance where adsorbates are underrepresented.</p>
+<div id="97cc86bd" class="cell" data-execution_count="7">
+<details class="code-fold">
+<summary>Show code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb7"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb7-1"><a href="http://localhost:4404/#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Create histogram for MAE</span></span>
+<span id="cb7-2"><a href="http://localhost:4404/#cb7-2" aria-hidden="true" tabindex="-1"></a>plt.figure()</span>
+<span id="cb7-3"><a href="http://localhost:4404/#cb7-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-4"><a href="http://localhost:4404/#cb7-4" aria-hidden="true" tabindex="-1"></a>plt.hist(initial_mae, bins<span class="op">=</span><span class="dv">50</span>, alpha<span class="op">=</span><span class="fl">0.7</span>, label<span class="op">=</span><span class="ss">f'Initial MAE = </span><span class="sc">{</span>initial_mae<span class="sc">.</span>mean()<span class="sc">:.2f}</span><span class="ss"> $</span><span class="er">\</span><span class="ss">AA$'</span>, color<span class="op">=</span><span class="st">'grey'</span>)</span>
+<span id="cb7-5"><a href="http://localhost:4404/#cb7-5" aria-hidden="true" tabindex="-1"></a>plt.hist(generated_mae, bins<span class="op">=</span><span class="dv">50</span>, alpha<span class="op">=</span><span class="fl">0.7</span>, label<span class="op">=</span><span class="ss">f'Generated MAE = </span><span class="sc">{</span>generated_mae<span class="sc">.</span>mean()<span class="sc">:.2f}</span><span class="ss"> $</span><span class="er">\</span><span class="ss">AA$'</span>, color<span class="op">=</span><span class="st">'steelblue'</span>)</span>
+<span id="cb7-6"><a href="http://localhost:4404/#cb7-6" aria-hidden="true" tabindex="-1"></a>plt.xlabel(<span class="st">'Mean Absolute Error ($</span><span class="er">\</span><span class="st">AA$)'</span>, fontsize<span class="op">=</span><span class="dv">14</span>)</span>
+<span id="cb7-7"><a href="http://localhost:4404/#cb7-7" aria-hidden="true" tabindex="-1"></a>plt.ylabel(<span class="st">'Count'</span>, fontsize<span class="op">=</span><span class="dv">14</span>)</span>
+<span id="cb7-8"><a href="http://localhost:4404/#cb7-8" aria-hidden="true" tabindex="-1"></a>plt.legend(fontsize<span class="op">=</span><span class="dv">12</span>)</span>
+<span id="cb7-9"><a href="http://localhost:4404/#cb7-9" aria-hidden="true" tabindex="-1"></a>plt.tick_params(axis<span class="op">=</span><span class="st">'both'</span>, labelsize<span class="op">=</span><span class="dv">12</span>)</span>
+<span id="cb7-10"><a href="http://localhost:4404/#cb7-10" aria-hidden="true" tabindex="-1"></a>plt.title(<span class="st">"Initial vs generated per structure MAE"</span>)</span>
+<span id="cb7-11"><a href="http://localhost:4404/#cb7-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-12"><a href="http://localhost:4404/#cb7-12" aria-hidden="true" tabindex="-1"></a><span class="co"># Create histogram for MAE</span></span>
+<span id="cb7-13"><a href="http://localhost:4404/#cb7-13" aria-hidden="true" tabindex="-1"></a>plt.figure()</span>
+<span id="cb7-14"><a href="http://localhost:4404/#cb7-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-15"><a href="http://localhost:4404/#cb7-15" aria-hidden="true" tabindex="-1"></a>plt.hist(initial_ads_mae, bins<span class="op">=</span><span class="dv">50</span>, alpha<span class="op">=</span><span class="fl">0.7</span>, label<span class="op">=</span><span class="ss">f'Initial Adsorbate MAE=</span><span class="sc">{</span>initial_ads_mae<span class="sc">.</span>mean()<span class="sc">:.2f}</span><span class="ss"> $</span><span class="er">\</span><span class="ss">AA$'</span>, color<span class="op">=</span><span class="st">'grey'</span>)</span>
+<span id="cb7-16"><a href="http://localhost:4404/#cb7-16" aria-hidden="true" tabindex="-1"></a>plt.hist(generated_ads_mae, bins<span class="op">=</span><span class="dv">50</span>, alpha<span class="op">=</span><span class="fl">0.7</span>, label<span class="op">=</span><span class="ss">f'Generated Adsorbate MAE=</span><span class="sc">{</span>generated_ads_mae<span class="sc">.</span>mean()<span class="sc">:.2f}</span><span class="ss"> $</span><span class="er">\</span><span class="ss">AA$'</span>, color<span class="op">=</span><span class="st">'steelblue'</span>)</span>
+<span id="cb7-17"><a href="http://localhost:4404/#cb7-17" aria-hidden="true" tabindex="-1"></a>plt.xlabel(<span class="st">'Adsorbate Mean Absolute Error ($</span><span class="er">\</span><span class="st">AA$)'</span>, fontsize<span class="op">=</span><span class="dv">14</span>)</span>
+<span id="cb7-18"><a href="http://localhost:4404/#cb7-18" aria-hidden="true" tabindex="-1"></a>plt.ylabel(<span class="st">'Count'</span>, fontsize<span class="op">=</span><span class="dv">14</span>)</span>
+<span id="cb7-19"><a href="http://localhost:4404/#cb7-19" aria-hidden="true" tabindex="-1"></a>plt.legend(fontsize<span class="op">=</span><span class="dv">12</span>)</span>
+<span id="cb7-20"><a href="http://localhost:4404/#cb7-20" aria-hidden="true" tabindex="-1"></a>plt.tick_params(axis<span class="op">=</span><span class="st">'both'</span>, labelsize<span class="op">=</span><span class="dv">12</span>)</span>
+<span id="cb7-21"><a href="http://localhost:4404/#cb7-21" aria-hidden="true" tabindex="-1"></a>plt.title(<span class="st">"Initial vs generated per adsorbate MAE"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
+<div class="cell-output cell-output-display" data-execution_count="22">
+<pre><code>Text(0.5, 1.0, 'Initial vs generated per adsorbate MAE')</code></pre>
+</div>
+<div class="cell-output cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="./adsflow-relax-overview_files/cell-8-output-2.png" width="604" height="460" class="figure-img"></p>
+</figure>
+</div>
+</div>
+<div class="cell-output cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="./adsflow-relax-overview_files/cell-8-output-3.png" width="604" height="460" class="figure-img"></p>
+</figure>
+</div>
+</div>
+</div>
+<section id="correlation-analysis-displacement-vs.-error" class="level3">
+<h3 class="anchored" data-anchor-id="correlation-analysis-displacement-vs.-error">Correlation Analysis: Displacement vs.&nbsp;Error<a class="anchorjs-link " aria-label="Anchor" data-anchorjs-icon="" href="http://localhost:4404/#correlation-analysis-displacement-vs.-error" style="font: 1em / 1 anchorjs-icons; margin-left: 0.1875em; padding-right: 0.1875em; padding-left: 0.1875em;"></a></h3>
+<p>To diagnose model performance on adsorbates, we examine two key correlations:</p>
+<p><strong>Plot 1 - Generated MAE vs Initial MAE:</strong> This reveals whether the model struggles with adsorbates requiring large displacements. A positive correlation indicates that atoms needing to move further tend to have higher final errors.</p>
+<p><strong>Plot 2 - Error Improvement vs Initial MAE:</strong> By plotting (Generated MAE - Initial MAE) against Initial MAE, we assess whether the model actively improves difficult cases. Key observations: - Negative values indicate improvement over the initial structure - Positive values (y &gt; 0) indicate the model made the structure worse - A negative slope suggests the model provides greater improvement for atoms with larger required displacements</p>
+<p><strong>Results:</strong> - Plot 1 shows moderate correlation: adsorbates requiring large displacements tend to have higher generated MAE. - Plot 2 reveals that the model does learn to handle large-displacement adsorbates—these cases show the largest improvements (most negative y-values). - Interestingly, structures with small initial MAE are more likely to be made slightly worse (y &gt; 0), though this does not contradict the first observation: an adsorbate with large initial MAE can be significantly improved while still having elevated final MAE due to the magnitude of required displacement.</p>
+<div id="f151ea7f" class="cell" data-execution_count="8">
+<details class="code-fold">
+<summary>Show code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb9"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb9-1"><a href="http://localhost:4404/#cb9-1" aria-hidden="true" tabindex="-1"></a>slope, intercept, r_value, p_value, std_err <span class="op">=</span> stats.linregress(initial_ads_mae, generated_ads_mae)</span>
+<span id="cb9-2"><a href="http://localhost:4404/#cb9-2" aria-hidden="true" tabindex="-1"></a>r_squared <span class="op">=</span> r_value<span class="op">**</span><span class="dv">2</span></span>
+<span id="cb9-3"><a href="http://localhost:4404/#cb9-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-4"><a href="http://localhost:4404/#cb9-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Generate regression line</span></span>
+<span id="cb9-5"><a href="http://localhost:4404/#cb9-5" aria-hidden="true" tabindex="-1"></a>x_reg <span class="op">=</span> np.linspace(initial_ads_mae.<span class="bu">min</span>(), initial_ads_mae.<span class="bu">max</span>(), <span class="dv">100</span>)</span>
+<span id="cb9-6"><a href="http://localhost:4404/#cb9-6" aria-hidden="true" tabindex="-1"></a>y_reg <span class="op">=</span> slope <span class="op">*</span> x_reg <span class="op">+</span> intercept</span>
+<span id="cb9-7"><a href="http://localhost:4404/#cb9-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-8"><a href="http://localhost:4404/#cb9-8" aria-hidden="true" tabindex="-1"></a>plt.figure()</span>
+<span id="cb9-9"><a href="http://localhost:4404/#cb9-9" aria-hidden="true" tabindex="-1"></a>plt.scatter(</span>
+<span id="cb9-10"><a href="http://localhost:4404/#cb9-10" aria-hidden="true" tabindex="-1"></a>    initial_ads_mae,</span>
+<span id="cb9-11"><a href="http://localhost:4404/#cb9-11" aria-hidden="true" tabindex="-1"></a>    generated_ads_mae,</span>
+<span id="cb9-12"><a href="http://localhost:4404/#cb9-12" aria-hidden="true" tabindex="-1"></a>    s<span class="op">=</span><span class="dv">100</span>,      <span class="co"># or e.g. 5 + 3*counts to exaggerate</span></span>
+<span id="cb9-13"><a href="http://localhost:4404/#cb9-13" aria-hidden="true" tabindex="-1"></a>    alpha<span class="op">=</span><span class="fl">0.7</span>,</span>
+<span id="cb9-14"><a href="http://localhost:4404/#cb9-14" aria-hidden="true" tabindex="-1"></a>    edgecolors<span class="op">=</span><span class="st">"black"</span></span>
+<span id="cb9-15"><a href="http://localhost:4404/#cb9-15" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb9-16"><a href="http://localhost:4404/#cb9-16" aria-hidden="true" tabindex="-1"></a>plt.plot(x_reg, y_reg, color<span class="op">=</span><span class="st">"blue"</span>, linewidth<span class="op">=</span><span class="dv">2</span>, linestyle<span class="op">=</span><span class="st">"--"</span>, label<span class="op">=</span><span class="ss">f"Linear Fit: y=</span><span class="sc">{</span>slope<span class="sc">:.3f}</span><span class="ss">x+</span><span class="sc">{</span>intercept<span class="sc">:.3f}</span><span class="ch">\n</span><span class="ss">$R^2$=</span><span class="sc">{</span>r_squared<span class="sc">:.3f}</span><span class="ss">"</span>)</span>
+<span id="cb9-17"><a href="http://localhost:4404/#cb9-17" aria-hidden="true" tabindex="-1"></a>plt.ylabel(<span class="st">"Generated Adsorbate MAE ($</span><span class="er">\</span><span class="st">AA$)"</span>)</span>
+<span id="cb9-18"><a href="http://localhost:4404/#cb9-18" aria-hidden="true" tabindex="-1"></a>plt.xlabel(<span class="st">"Initial Adsorbate MAE ($</span><span class="er">\</span><span class="st">AA$)"</span>)</span>
+<span id="cb9-19"><a href="http://localhost:4404/#cb9-19" aria-hidden="true" tabindex="-1"></a>plt.title(<span class="st">"Generated Adsorbate MAE vs Initial Adsorbate MAE"</span>)</span>
+<span id="cb9-20"><a href="http://localhost:4404/#cb9-20" aria-hidden="true" tabindex="-1"></a>plt.legend()</span>
+<span id="cb9-21"><a href="http://localhost:4404/#cb9-21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-22"><a href="http://localhost:4404/#cb9-22" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-23"><a href="http://localhost:4404/#cb9-23" aria-hidden="true" tabindex="-1"></a>delta <span class="op">=</span> generated_ads_mae <span class="op">-</span> initial_ads_mae</span>
+<span id="cb9-24"><a href="http://localhost:4404/#cb9-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-25"><a href="http://localhost:4404/#cb9-25" aria-hidden="true" tabindex="-1"></a>plt.figure()</span>
+<span id="cb9-26"><a href="http://localhost:4404/#cb9-26" aria-hidden="true" tabindex="-1"></a>plt.scatter(</span>
+<span id="cb9-27"><a href="http://localhost:4404/#cb9-27" aria-hidden="true" tabindex="-1"></a>    initial_ads_mae,</span>
+<span id="cb9-28"><a href="http://localhost:4404/#cb9-28" aria-hidden="true" tabindex="-1"></a>    delta,</span>
+<span id="cb9-29"><a href="http://localhost:4404/#cb9-29" aria-hidden="true" tabindex="-1"></a>    s<span class="op">=</span><span class="dv">100</span>,      <span class="co"># or e.g. 5 + 3*counts to exaggerate</span></span>
+<span id="cb9-30"><a href="http://localhost:4404/#cb9-30" aria-hidden="true" tabindex="-1"></a>    alpha<span class="op">=</span><span class="fl">0.7</span>,</span>
+<span id="cb9-31"><a href="http://localhost:4404/#cb9-31" aria-hidden="true" tabindex="-1"></a>    edgecolors<span class="op">=</span><span class="st">"black"</span></span>
+<span id="cb9-32"><a href="http://localhost:4404/#cb9-32" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb9-33"><a href="http://localhost:4404/#cb9-33" aria-hidden="true" tabindex="-1"></a>plt.plot(x_reg, np.zeros_like(x_reg), color<span class="op">=</span><span class="st">"red"</span>, label<span class="op">=</span><span class="st">"y=0"</span>, linewidth<span class="op">=</span><span class="dv">2</span>)</span>
+<span id="cb9-34"><a href="http://localhost:4404/#cb9-34" aria-hidden="true" tabindex="-1"></a>plt.xlabel(<span class="st">"Initial MAE ($</span><span class="er">\</span><span class="st">AA$)"</span>)</span>
+<span id="cb9-35"><a href="http://localhost:4404/#cb9-35" aria-hidden="true" tabindex="-1"></a>plt.ylabel(<span class="st">"Generated - Initial MA ($</span><span class="er">\</span><span class="st">AA$)"</span>)</span>
+<span id="cb9-36"><a href="http://localhost:4404/#cb9-36" aria-hidden="true" tabindex="-1"></a>plt.title(<span class="st">"Generated Adsorbate MAE - Initial Adsorbate MAE vs Initial Adsorbate MAE"</span>)</span>
+<span id="cb9-37"><a href="http://localhost:4404/#cb9-37" aria-hidden="true" tabindex="-1"></a>plt.legend()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
+<div class="cell-output cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="./adsflow-relax-overview_files/cell-9-output-1.png" width="593" height="453" class="figure-img"></p>
+</figure>
+</div>
+</div>
+<div class="cell-output cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="./adsflow-relax-overview_files/cell-9-output-2.png" width="642" height="453" class="figure-img"></p>
+</figure>
+</div>
+</div>
+</div>
+</section>
+<section id="mean-drift-bias-analysis" class="level2">
+<h2 class="anchored" data-anchor-id="mean-drift-bias-analysis">Mean Drift (Bias) Analysis<a class="anchorjs-link " aria-label="Anchor" data-anchorjs-icon="" href="http://localhost:4404/#mean-drift-bias-analysis" style="font: 1em / 1 anchorjs-icons; margin-left: 0.1875em; padding-right: 0.1875em; padding-left: 0.1875em;"></a></h2>
+<p>To assess systematic bias in model predictions, we compute the mean error (ME), which captures the signed average displacement error. Unlike MAE, ME reveals whether the model consistently over- or under-predicts atomic positions.</p>
+<div id="a7f82f88" class="cell" data-execution_count="9">
+<details class="code-fold">
+<summary>Show code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb10"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb10-1"><a href="http://localhost:4404/#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Load test set metrics</span></span>
+<span id="cb10-2"><a href="http://localhost:4404/#cb10-2" aria-hidden="true" tabindex="-1"></a>generated_me <span class="op">=</span> np.load(<span class="st">'val_ood_both_base-metrics/generated_me.npy'</span>)</span>
+<span id="cb10-3"><a href="http://localhost:4404/#cb10-3" aria-hidden="true" tabindex="-1"></a>generated_ads_me <span class="op">=</span> np.load(<span class="st">'val_ood_both_base-metrics/generated_ads_me.npy'</span>)</span>
+<span id="cb10-4"><a href="http://localhost:4404/#cb10-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-5"><a href="http://localhost:4404/#cb10-5" aria-hidden="true" tabindex="-1"></a>initial_me <span class="op">=</span> np.load(<span class="st">'val_ood_both_base-metrics/initial_me.npy'</span>)</span>
+<span id="cb10-6"><a href="http://localhost:4404/#cb10-6" aria-hidden="true" tabindex="-1"></a>initial_ads_me <span class="op">=</span> np.load(<span class="st">'val_ood_both_base-metrics/initial_ads_me.npy'</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
+</div>
+<p><strong>Observations:</strong> - The mean error is approximately zero for both overall structures and adsorbate atoms, indicating the model is unbiased. - This unbiased behavior confirms the model does not systematically underpredict or overpredict positions. - However, the variance of adsorbate predictions is substantially higher than for catalyst atoms, indicating the model over/underpredicts individual samples in roughly equal but significant quantities. - Importantly, AdsFlow significantly reduces variance compared to the initial structure distribution, particularly for adsorbate atoms.</p>
+<div id="2b92e82f" class="cell" data-execution_count="10">
+<details class="code-fold">
+<summary>Show code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb11"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb11-1"><a href="http://localhost:4404/#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Create histogram for MAE</span></span>
+<span id="cb11-2"><a href="http://localhost:4404/#cb11-2" aria-hidden="true" tabindex="-1"></a>plt.figure()</span>
+<span id="cb11-3"><a href="http://localhost:4404/#cb11-3" aria-hidden="true" tabindex="-1"></a>plt.hist(initial_me, bins<span class="op">=</span><span class="dv">50</span>, alpha<span class="op">=</span><span class="fl">0.7</span>, label<span class="op">=</span><span class="ss">f'Initial ME = </span><span class="sc">{</span>initial_me<span class="sc">.</span>mean()<span class="sc">:.2f}</span><span class="ss"> $</span><span class="er">\</span><span class="ss">AA$'</span>, color<span class="op">=</span><span class="st">'grey'</span>)</span>
+<span id="cb11-4"><a href="http://localhost:4404/#cb11-4" aria-hidden="true" tabindex="-1"></a>plt.hist(generated_me, bins<span class="op">=</span><span class="dv">50</span>, alpha<span class="op">=</span><span class="fl">0.7</span>, label<span class="op">=</span><span class="ss">f'Generated ME = </span><span class="sc">{</span>generated_me<span class="sc">.</span>mean()<span class="sc">:.2f}</span><span class="ss"> $</span><span class="er">\</span><span class="ss">AA$'</span>, color<span class="op">=</span><span class="st">'steelblue'</span>)</span>
+<span id="cb11-5"><a href="http://localhost:4404/#cb11-5" aria-hidden="true" tabindex="-1"></a>plt.xlabel(<span class="st">'Generated Mean Error ($</span><span class="er">\</span><span class="st">AA$)'</span>, fontsize<span class="op">=</span><span class="dv">14</span>)</span>
+<span id="cb11-6"><a href="http://localhost:4404/#cb11-6" aria-hidden="true" tabindex="-1"></a>plt.ylabel(<span class="st">'Count'</span>, fontsize<span class="op">=</span><span class="dv">14</span>)</span>
+<span id="cb11-7"><a href="http://localhost:4404/#cb11-7" aria-hidden="true" tabindex="-1"></a>plt.legend(fontsize<span class="op">=</span><span class="dv">12</span>)</span>
+<span id="cb11-8"><a href="http://localhost:4404/#cb11-8" aria-hidden="true" tabindex="-1"></a>plt.tick_params(axis<span class="op">=</span><span class="st">'both'</span>, labelsize<span class="op">=</span><span class="dv">12</span>)</span>
+<span id="cb11-9"><a href="http://localhost:4404/#cb11-9" aria-hidden="true" tabindex="-1"></a>plt.title(<span class="st">'Initial vs Generated Mean Error'</span>)</span>
+<span id="cb11-10"><a href="http://localhost:4404/#cb11-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-11"><a href="http://localhost:4404/#cb11-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-12"><a href="http://localhost:4404/#cb11-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-13"><a href="http://localhost:4404/#cb11-13" aria-hidden="true" tabindex="-1"></a><span class="co"># Create histogram for MAE</span></span>
+<span id="cb11-14"><a href="http://localhost:4404/#cb11-14" aria-hidden="true" tabindex="-1"></a>plt.figure()</span>
+<span id="cb11-15"><a href="http://localhost:4404/#cb11-15" aria-hidden="true" tabindex="-1"></a>plt.hist(initial_ads_me, bins<span class="op">=</span><span class="dv">50</span>, alpha<span class="op">=</span><span class="fl">0.7</span>, label<span class="op">=</span><span class="ss">f'Initial Adsorbate ME = </span><span class="sc">{</span>initial_ads_me<span class="sc">.</span>mean()<span class="sc">:.2f}</span><span class="ss"> $</span><span class="er">\</span><span class="ss">AA$'</span>, color<span class="op">=</span><span class="st">'grey'</span>)</span>
+<span id="cb11-16"><a href="http://localhost:4404/#cb11-16" aria-hidden="true" tabindex="-1"></a>plt.hist(generated_ads_me, bins<span class="op">=</span><span class="dv">50</span>, alpha<span class="op">=</span><span class="fl">0.7</span>, label<span class="op">=</span><span class="ss">f'Generated Adsorbate ME = </span><span class="sc">{</span>generated_ads_me<span class="sc">.</span>mean()<span class="sc">:.2f}</span><span class="ss"> $</span><span class="er">\</span><span class="ss">AA$'</span>, color<span class="op">=</span><span class="st">'steelblue'</span>)</span>
+<span id="cb11-17"><a href="http://localhost:4404/#cb11-17" aria-hidden="true" tabindex="-1"></a>plt.xlabel(<span class="st">'Generated Mean Error ($</span><span class="er">\</span><span class="st">AA$)'</span>, fontsize<span class="op">=</span><span class="dv">14</span>)</span>
+<span id="cb11-18"><a href="http://localhost:4404/#cb11-18" aria-hidden="true" tabindex="-1"></a>plt.ylabel(<span class="st">'Count'</span>, fontsize<span class="op">=</span><span class="dv">14</span>)</span>
+<span id="cb11-19"><a href="http://localhost:4404/#cb11-19" aria-hidden="true" tabindex="-1"></a>plt.legend(fontsize<span class="op">=</span><span class="dv">12</span>)</span>
+<span id="cb11-20"><a href="http://localhost:4404/#cb11-20" aria-hidden="true" tabindex="-1"></a>plt.tick_params(axis<span class="op">=</span><span class="st">'both'</span>, labelsize<span class="op">=</span><span class="dv">12</span>)</span>
+<span id="cb11-21"><a href="http://localhost:4404/#cb11-21" aria-hidden="true" tabindex="-1"></a>plt.title(<span class="st">'Initial vs Generated Adsorbate Mean Error'</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
+<div class="cell-output cell-output-display" data-execution_count="25">
+<pre><code>Text(0.5, 1.0, 'Initial vs Generated Adsorbate Mean Error')</code></pre>
+</div>
+<div class="cell-output cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="./adsflow-relax-overview_files/cell-11-output-2.png" width="604" height="460" class="figure-img"></p>
+</figure>
+</div>
+</div>
+<div class="cell-output cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="./adsflow-relax-overview_files/cell-11-output-3.png" width="604" height="460" class="figure-img"></p>
+</figure>
+</div>
+</div>
+</div>
+<section id="correlation-mean-error-vs-required-displacement" class="level3">
+<h3 class="anchored" data-anchor-id="correlation-mean-error-vs-required-displacement">Correlation: Mean Error vs Required Displacement<a class="anchorjs-link " aria-label="Anchor" data-anchorjs-icon="" href="http://localhost:4404/#correlation-mean-error-vs-required-displacement" style="font: 1em / 1 anchorjs-icons; margin-left: 0.1875em; padding-right: 0.1875em; padding-left: 0.1875em;"></a></h3>
+<p>We examine whether over/under-prediction correlates with the required displacement magnitude. A significant correlation would indicate that the model systematically underpredicts atoms requiring large displacements while overpredicting atoms requiring small displacements.</p>
+<p><strong>Result:</strong> The regression analysis shows no statistically significant correlation (R² ≈ 0), confirming that the model’s prediction errors are independent of displacement magnitude.</p>
+<div id="c2fa3c3f" class="cell" data-execution_count="11">
+<details class="code-fold">
+<summary>Show code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb13"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb13-1"><a href="http://localhost:4404/#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Generate regression line</span></span>
+<span id="cb13-2"><a href="http://localhost:4404/#cb13-2" aria-hidden="true" tabindex="-1"></a>slope, intercept, r_value, p_value, std_err <span class="op">=</span> stats.linregress(initial_ads_mae, generated_ads_me)</span>
+<span id="cb13-3"><a href="http://localhost:4404/#cb13-3" aria-hidden="true" tabindex="-1"></a>r_squared <span class="op">=</span> r_value<span class="op">**</span><span class="dv">2</span></span>
+<span id="cb13-4"><a href="http://localhost:4404/#cb13-4" aria-hidden="true" tabindex="-1"></a>x_reg <span class="op">=</span> np.linspace(initial_ads_mae.<span class="bu">min</span>(), initial_ads_me.<span class="bu">max</span>(), <span class="dv">100</span>)</span>
+<span id="cb13-5"><a href="http://localhost:4404/#cb13-5" aria-hidden="true" tabindex="-1"></a>y_reg <span class="op">=</span> slope <span class="op">*</span> x_reg <span class="op">+</span> intercept</span>
+<span id="cb13-6"><a href="http://localhost:4404/#cb13-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb13-7"><a href="http://localhost:4404/#cb13-7" aria-hidden="true" tabindex="-1"></a>plt.figure()</span>
+<span id="cb13-8"><a href="http://localhost:4404/#cb13-8" aria-hidden="true" tabindex="-1"></a>plt.scatter(</span>
+<span id="cb13-9"><a href="http://localhost:4404/#cb13-9" aria-hidden="true" tabindex="-1"></a>    initial_ads_mae,</span>
+<span id="cb13-10"><a href="http://localhost:4404/#cb13-10" aria-hidden="true" tabindex="-1"></a>    generated_ads_me,</span>
+<span id="cb13-11"><a href="http://localhost:4404/#cb13-11" aria-hidden="true" tabindex="-1"></a>    s<span class="op">=</span><span class="dv">100</span>,      <span class="co"># or e.g. 5 + 3*counts to exaggerate</span></span>
+<span id="cb13-12"><a href="http://localhost:4404/#cb13-12" aria-hidden="true" tabindex="-1"></a>    alpha<span class="op">=</span><span class="fl">0.7</span>,</span>
+<span id="cb13-13"><a href="http://localhost:4404/#cb13-13" aria-hidden="true" tabindex="-1"></a>    edgecolors<span class="op">=</span><span class="st">"black"</span></span>
+<span id="cb13-14"><a href="http://localhost:4404/#cb13-14" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb13-15"><a href="http://localhost:4404/#cb13-15" aria-hidden="true" tabindex="-1"></a>plt.plot(x_reg, y_reg, color<span class="op">=</span><span class="st">"blue"</span>, linewidth<span class="op">=</span><span class="dv">2</span>, linestyle<span class="op">=</span><span class="st">"--"</span>, label<span class="op">=</span><span class="ss">f"Linear Fit: y=</span><span class="sc">{</span>slope<span class="sc">:.3f}</span><span class="ss">x+</span><span class="sc">{</span>intercept<span class="sc">:.3f}</span><span class="ch">\n</span><span class="ss">$R^2$=</span><span class="sc">{</span>r_squared<span class="sc">:.3f}</span><span class="ss">"</span>)</span>
+<span id="cb13-16"><a href="http://localhost:4404/#cb13-16" aria-hidden="true" tabindex="-1"></a>plt.ylabel(<span class="st">"Generated Adsorbate ME ($</span><span class="er">\</span><span class="st">AA$)"</span>)</span>
+<span id="cb13-17"><a href="http://localhost:4404/#cb13-17" aria-hidden="true" tabindex="-1"></a>plt.xlabel(<span class="st">"Initial Adsorbate MAE ($</span><span class="er">\</span><span class="st">AA$)"</span>)</span>
+<span id="cb13-18"><a href="http://localhost:4404/#cb13-18" aria-hidden="true" tabindex="-1"></a>plt.legend()</span>
+<span id="cb13-19"><a href="http://localhost:4404/#cb13-19" aria-hidden="true" tabindex="-1"></a>plt.title(<span class="st">"Generated Adsorbate ME vs Initial Adsorbate MAE"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
+<div class="cell-output cell-output-display" data-execution_count="26">
+<pre><code>Text(0.5, 1.0, 'Generated Adsorbate ME vs Initial Adsorbate MAE')</code></pre>
+</div>
+<div class="cell-output cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="./adsflow-relax-overview_files/cell-12-output-2.png" width="604" height="453" class="figure-img"></p>
+</figure>
+</div>
+</div>
+</div>
+</section>
+</section>
+<section id="transition-to-velocity-field-analysis" class="level2">
+<h2 class="anchored" data-anchor-id="transition-to-velocity-field-analysis">Transition to Velocity Field Analysis<a class="anchorjs-link " aria-label="Anchor" data-anchorjs-icon="" href="http://localhost:4404/#transition-to-velocity-field-analysis" style="font: 1em / 1 anchorjs-icons; margin-left: 0.1875em; padding-right: 0.1875em; padding-left: 0.1875em;"></a></h2>
+<p>The structural MAE analysis provides limited insight into the specific failure modes of AdsFlow, particularly regarding adsorbate performance and bias since they are <strong>per structure</strong> metrics. To gain deeper understanding, we now examine the velocity field predictions directly—the actual regression target of the model.</p>
+</section>
+<section id="velocity-field-predictions" class="level2">
+<h2 class="anchored" data-anchor-id="velocity-field-predictions">Velocity Field Predictions<a class="anchorjs-link " aria-label="Anchor" data-anchorjs-icon="" href="http://localhost:4404/#velocity-field-predictions" style="font: 1em / 1 anchorjs-icons; margin-left: 0.1875em; padding-right: 0.1875em; padding-left: 0.1875em;"></a></h2>
+<p>The flow matching model regresses velocity field vectors that direct each atom from its initial position to its final relaxed position. Unlike the earlier per-structure statistics, velocity fields are defined per atom, enabling more granular analysis.</p>
+<p>For our one-shot prediction approach, the velocity field represents the residual vector between relaxed coordinates (x₁, y₁, z₁) and initial coordinates (x₀, y₀, z₀).</p>
+<div id="04882788" class="cell" data-execution_count="12">
+<details class="code-fold">
+<summary>Show code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb15"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb15-1"><a href="http://localhost:4404/#cb15-1" aria-hidden="true" tabindex="-1"></a>u <span class="op">=</span> np.load(<span class="st">'val_ood_both_base-metrics/u.npy'</span>) </span>
+<span id="cb15-2"><a href="http://localhost:4404/#cb15-2" aria-hidden="true" tabindex="-1"></a>u_hat <span class="op">=</span> np.load(<span class="st">'val_ood_both_base-metrics/u_hat.npy'</span>)</span>
+<span id="cb15-3"><a href="http://localhost:4404/#cb15-3" aria-hidden="true" tabindex="-1"></a>tags <span class="op">=</span> np.load(<span class="st">'val_ood_both_base-metrics/tags.npy'</span>)</span>
+<span id="cb15-4"><a href="http://localhost:4404/#cb15-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb15-5"><a href="http://localhost:4404/#cb15-5" aria-hidden="true" tabindex="-1"></a>u_ads <span class="op">=</span> u[tags <span class="op">==</span> <span class="dv">2</span>]</span>
+<span id="cb15-6"><a href="http://localhost:4404/#cb15-6" aria-hidden="true" tabindex="-1"></a>u_cat <span class="op">=</span> u[tags <span class="op">==</span> <span class="dv">1</span>]</span>
+<span id="cb15-7"><a href="http://localhost:4404/#cb15-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb15-8"><a href="http://localhost:4404/#cb15-8" aria-hidden="true" tabindex="-1"></a>u_hat_ads <span class="op">=</span> u_hat[tags <span class="op">==</span> <span class="dv">2</span>]</span>
+<span id="cb15-9"><a href="http://localhost:4404/#cb15-9" aria-hidden="true" tabindex="-1"></a>u_hat_cat <span class="op">=</span> u_hat[tags <span class="op">==</span> <span class="dv">1</span>]</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
+</div>
+<section id="distribution-of-true-velocity-field-norms" class="level3">
+<h3 class="anchored" data-anchor-id="distribution-of-true-velocity-field-norms">Distribution of True Velocity Field Norms<a class="anchorjs-link " aria-label="Anchor" data-anchorjs-icon="" href="http://localhost:4404/#distribution-of-true-velocity-field-norms" style="font: 1em / 1 anchorjs-icons; margin-left: 0.1875em; padding-right: 0.1875em; padding-left: 0.1875em;"></a></h3>
+<p><strong>Observation:</strong> Adsorbate atoms have systematically larger velocity field vector norms (mean = ~1.24 Å) compared to catalyst atoms (mean = ~0.26 Å), with substantially higher variance. This confirms that adsorbates undergo larger displacements during relaxation, contributing to the difficulty in predicting their final positions.</p>
+<div id="eff1cac3" class="cell" data-execution_count="13">
+<details class="code-fold">
+<summary>Show code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb16"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb16-1"><a href="http://localhost:4404/#cb16-1" aria-hidden="true" tabindex="-1"></a>u_norm <span class="op">=</span> np.linalg.norm(u, axis<span class="op">=</span><span class="dv">1</span>)</span>
+<span id="cb16-2"><a href="http://localhost:4404/#cb16-2" aria-hidden="true" tabindex="-1"></a>u_hat_norm <span class="op">=</span> np.linalg.norm(u_hat, axis<span class="op">=</span><span class="dv">1</span>)</span>
+<span id="cb16-3"><a href="http://localhost:4404/#cb16-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-4"><a href="http://localhost:4404/#cb16-4" aria-hidden="true" tabindex="-1"></a>u_ads_norm <span class="op">=</span> np.linalg.norm(u_ads, axis<span class="op">=</span><span class="dv">1</span>)</span>
+<span id="cb16-5"><a href="http://localhost:4404/#cb16-5" aria-hidden="true" tabindex="-1"></a>u_hat_ads_norm <span class="op">=</span> np.linalg.norm(u_hat_ads, axis<span class="op">=</span><span class="dv">1</span>)</span>
+<span id="cb16-6"><a href="http://localhost:4404/#cb16-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-7"><a href="http://localhost:4404/#cb16-7" aria-hidden="true" tabindex="-1"></a>u_cat_norm <span class="op">=</span> np.linalg.norm(u_cat, axis<span class="op">=</span><span class="dv">1</span>)</span>
+<span id="cb16-8"><a href="http://localhost:4404/#cb16-8" aria-hidden="true" tabindex="-1"></a>u_hat_cat_norm <span class="op">=</span> np.linalg.norm(u_hat_cat, axis<span class="op">=</span><span class="dv">1</span>)</span>
+<span id="cb16-9"><a href="http://localhost:4404/#cb16-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-10"><a href="http://localhost:4404/#cb16-10" aria-hidden="true" tabindex="-1"></a>plt.figure()</span>
+<span id="cb16-11"><a href="http://localhost:4404/#cb16-11" aria-hidden="true" tabindex="-1"></a>plt.xlim(<span class="va">None</span>, <span class="dv">4</span>)</span>
+<span id="cb16-12"><a href="http://localhost:4404/#cb16-12" aria-hidden="true" tabindex="-1"></a>plt.hist(u_cat_norm, bins<span class="op">=</span><span class="dv">30</span>,  density<span class="op">=</span><span class="va">True</span>, label<span class="op">=</span><span class="ss">f'Catalyst (mean=</span><span class="sc">{</span>u_cat_norm<span class="sc">.</span>mean()<span class="sc">:.2f}</span><span class="ss"> $</span><span class="er">\</span><span class="ss">AA$)'</span>, color<span class="op">=</span><span class="st">"#087F91"</span>)</span>
+<span id="cb16-13"><a href="http://localhost:4404/#cb16-13" aria-hidden="true" tabindex="-1"></a>plt.hist(u_ads_norm, bins<span class="op">=</span><span class="dv">30</span>,  density<span class="op">=</span><span class="va">True</span>, label<span class="op">=</span><span class="ss">f'Adsorbate (mean=</span><span class="sc">{</span>u_ads_norm<span class="sc">.</span>mean()<span class="sc">:.2f}</span><span class="ss"> $</span><span class="er">\</span><span class="ss">AA$)'</span>, color<span class="op">=</span><span class="st">"#F5563D"</span>)</span>
+<span id="cb16-14"><a href="http://localhost:4404/#cb16-14" aria-hidden="true" tabindex="-1"></a>plt.xlabel(<span class="st">"Velocity field norm, ||x1 - x0|| ($</span><span class="er">\</span><span class="st">AA$)"</span>)</span>
+<span id="cb16-15"><a href="http://localhost:4404/#cb16-15" aria-hidden="true" tabindex="-1"></a>plt.ylabel(<span class="st">"Count"</span>)</span>
+<span id="cb16-16"><a href="http://localhost:4404/#cb16-16" aria-hidden="true" tabindex="-1"></a>plt.title(<span class="st">"Distribution of true velocity field norms"</span>)</span>
+<span id="cb16-17"><a href="http://localhost:4404/#cb16-17" aria-hidden="true" tabindex="-1"></a>plt.legend()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
+<div class="cell-output cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="./adsflow-relax-overview_files/cell-14-output-1.png" width="599" height="455" class="figure-img"></p>
+</figure>
+</div>
+</div>
+</div>
+</section>
+<section id="predicted-vs-true-velocity-field-magnitudes" class="level3">
+<h3 class="anchored" data-anchor-id="predicted-vs-true-velocity-field-magnitudes">Predicted vs True Velocity Field Magnitudes<a class="anchorjs-link " aria-label="Anchor" data-anchorjs-icon="" href="http://localhost:4404/#predicted-vs-true-velocity-field-magnitudes" style="font: 1em / 1 anchorjs-icons; margin-left: 0.1875em; padding-right: 0.1875em; padding-left: 0.1875em;"></a></h3>
+<p><strong>Observations:</strong> - The model predicts velocity vectors with high variance around the true values for both atom types. - Adsorbate atoms achieve an MAE of 0.40 Å, approximately 4× higher than catalyst atoms (MAE = 0.09 Å). - <strong>Critical finding:</strong> The model systematically underestimates velocity field magnitudes for all atoms, but this effect is most pronounced for adsorbate atoms. Points consistently fall below the y=x line, indicating the model predicts smaller displacements than required. - This underestimation was not apparent from structural MAE analysis alone, highlighting the value of per-atom velocity field diagnostics.</p>
+<div id="3cd28097" class="cell" data-execution_count="14">
+<details class="code-fold">
+<summary>Show code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb17"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb17-1"><a href="http://localhost:4404/#cb17-1" aria-hidden="true" tabindex="-1"></a>mask <span class="op">=</span> u_cat_norm <span class="op">&lt;</span> <span class="dv">8</span></span>
+<span id="cb17-2"><a href="http://localhost:4404/#cb17-2" aria-hidden="true" tabindex="-1"></a>u_cat_norm <span class="op">=</span> u_cat_norm[mask]</span>
+<span id="cb17-3"><a href="http://localhost:4404/#cb17-3" aria-hidden="true" tabindex="-1"></a>u_hat_cat_norm <span class="op">=</span> u_hat_cat_norm[mask]</span>
+<span id="cb17-4"><a href="http://localhost:4404/#cb17-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-5"><a href="http://localhost:4404/#cb17-5" aria-hidden="true" tabindex="-1"></a>me_u_cat_norm <span class="op">=</span> np.mean(u_hat_cat_norm <span class="op">-</span> u_cat_norm)</span>
+<span id="cb17-6"><a href="http://localhost:4404/#cb17-6" aria-hidden="true" tabindex="-1"></a>me_u_ads_norm <span class="op">=</span> np.mean(u_hat_ads_norm <span class="op">-</span> u_ads_norm)</span>
+<span id="cb17-7"><a href="http://localhost:4404/#cb17-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-8"><a href="http://localhost:4404/#cb17-8" aria-hidden="true" tabindex="-1"></a>mae_u_cat_norm <span class="op">=</span> np.<span class="bu">abs</span>(u_hat_cat_norm <span class="op">-</span> u_cat_norm).mean()</span>
+<span id="cb17-9"><a href="http://localhost:4404/#cb17-9" aria-hidden="true" tabindex="-1"></a>mae_u_ads_norm <span class="op">=</span> np.<span class="bu">abs</span>(u_hat_ads_norm <span class="op">-</span> u_ads_norm).mean()</span>
+<span id="cb17-10"><a href="http://localhost:4404/#cb17-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-11"><a href="http://localhost:4404/#cb17-11" aria-hidden="true" tabindex="-1"></a>plt.figure()</span>
+<span id="cb17-12"><a href="http://localhost:4404/#cb17-12" aria-hidden="true" tabindex="-1"></a>plt.scatter(</span>
+<span id="cb17-13"><a href="http://localhost:4404/#cb17-13" aria-hidden="true" tabindex="-1"></a>    u_ads_norm,</span>
+<span id="cb17-14"><a href="http://localhost:4404/#cb17-14" aria-hidden="true" tabindex="-1"></a>    u_hat_ads_norm,</span>
+<span id="cb17-15"><a href="http://localhost:4404/#cb17-15" aria-hidden="true" tabindex="-1"></a>    s<span class="op">=</span><span class="dv">100</span>,      <span class="co"># or e.g. 5 + 3*counts to exaggerate</span></span>
+<span id="cb17-16"><a href="http://localhost:4404/#cb17-16" aria-hidden="true" tabindex="-1"></a>    edgecolors<span class="op">=</span><span class="st">"black"</span>, </span>
+<span id="cb17-17"><a href="http://localhost:4404/#cb17-17" aria-hidden="true" tabindex="-1"></a>    color<span class="op">=</span><span class="st">"#F5563D"</span>,</span>
+<span id="cb17-18"><a href="http://localhost:4404/#cb17-18" aria-hidden="true" tabindex="-1"></a>    label<span class="op">=</span><span class="ss">f'Adsorbate (MAE, ME=</span><span class="sc">{</span>mae_u_ads_norm<span class="sc">:.2f}</span><span class="ss">,</span><span class="sc">{</span>me_u_ads_norm<span class="sc">:.2f}</span><span class="ss"> $</span><span class="er">\</span><span class="ss">AA$)'</span>,</span>
+<span id="cb17-19"><a href="http://localhost:4404/#cb17-19" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb17-20"><a href="http://localhost:4404/#cb17-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-21"><a href="http://localhost:4404/#cb17-21" aria-hidden="true" tabindex="-1"></a>plt.scatter(</span>
+<span id="cb17-22"><a href="http://localhost:4404/#cb17-22" aria-hidden="true" tabindex="-1"></a>    u_cat_norm,</span>
+<span id="cb17-23"><a href="http://localhost:4404/#cb17-23" aria-hidden="true" tabindex="-1"></a>    u_hat_cat_norm,</span>
+<span id="cb17-24"><a href="http://localhost:4404/#cb17-24" aria-hidden="true" tabindex="-1"></a>    s<span class="op">=</span><span class="dv">100</span>,      <span class="co"># or e.g. 5 + 3*counts to exaggerate</span></span>
+<span id="cb17-25"><a href="http://localhost:4404/#cb17-25" aria-hidden="true" tabindex="-1"></a>    edgecolors<span class="op">=</span><span class="st">"black"</span>, </span>
+<span id="cb17-26"><a href="http://localhost:4404/#cb17-26" aria-hidden="true" tabindex="-1"></a>    color<span class="op">=</span><span class="st">"#087F91"</span>,</span>
+<span id="cb17-27"><a href="http://localhost:4404/#cb17-27" aria-hidden="true" tabindex="-1"></a>    label<span class="op">=</span><span class="ss">f'Catalyst (MAE, ME=</span><span class="sc">{</span>mae_u_cat_norm<span class="sc">:.2f}</span><span class="ss">,</span><span class="sc">{</span>me_u_cat_norm<span class="sc">:.2f}</span><span class="ss"> $</span><span class="er">\</span><span class="ss">AA$)'</span>,</span>
+<span id="cb17-28"><a href="http://localhost:4404/#cb17-28" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb17-29"><a href="http://localhost:4404/#cb17-29" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-30"><a href="http://localhost:4404/#cb17-30" aria-hidden="true" tabindex="-1"></a><span class="co"># Generate regression line</span></span>
+<span id="cb17-31"><a href="http://localhost:4404/#cb17-31" aria-hidden="true" tabindex="-1"></a>x <span class="op">=</span> np.arange(<span class="dv">0</span>, <span class="dv">5</span>)</span>
+<span id="cb17-32"><a href="http://localhost:4404/#cb17-32" aria-hidden="true" tabindex="-1"></a>plt.plot(x, x, color<span class="op">=</span><span class="st">"black"</span>, label<span class="op">=</span><span class="st">"y=x"</span>, linewidth<span class="op">=</span><span class="dv">2</span>)</span>
+<span id="cb17-33"><a href="http://localhost:4404/#cb17-33" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-34"><a href="http://localhost:4404/#cb17-34" aria-hidden="true" tabindex="-1"></a>plt.legend()</span>
+<span id="cb17-35"><a href="http://localhost:4404/#cb17-35" aria-hidden="true" tabindex="-1"></a>plt.xlabel(<span class="st">"Velocity field norm, ||x1 - x0|| ($</span><span class="er">\</span><span class="st">AA$)"</span>)</span>
+<span id="cb17-36"><a href="http://localhost:4404/#cb17-36" aria-hidden="true" tabindex="-1"></a>plt.ylabel(<span class="st">"Predicted velocity field norm, ||u$_</span><span class="sc">{hat}</span><span class="st">$|| ($</span><span class="er">\</span><span class="st">AA$)"</span>)</span>
+<span id="cb17-37"><a href="http://localhost:4404/#cb17-37" aria-hidden="true" tabindex="-1"></a>plt.title(<span class="st">"Regressed vs actual velocity field norms"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
+<div class="cell-output cell-output-display" data-execution_count="29">
+<pre><code>Text(0.5, 1.0, 'Regressed vs actual velocity field norms')</code></pre>
+</div>
+<div class="cell-output cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="./adsflow-relax-overview_files/cell-15-output-2.png" width="594" height="455" class="figure-img"></p>
+</figure>
+</div>
+</div>
+</div>
+</section>
+<section id="directional-accuracy-cosine-similarity-analysis" class="level3">
+<h3 class="anchored" data-anchor-id="directional-accuracy-cosine-similarity-analysis">Directional Accuracy: Cosine Similarity Analysis<a class="anchorjs-link " aria-label="Anchor" data-anchorjs-icon="" href="http://localhost:4404/#directional-accuracy-cosine-similarity-analysis" style="font: 1em / 1 anchorjs-icons; margin-left: 0.1875em; padding-right: 0.1875em; padding-left: 0.1875em;"></a></h3>
+<p>To verify the model correctly predicts the direction of atomic displacements (independent of magnitude), we compute the cosine similarity between predicted and true velocity vectors.</p>
+<p><strong>Observation:</strong> Both catalyst and adsorbate atoms show high mean cosine similarity scores (close to 1.0), confirming the model accurately predicts the direction of required displacements. Combined with the magnitude underestimation finding above, this suggests the primary model limitation is in predicting the correct displacement magnitude rather than direction.</p>
+<div id="22c4c376" class="cell" data-execution_count="15">
+<details class="code-fold">
+<summary>Show code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb19"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb19-1"><a href="http://localhost:4404/#cb19-1" aria-hidden="true" tabindex="-1"></a>sim_matrix_cat <span class="op">=</span> cosine_similarity(u_cat, u_hat_cat)</span>
+<span id="cb19-2"><a href="http://localhost:4404/#cb19-2" aria-hidden="true" tabindex="-1"></a>similarity_cat <span class="op">=</span> np.diag(sim_matrix_cat)</span>
+<span id="cb19-3"><a href="http://localhost:4404/#cb19-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-4"><a href="http://localhost:4404/#cb19-4" aria-hidden="true" tabindex="-1"></a>sim_matrix_ads <span class="op">=</span> cosine_similarity(u_ads, u_hat_ads)</span>
+<span id="cb19-5"><a href="http://localhost:4404/#cb19-5" aria-hidden="true" tabindex="-1"></a>similarity_ads <span class="op">=</span> np.diag(sim_matrix_ads)</span>
+<span id="cb19-6"><a href="http://localhost:4404/#cb19-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-7"><a href="http://localhost:4404/#cb19-7" aria-hidden="true" tabindex="-1"></a>plt.figure()</span>
+<span id="cb19-8"><a href="http://localhost:4404/#cb19-8" aria-hidden="true" tabindex="-1"></a>plt.hist(similarity_cat, bins<span class="op">=</span><span class="dv">30</span>, density<span class="op">=</span><span class="va">True</span>, label<span class="op">=</span><span class="ss">f'Catalyst (mean=</span><span class="sc">{</span>similarity_cat<span class="sc">.</span>mean()<span class="sc">:.2f}</span><span class="ss">)'</span>, color<span class="op">=</span><span class="st">"#087F91"</span>)</span>
+<span id="cb19-9"><a href="http://localhost:4404/#cb19-9" aria-hidden="true" tabindex="-1"></a>plt.hist(similarity_ads, bins<span class="op">=</span><span class="dv">30</span>, density<span class="op">=</span><span class="va">True</span>, label<span class="op">=</span><span class="ss">f'Adsorbate (mean=</span><span class="sc">{</span>similarity_ads<span class="sc">.</span>mean()<span class="sc">:.2f}</span><span class="ss">)'</span>, color<span class="op">=</span><span class="st">"#F5563D"</span>)</span>
+<span id="cb19-10"><a href="http://localhost:4404/#cb19-10" aria-hidden="true" tabindex="-1"></a>plt.xlabel(<span class="st">"Cosine similarity score"</span>)</span>
+<span id="cb19-11"><a href="http://localhost:4404/#cb19-11" aria-hidden="true" tabindex="-1"></a>plt.ylabel(<span class="st">"Count"</span>)</span>
+<span id="cb19-12"><a href="http://localhost:4404/#cb19-12" aria-hidden="true" tabindex="-1"></a>plt.title(<span class="st">"Cos. sim. scores b/t actual and prediction velocity vectors"</span>)</span>
+<span id="cb19-13"><a href="http://localhost:4404/#cb19-13" aria-hidden="true" tabindex="-1"></a>plt.legend()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
+<div class="cell-output cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="./adsflow-relax-overview_files/cell-16-output-1.png" width="576" height="449" class="figure-img"></p>
+</figure>
+</div>
+</div>
+</div>
+</section>
+</section>
+</section>
+<section id="conclusions" class="level1">
+<h1>Conclusions</h1>
+<p>This diagnostic analysis reveals the following key insights about AdsFlow performance:</p>
+<section id="strengths" class="level2">
+<h2 class="anchored" data-anchor-id="strengths">Strengths<a class="anchorjs-link " aria-label="Anchor" data-anchorjs-icon="" href="http://localhost:4404/#strengths" style="font: 1em / 1 anchorjs-icons; margin-left: 0.1875em; padding-right: 0.1875em; padding-left: 0.1875em;"></a></h2>
+<ol type="1">
+<li><strong>Significant improvement over initial structures:</strong> AdsFlow reduces MAE by 0.08 Å on average.</li>
+<li><strong>Correct directional prediction:</strong> High cosine similarity scores confirm the model accurately predicts the direction of atomic displacements.</li>
+<li><strong>Robust architecture choice:</strong> EquiformerV2 demonstrates superior generalization compared to GemNet-OC.</li>
+</ol>
+</section>
+<section id="limitations-and-opportunities" class="level2">
+<h2 class="anchored" data-anchor-id="limitations-and-opportunities">Limitations and Opportunities<a class="anchorjs-link " aria-label="Anchor" data-anchorjs-icon="" href="http://localhost:4404/#limitations-and-opportunities" style="font: 1em / 1 anchorjs-icons; margin-left: 0.1875em; padding-right: 0.1875em; padding-left: 0.1875em;"></a></h2>
+<ol type="1">
+<li><strong>Magnitude underestimation:</strong> The model systematically underestimates velocity field magnitudes, particularly for adsorbate atoms. This represents the primary avenue for improvement.</li>
+<li><strong>Adsorbate challenge:</strong> Adsorbates inherently require larger displacements and exhibit higher prediction variance, consistent with their underrepresentation in the training distribution.</li>
+</ol>
+</section>
+<section id="recommended-next-steps" class="level2">
+<h2 class="anchored" data-anchor-id="recommended-next-steps">Recommended Next Steps<a class="anchorjs-link " aria-label="Anchor" data-anchorjs-icon="" href="http://localhost:4404/#recommended-next-steps" style="font: 1em / 1 anchorjs-icons; margin-left: 0.1875em; padding-right: 0.1875em; padding-left: 0.1875em;"></a></h2>
+<p>Since we have already tried weighting adsorbate atoms more in the loss function, we should try to remove the distractive catalayst atoms all together, i.e., have the model target adsorabte atoms + catalayst atoms within some cutoff.</p>
+</section>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+
+<script>
+  window.backupDefine = window.define;
+  window.define = undefined;
+</script>
+<script type="text/javascript" src="./adsflow-relax-overview_files/quarto-preview.js"></script>
+<script>
+  window.define = window.backupDefine;
+  window.backupDefine = undefined;
+</script>
+<script type="text/javascript">
+  document.addEventListener("DOMContentLoaded", function () {
+    window.QuartoPreview.init({
+      origin: "http://localhost:4404",
+      search: "?quartoPreviewReqId=1769707961670&amp;quartoPreviewThemeCategory=dark",
+      inputFile: "/Users/deanmsweeney/Documents/CFM/AdsFlow/analysis/evalution/performance_plots.qmd",
+      isPresentation: false
+    });
+  })
+</script>
+<div><div dir="ltr" class="fui-FluentProvider fui-FluentProviderr0 ___jdtuxv0 f19n0e5 fxugw4r f1o700av fk6fouc fkhj508 figsok6 f1i3iumi"></div></div><i tabindex="0" role="none" data-tabster-dummy="" aria-hidden="true" style="position: fixed; height: 1px; width: 1px; opacity: 0.001; z-index: -1; content-visibility: hidden; top: 0px; left: 0px;"></i></body><grammarly-desktop-integration data-grammarly-shadow-root="true"><template shadowrootmode="open"><style>
+      div.grammarly-desktop-integration {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+        -moz-user-select: none;
+        -webkit-user-select: none;
+        -ms-user-select:none;
+        user-select:none;
+      }
+
+      div.grammarly-desktop-integration:before {
+        content: attr(data-content);
+      }
+    </style><div aria-label="grammarly-integration" role="group" tabindex="-1" class="grammarly-desktop-integration" data-content="{&quot;mode&quot;:&quot;full&quot;,&quot;isActive&quot;:true,&quot;isUserDisabled&quot;:false}"></div></template></grammarly-desktop-integration></html>
