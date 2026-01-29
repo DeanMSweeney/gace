@@ -110,7 +110,7 @@ class LightFlowMatch(LightningModule, XMatching):
         self.diagnostics = False
         self.bad_iter, self.good_ter, self.iter = 0, 0, 0
        # ==============================================================================
-
+       
     def forward(self, data):
         """
         Forward pass through the model.
@@ -159,7 +159,7 @@ class LightFlowMatch(LightningModule, XMatching):
             )
 
         return loss, max_loss, max_loss_idx
-
+    
     # ==================== Training and Validation Methods ====================
 
     def training_step(self, data: Data, batch_idx):
@@ -198,7 +198,7 @@ class LightFlowMatch(LightningModule, XMatching):
         )
 
         return loss
-
+        
 
     def validation_step(self, data: Data, batch_idx):
         """
@@ -239,7 +239,7 @@ class LightFlowMatch(LightningModule, XMatching):
         )
 
         return loss
-
+    
     def test_step(self, data: Data, batch_idx):
         """
         Single test step (one batch).
@@ -276,9 +276,8 @@ class LightFlowMatch(LightningModule, XMatching):
                 ]
             }
             # Separate lists for array metrics (Nx3 matrices)
-            self.array_metrics_lists = {"u": [], "u_hat": []}
             self.array_metrics_lists = {"u": [], "u_hat": [], "tags": []}
-
+  
         if self.diagnostics:
             # Diagnostic mode: detailed loss analysis for problematic samples
             if loss > 0.001:
@@ -321,7 +320,7 @@ class LightFlowMatch(LightningModule, XMatching):
         # ==================== Log Test Metrics ====================
 
         # Loss metrics (training-style loss for comparison)
-
+        
         self.log(
             "test/loss",
             loss,
@@ -341,7 +340,6 @@ class LightFlowMatch(LightningModule, XMatching):
         # Log all evaluation metrics (skip array metrics like u, u_hat)
         if not self.diagnostics:
             for name, value in eval_metrics.items():
-                if name in ("u", "u_hat"):
                 if name in ("u", "u_hat", "tags"):
                     continue  # Skip array metrics, they are saved to .npy files
                 self.log(
