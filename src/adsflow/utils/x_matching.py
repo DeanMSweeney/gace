@@ -204,7 +204,7 @@ class XMatching():
             xt = x0 + alpha_t_x * u_x
 
             # Rescale velocity for cosine schedule (to account for d(alpha_t)/dt)
-            u_x = alpha_t_x_grad * u_x# alpha_t' * (x1 - x0)
+            u_x = alpha_t_x_grad * u_x # alpha_t' * (x1 - x0)
 
             # Store interpolated data
             data.pos = xt  # Current position (what model sees as input)
