@@ -59,15 +59,11 @@ class XMatching():
             raise ValueError("Invalid x_matching routine")
 
         # Apply adsorbate weighting if tao > 0 (needs gradients!)
-        if tao > 0:
-            # Identify adsorbate atoms (tags == 2)
-            with torch.no_grad():
-                ads = (data.tags == 2).float().unsqueeze(1)  # N, 1
-            # Upweight adsorbate atoms by factor tao: mask * (1 + ads * (tao - 1))
-            # e.g., if tao=2, adsorbate atoms weighted 2x more than catalyst
-            ads_mask_factor = mask * (1 + ads * (tao - 1))
-        else:
-            ads_mask_factor = mask
+        with torch.no_grad():
+            ads = (data.tags == 2).float().unsqueeze(1)  # N, 1
+        # Upweight adsorbate atoms by factor tao: mask * (1 + ads * (tao - 1))
+        # e.g., if tao=2, adsorbate atoms weighted 2x more than catalyst
+        ads_mask_factor = mask * (1 + ads * (tao - 1))
 
         # Compute mean squared error per atom (averaged over xyz dimensions)
         L_per_atom = (diff ** 2).mean(dim=1, keepdim=True)  # N, 1
