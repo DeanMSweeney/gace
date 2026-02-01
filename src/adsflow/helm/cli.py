@@ -127,7 +127,7 @@ def main(cfg: Config) -> None:
         train_set = LazyLmdbDataset(pt)
 
         # Load permutations 
-        g = torch.Generator().manual_seed(seed=cfg.seed)
+        g = torch.Generator().manual_seed(cfg.seed)
         indices = torch.randperm(len(train_set), generator=g)[:cfg.num_debug_samples].tolist()
         train_set = Subset(train_set, indices=indices)
 
