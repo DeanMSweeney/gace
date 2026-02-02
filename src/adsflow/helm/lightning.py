@@ -74,12 +74,13 @@ class LightFlowMatch(LightningModule, XMatching):
             threshold: float=0.20,
             x_matching: Literal["flow", "endpoint"]="flow",
             schedule_type: Literal["linear", "cosine"]="linear",
+            write_eval_metrics: bool=False,
             **kwargs,
         ):
 
         super().__init__()
         # Save hyperparameters for logging and checkpointing (ignoring model-specific args)
-        self.save_hyperparameters(ignore=["model", "variant", "mode", "rtol", "atol", "ode_method", "track_grad_norms", "in_POS", "gen_POS", "rlxd_POS", "config_vasp", "threshold", "x_matching", "interpolant_schedule"])
+        self.save_hyperparameters(ignore=["model", "variant", "mode", "rtol", "atol", "ode_method", "track_grad_norms", "in_POS", "gen_POS", "rlxd_POS", "config_vasp", "threshold", "x_matching", "interpolant_schedule", "write_eval_metrics"])
 
         # Model and training configuration
         self.model = model  # Neural network (e.g., Equiformer)
@@ -155,6 +156,7 @@ class LightFlowMatch(LightningModule, XMatching):
                 input_data=data,
                 a=f,  # Model prediction
                 b=data.pos_relaxed if self.x_matching == "endpoint" else u,  # Target
+                loss_fn=self.hparams.loss_fn,
                 tao=self.hparams.tao,  # Adsorbate weighting factor
             )
 
@@ -264,7 +266,7 @@ class LightFlowMatch(LightningModule, XMatching):
         loss, max_loss, max_loss_idx = self._transport_loss(data)
 
         # compute test metrics
-        if not hasattr(self, "eval_metrics_lists"):
+        if not hasattr(self, "eval_metrics_lists") and self.write_eval_metrics:
             self.eval_metrics_lists = {
                 name: [] for name in [
                     "generated_mae", "generated_dwt", "generated_adwt",
@@ -338,7 +340,7 @@ class LightFlowMatch(LightningModule, XMatching):
         )
 
         # Log all evaluation metrics (skip array metrics like u, u_hat)
-        if not self.diagnostics:
+        if not self.diagnostics and self.write_eval_metrics:
             for name, value in eval_metrics.items():
                 if name in ("u", "u_hat", "tags"):
                     continue  # Skip array metrics, they are saved to .npy files
