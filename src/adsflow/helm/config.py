@@ -22,7 +22,9 @@ class OptimizerConfig:
     """
 
     # ==================== Optimizer Hyperparameters ====================
-
+    loss_fn: Literal["mse", "mae"] = "mse"
+    """Loss function to use for training"""
+    
     lr: float = 1e-3
     """Base learning rate for AdamW optimizer (default: 1e-3)"""
 
@@ -303,6 +305,9 @@ class Config:
     """Whether to generate VASP DFT input files for generated structures
     Creates INCAR, KPOINTS, POTCAR files for DFT verification workflow
     """
+
+    write_eval_metrics: bool = False
+    """Whether to write evaluation metrics to file"""
 
     # ==================== Miscellaneous ====================
 

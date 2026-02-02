@@ -20,6 +20,7 @@ class XMatching():
         input_data,
         a: Tensor,  # N, 3 - predicted positions
         b: Tensor,  # N, 3 - target positions
+        loss_fn: str = "mse",
         tao: float=0,  # adsorbate weighting factor (if > 0, upweight adsorbate atoms)
     ):
         """
@@ -66,8 +67,12 @@ class XMatching():
         ads_mask_factor = mask * (1 + ads * (tao - 1))
 
         # Compute mean squared error per atom (averaged over xyz dimensions)
-        L_per_atom = (diff ** 2).mean(dim=1, keepdim=True)  # N, 1
-        #L_per_atom = diff.abs().mean(dim=1, keepdim=True)  # N, 1
+        if loss_fn == "mse":
+            L_per_atom = (diff ** 2).mean(dim=1, keepdim=True)  # N, 1
+        elif loss_fn == "mae":
+            L_per_atom = diff.abs().mean(dim=1, keepdim=True)  # N, 1
+        else:
+            raise ValueError(f"Invalid loss function: {loss_fn}")
 
         # Apply time-dependent weighting for cosine interpolation schedules
         # (helps stabilize training by reweighting loss based on interpolation time)
@@ -356,7 +361,7 @@ class XMatching():
             print("Output file not provided... structure will not be saved")
 
         # Compute evaluation metrics if ground truth relaxed positions available
-        if hasattr(data, "pos_relaxed"):
+        if hasattr(data, "pos_relaxed") and self.write_eval_metrics:
             # Compute metrics for generated strucure:
             # - MAE: Mean Absolute Error
             # - DwT: Distance within Threshold (% atoms within threshold)
@@ -402,5 +407,5 @@ class XMatching():
 
             return data, eval_metrics
         else:
-            return data
+            return data, None
   
