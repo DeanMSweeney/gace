@@ -66,8 +66,8 @@ class XMatching():
         ads_mask_factor = mask * (1 + ads * (tao - 1))
 
         # Compute mean squared error per atom (averaged over xyz dimensions)
-        #L_per_atom = (diff ** 2).mean(dim=1, keepdim=True)  # N, 1
-        L_per_atom = diff.abs().mean(dim=1, keepdim=True)  # N, 1
+        L_per_atom = (diff ** 2).mean(dim=1, keepdim=True)  # N, 1
+        #L_per_atom = diff.abs().mean(dim=1, keepdim=True)  # N, 1
 
         # Apply time-dependent weighting for cosine interpolation schedules
         # (helps stabilize training by reweighting loss based on interpolation time)
