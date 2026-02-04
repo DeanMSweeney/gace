@@ -41,9 +41,16 @@ class XMatching():
         with torch.no_grad():
             data.fixed = data.fixed.float()
             # Create mask: 0 for frozen atoms, 1 for free atoms (N, 1)
-            
-            # mask = (1 - data.fixed).unsqueeze(1)
-            mask = (data.tags == 2).float().unsqueeze(1)
+
+            if tao == float('inf'):
+                mask = (data.tags == 2).float().unsqueeze(1)
+                mask_factor = mask 
+            else:
+                mask = (1 - data.fixed).float().unsqueeze(1)
+                ads_mask = (data.tags == 2).float().unsqueeze(1)  # N, 1
+                # Upweight adsorbate atoms by factor tao: mask * (1 + ads * (tao - 1))
+                # e.g., if tao=2, adsorbate atoms weighted 2x more than catalyst
+                mask_factor = mask * (1 + ads_mask * (tao - 1))
 
         # Compute position difference based on matching mode (needs gradients!)
         if self.x_matching == "endpoint":
@@ -59,13 +66,6 @@ class XMatching():
             diff = a - b
         else:
             raise ValueError("Invalid x_matching routine")
-
-        # Apply adsorbate weighting if tao > 0 (needs gradients!)
-        with torch.no_grad():
-            ads = (data.tags == 2).float().unsqueeze(1)  # N, 1
-        # Upweight adsorbate atoms by factor tao: mask * (1 + ads * (tao - 1))
-        # e.g., if tao=2, adsorbate atoms weighted 2x more than catalyst
-        mask_factor = mask * (1 + ads * (tao - 1))
 
         # Compute mean squared error per atom (averaged over xyz dimensions)
         if loss_fn == "mse":
