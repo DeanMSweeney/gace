@@ -20,7 +20,7 @@ class XMatching():
         a: Tensor,  # N, 3 - predicted positions
         b: Tensor,  # N, 3 - target positions
         loss_fn: str = "mse",
-        tao: float=0,  # adsorbate weighting factor (if > 0, upweight adsorbate atoms)
+        tao: float=1,  # adsorbate weighting factor (if > 0, upweight adsorbate atoms)
     ):
         """
         Compute the loss between predicted and target atomic positions.
@@ -41,7 +41,9 @@ class XMatching():
         with torch.no_grad():
             data.fixed = data.fixed.float()
             # Create mask: 0 for frozen atoms, 1 for free atoms (N, 1)
-            mask = (1 - data.fixed).unsqueeze(1)
+            
+            # mask = (1 - data.fixed).unsqueeze(1)
+            mask = (data.tags == 2).float().unsqueeze(1)
 
         # Compute position difference based on matching mode (needs gradients!)
         if self.x_matching == "endpoint":
@@ -63,7 +65,7 @@ class XMatching():
             ads = (data.tags == 2).float().unsqueeze(1)  # N, 1
         # Upweight adsorbate atoms by factor tao: mask * (1 + ads * (tao - 1))
         # e.g., if tao=2, adsorbate atoms weighted 2x more than catalyst
-        ads_mask_factor = mask * (1 + ads * (tao - 1))
+        mask_factor = mask * (1 + ads * (tao - 1))
 
         # Compute mean squared error per atom (averaged over xyz dimensions)
         if loss_fn == "mse":
@@ -79,14 +81,14 @@ class XMatching():
              else self.alpha_t_x_factor
 
         # Apply all weighting factors: frozen atom mask, adsorbate weight, time weight
-        weighted_L_per_atom = L_per_atom * ads_mask_factor * time_factor  # N, 1
+        modified_L_per_atom = L_per_atom * mask_factor * time_factor  # N, 1
         # Average over all free (non-frozen) atoms
-        L = weighted_L_per_atom.sum() / mask.sum().clamp_min(1e-8)
+        L = modified_L_per_atom.sum() / mask.sum().clamp_min(1e-8)
 
         with torch.no_grad():
             # Track maximum loss atom for stability monitoring
-            max_L = weighted_L_per_atom.max()
-            max_L_idx = torch.argmax(weighted_L_per_atom)
+            max_L = modified_L_per_atom.max()
+            max_L_idx = torch.argmax(modified_L_per_atom)
 
         return L, max_L, max_L_idx
 
