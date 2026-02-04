@@ -1,7 +1,8 @@
 import os
 import numpy as np
+import pandas as pd
 import torch
-from torch import optim 
+from torch import optim
 from torch.cuda.amp import autocast
 from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingLR, PolynomialLR
 import torch.nn as nn
@@ -10,7 +11,7 @@ from torch_geometric.data import Data
 from transformers import get_cosine_schedule_with_warmup, get_polynomial_decay_schedule_with_warmup
 
 from adsflow.utils.x_matching import XMatching
-from adsflow.utils.post_processing import analyze_loss
+from adsflow.utils.evaluation import compute_eval_metrics
 
 from typing import Optional, Literal, Union, Tuple
 
@@ -104,10 +105,9 @@ class LightFlowMatch(LightningModule, XMatching):
         # Flow matching configuration
         self.x_matching = x_matching  # "flow" or "endpoint"
         self.schedule_type = schedule_type  # "linear" or "cosine"
+        self.write_eval_metrics = write_eval_metrics
 
-        # =============================================================================
         # Diagnostic mode: detailed loss analysis for model development
-        # When enabled, collects per-atom statistics for problematic predictions
         self.diagnostics = False
         self.bad_iter, self.good_ter, self.iter = 0, 0, 0
        # ==============================================================================
@@ -265,96 +265,26 @@ class LightFlowMatch(LightningModule, XMatching):
         data.Fmax = torch.ones_like(data.y_relaxed) * 0.02
         loss, max_loss, max_loss_idx = self._transport_loss(data)
 
-        # compute test metrics
-        if not hasattr(self, "eval_metrics_lists") and self.write_eval_metrics:
-            self.eval_metrics_lists = {
-                name: [] for name in [
-                    "generated_mae", "generated_dwt", "generated_adwt",
-                    "generated_ads_mae", "generated_ads_dwt", "generated_ads_adwt",
-                    "generated_me", "generated_ads_me",
-                    "initial_mae", "initial_dwt", "initial_adwt",
-                    "initial_ads_mae", "initial_ads_dwt", "initial_ads_adwt",
-                    "initial_me", "initial_ads_me",
-                ]
-            }
-            # Separate lists for array metrics (Nx3 matrices)
-            self.array_metrics_lists = {"u": [], "u_hat": [], "tags": []}
-  
-        if self.diagnostics:
-            # Diagnostic mode: detailed loss analysis for problematic samples
-            if loss > 0.001:
-                self.bad_iter += 1
-                # Collect detailed statistics about the loss
-                (self.DS0,  # displacement from adsorbate
-                self.DS1,   # atomic numbers at high loss atoms
-                self.DS2,   # tags at high loss atoms
-                self.DS3,   # atomic numbers by distance
-                self.DS4,   # tags by distance
-                self.DS5,   # max distance
-                self.DS6,   # max loss value
-                self.DS7) = analyze_loss(  # average distance
-                    data=data,
-                    loss=loss,
-                    max_loss=max_loss,
-                    max_loss_idx=max_loss_idx,
-                    bad_iter=self.bad_iter,
-                )
-            # Skip ODE integration in diagnostics mode
-            eval_metrics = {name: 0 for name in self.eval_metrics_lists.keys()} if hasattr(self, "eval_metrics_lists") else {}
+        # Normal test mode: generate structures via ODE integration
+        t = torch.linspace(0., 1, 2, device=data.pos.device, dtype=data.pos.dtype)
+        opt_graph = self.sample(input_data=data, t=t)
+        eval_metrics = compute_eval_metrics(data=opt_graph, threshold=self.threshold)
 
-        else:
-            # Normal test mode: generate structures via ODE integration
-            # Define time interval for IVP (Initial Value Problem): t ∈ [0, 1]
-            t = torch.linspace(0., 1, 2, device=data.pos.device, dtype=data.pos.dtype)
-
-            # Generate relaxed structure and compute metrics
-            opt_graph, eval_metrics = self.sample(input_data=data, t=t, threshold=self.threshold)
-
-            if hasattr(self, "eval_metrics_lists"):
-                for name, value in eval_metrics.items():
-                    if name in self.array_metrics_lists:
-                        # Array metrics (u, u_hat) - append numpy arrays
-                        self.array_metrics_lists[name].append(value)
-                    else:
-                        # Scalar metrics
-                        self.eval_metrics_lists[name].append(value)
+        if self.write_eval_metrics:
+            if not hasattr(self, "eval_metrics"):
+                self.eval_metrics = {k: [] for k in eval_metrics.keys()}
+            for k, v in eval_metrics.items():
+                self.eval_metrics[k].append(v) # only append updated batch values
 
         # ==================== Log Test Metrics ====================
 
-        # Loss metrics (training-style loss for comparison)
-        
-        self.log(
-            "test/loss",
-            loss,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
+        self.log("test/loss", loss, prog_bar=True, batch_size=len(data.natoms), sync_dist=True)
+        self.log("test/max_loss", max_loss, prog_bar=True, batch_size=len(data.natoms), sync_dist=True)
 
-        self.log(
-            "test/max_loss",
-            max_loss,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-
-        # Log all evaluation metrics (skip array metrics like u, u_hat)
-        if not self.diagnostics and self.write_eval_metrics:
+        # Log all evaluation metrics
+        if eval_metrics:
             for name, value in eval_metrics.items():
-                if name in ("u", "u_hat", "tags"):
-                    continue  # Skip array metrics, they are saved to .npy files
-                self.log(
-                    f"test/{name}",
-                    value,
-                    prog_bar=True,
-                    batch_size=len(data.natoms),
-                    sync_dist=True,
-                )
-
-        # Ensure output directory exists for saving structures
-        out_dir = self.trainer.default_root_dir
-        os.makedirs(out_dir, exist_ok=True)
+                self.log(f"test/{name}", value, prog_bar=True, batch_size=len(data.natoms), sync_dist=True)
 
         return loss    
 
@@ -362,49 +292,28 @@ class LightFlowMatch(LightningModule, XMatching):
         """
         Called after all test batches complete.
 
-        If diagnostics mode is enabled, saves detailed loss analysis to .npy files.
-        These files contain per-atom statistics for analyzing model failures.
+        Saves evaluation metrics to CSV. Handles multi-GPU gathering.
         """
-        if self.diagnostics:
-            print(">>> You are running with diagnostic mode turned on ‼️")
+        if hasattr(self, "eval_metrics"):
+            output_dir = './eval_metrics'
 
-            # Convert Python lists → tensors for multi-GPU gathering
-            DS0 = torch.tensor(self.DS0, dtype=torch.float32)  # displacement from adsorbate
-            DS1 = torch.tensor(self.DS1, dtype=torch.long)     # atomic numbers (high loss)
-            DS2 = torch.tensor(self.DS2, dtype=torch.long)     # tags (high loss)
-            DS3 = torch.tensor(self.DS3, dtype=torch.long)     # atomic numbers (by distance)
-            DS4 = torch.tensor(self.DS4, dtype=torch.long)     # tags (by distance)
-            DS5 = torch.tensor(self.DS5, dtype=torch.float32)  # max distance
-            DS6 = torch.tensor(self.DS6, dtype=torch.float32)  # max loss value
-            DS7 = torch.tensor(self.DS7, dtype=torch.float32)  # average distance
+            # Check if running distributed
+            if self.trainer.world_size > 1:
+                # Gather metrics from all GPUs
+                gathered_metrics = {}
+                for k, v in self.eval_metrics.items():
+                    eval_tensor = torch.tensor(v, device=self.device)
+                    gathered_eval_tensors = self.all_gather(eval_tensor)
+                    gathered_metrics[k] = gathered_eval_tensors.flatten().cpu().tolist()
 
-            # Helper to convert tensors to 1D NumPy arrays
-            def unwrap(x):
-                return x.reshape(-1).cpu().numpy()
-
-            # Save diagnostic data for post-hoc analysis
-            np.save("loss-displacement_from_ads", unwrap(DS0))  # loss vs distance from adsorbate
-            np.save("loss-atomic_number",        unwrap(DS1))   # loss vs atomic number
-            np.save("loss-tag",                  unwrap(DS2))   # loss vs atom tag
-            np.save("distance-atomic_number",    unwrap(DS3))   # distance error vs atomic number
-            np.save("distance-tag",              unwrap(DS4))   # distance error vs atom tag
-            np.save("distance-max",              unwrap(DS5))   # maximum distance error
-            np.save("distance-max_loss",         unwrap(DS6))   # maximum loss value
-            np.save("avg_distance",              unwrap(DS7))   # average distance error
-
-        if hasattr(self, "eval_metrics_lists"):
-            output_dir = './test_metrics'
-            os.makedirs(output_dir, exist_ok=True)
-
-            for name, values in self.eval_metrics_lists.items():
-                np.save(os.path.join(output_dir, f'{name}.npy'), np.array(values))
-
-            # Save array metrics (u, u_hat) - concatenate along first axis
-            if hasattr(self, "array_metrics_lists"):
-                for name, arrays in self.array_metrics_lists.items():
-                    if arrays:
-                        np.save(os.path.join(output_dir, f'{name}.npy'), np.concatenate(arrays, axis=0))
-
+                # Only rank 0 writes the CSV
+                if self.global_rank == 0:
+                    os.makedirs(output_dir, exist_ok=True)
+                    pd.DataFrame(gathered_metrics).to_csv(os.path.join(output_dir, 'eval_metrics.csv'), index=False)
+            else:
+                # Single GPU - write directly
+                os.makedirs(output_dir, exist_ok=True)
+                pd.DataFrame(self.eval_metrics).to_csv(os.path.join(output_dir, 'eval_metrics.csv'), index=False)
 
     # ==================== Optimizer Configuration ====================
 
