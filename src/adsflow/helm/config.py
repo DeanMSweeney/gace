@@ -22,7 +22,7 @@ class OptimizerConfig:
     """
 
     # ==================== Optimizer Hyperparameters ====================
-    loss_fn: Literal["mse", "mae"] = "mse"
+    loss_fn: Literal["mse", "mae"] = "mae"
     """Loss function to use for training"""
     
     lr: float = 1e-3
