@@ -45,3 +45,4 @@ l-*/
 ocp_checkpoints/
 plots/
 *_files/
+.DS_Store
