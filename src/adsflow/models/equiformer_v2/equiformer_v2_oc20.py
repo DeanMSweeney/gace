@@ -173,7 +173,7 @@ class EquiformerV2_Flow(BaseModel):
         energy_n_emb_freqs: int=16,
         force_n_emb_freqs: int=16,
         energy_force_conditioning: bool=False,
-        pretrained: bool=False,
+        pretrained: bool=True,
     ):
         super().__init__()
 
@@ -508,7 +508,7 @@ class EquiformerV2_Flow(BaseModel):
         # add time embedding 
         # inject only into the first coefficient (for single-resolution case)
         # (that first index corresponds to l=0,m=0 for the first resolution)
-        t_add = (self.salpha_t * time_embeds).unsqueeze(1)
+        t_add = (self.alpha_t * time_embeds).unsqueeze(1)
         x.embedding[:, 0:1, :] = x.embedding[:, 0:1, :] + t_add
         
         if self.energy_force_conditioning:
