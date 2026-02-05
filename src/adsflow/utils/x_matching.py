@@ -41,10 +41,12 @@ class XMatching():
         with torch.no_grad():
             data.fixed = data.fixed.float()
             # Create mask: 0 for frozen atoms, 1 for free atoms (N, 1)
-
+     
             if tao == float('inf'):
                 mask = (data.tags == 2).float().unsqueeze(1)
                 mask_factor = mask 
+                print(tao)
+
             else:
                 mask = (1 - data.fixed).float().unsqueeze(1)
                 ads_mask = (data.tags == 2).float().unsqueeze(1)  # N, 1
