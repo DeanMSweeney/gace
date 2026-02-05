@@ -21,6 +21,8 @@ def pbc_aware_delta(
             batch: Optional[Tensor]=None,
             naive: bool=True,
             norm: bool=False,
+            cartesian: bool=True,
+            cartesian_to_fractional: bool=False, 
 ) -> Tensor:
     """
     Compute minimum image convention distance under periodic boundary conditions.
@@ -72,6 +74,9 @@ def pbc_aware_delta(
     u = delta  # (N, 3)
     u_f = torch.linalg.solve(A.transpose(1,2), u.unsqueeze(-1)).squeeze(-1)  # (N, 3)
 
+    if cartesian_to_fractional:
+        return u_f
+
     # Find nearest lattice translation (integer cell translations)
     n0 = torch.round(u_f)
     # Fast method: just round to nearest integer
@@ -79,7 +84,10 @@ def pbc_aware_delta(
     u_f_mic = u_f - n0 
 
     # Convert back to Cartesian coordinates: u_min = A @ u_f_min
-    u_mic = torch.bmm(u_f_mic.unsqueeze(1), A).squeeze(1)  # (N, 3)
+    if cartesian: 
+        u_mic = torch.bmm(u_f_mic.unsqueeze(1), A).squeeze(1)  # (N, 3)
+    else:
+        u_mic = u_f_mic
 
     if norm:
         # Return L1 norm (mean absolute value across xyz)
