@@ -49,7 +49,6 @@ from typing import Optional, Literal, Union, Tuple
 # AdsFlow modules
 from adsflow.helm.lightning import LightFlowMatch
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
-from adsflow.models.equiformer_v2.equiformerv2_flow import EquiformerV2_Flow
 from adsflow.utils.lmdb_loader import LazyLmdbDataset
 from adsflow.utils.utils import ship_data
 from adsflow.helm.config import Config
@@ -91,10 +90,7 @@ def main(cfg: Config) -> None:
 
     # === Model Initialization ===
     # Instantiate the appropriate flow matching model based on regressor type
-    if cfg.regressor == "EquiformerV2":
-        model: EquiformerV2_Flow = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
-    elif cfg.regressor == "GemNet-OC":
-        model: GemNetFlow = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
+    model = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
 
     # Print configuration at rank 0 only
     declare(f">>> Training and model configurations:\n {OmegaConf.to_yaml(cfg)}")
@@ -182,7 +178,7 @@ def main(cfg: Config) -> None:
         declare(f">>> Activated Evaluation mode with OC20-test: {cfg.oc20_test} 🦉")
         ptst = {"src": cfg.oc20_test}
         test_set = LazyLmdbDataset(ptst)
-        test_set = Subset(test_set, indices=range(100))
+        test_set = Subset(test_set, indices=range(1000))
         test_loader = DataLoader(
             dataset=test_set,
             batch_size=cfg.batch_size,
@@ -256,17 +252,53 @@ def main(cfg: Config) -> None:
         gradient_clip_val=1,  # Gradient clipping value
     )
 
-    # === Checkpoint Loading ===
-    # Handle two checkpoint loading scenarios:
-    # 1. resume_training=True: Resume full training state (epoch, optimizer, lr scheduler)
-    # 2. resume_training=False: Load only model weights, reset training state
-    ckpt_path_for_trainer = cfg.ckpt_path
-    if cfg.ckpt_path and not cfg.resume_training:
+
+   # === Checkpoint Loading ===
+    ckpt_path_for_trainer = cfg.ckpt_path # resume training from checkpoint
+    if cfg.ckpt_path and not cfg.resume_training: # restart training with pretained model 
         declare(f">>> Loading model weights only from: {cfg.ckpt_path} 🔄")
+
         checkpoint = torch.load(cfg.ckpt_path, map_location="cpu")
-        lightning.load_state_dict(checkpoint["state_dict"])
-        declare(">>> Model weights loaded. Training will restart from scratch (epoch 0, new optimizer state)")
-        ckpt_path_for_trainer = None  # Don't pass checkpoint to trainer (fresh start)
+        state_dict = checkpoint["state_dict"] if "state_dict" in checkpoint else checkpoint
+
+        # --- Universal Prefix & Renaming Logic ---
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            # 1. Clean nesting
+            clean_key = k.replace("module.module.", "").replace("module.", "")
+            
+            # 2. Rename Force -> Velocity
+            if "force_block" in clean_key:
+                clean_key = clean_key.replace("force_block", "velocity_block")
+            
+            # 3. Prepend 'model.' prefix
+            if not clean_key.startswith("model."):
+                final_key = f"model.{clean_key}"
+            else:
+                final_key = clean_key
+            
+            new_state_dict[final_key] = v
+
+        # Load into the model
+        load_result = lightning.load_state_dict(new_state_dict, strict=False)
+       
+        # Verification Reports
+        print("\n--- LOADING REPORT ---")
+        vel_keys = [k for k in new_state_dict.keys() if "velocity_block" in k]
+        print(f"✅ Mapped {len(vel_keys)} weights into velocity_block.")
+
+        if load_result.missing_keys:
+            print("\n--- MISSING KEYS (Not w/in Checkpoint) ---")
+            for key in load_result.missing_keys:
+                print(f"  [!] {key}")
+
+        if load_result.unexpected_keys:
+            print("\n--- UNEXPECTED KEYS (Ignored from Checkpoint) ---")
+            for key in load_result.unexpected_keys:
+                print(f"  [?] {key}")
+
+        declare(">>> Model weights initialized. Training/Eval will proceed.")
+        ckpt_path_for_trainer = None
 
     # === Training/Evaluation/Generation Execution ===
     if cfg.mode == "debug" or cfg.mode == "train":
@@ -282,12 +314,10 @@ def main(cfg: Config) -> None:
         trainer.test(
             model=lightning,
             dataloaders=test_loader,
-            ckpt_path=cfg.ckpt_path,
         )
     elif cfg.mode == "generate":
         # Generate predictions for single atomic structure
         trainer.predict(
             model=lightning,
             dataloaders=gen_loader,
-            ckpt_path=cfg.ckpt_path
         )

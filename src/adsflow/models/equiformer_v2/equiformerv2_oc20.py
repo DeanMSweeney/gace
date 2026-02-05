@@ -73,7 +73,7 @@ _AVG_NUM_NODES  = 77.81317
 _AVG_DEGREE     = 23.395238876342773    # IS2RE: 100k, max_radius = 5, max_neighbors = 100
 
 @registry.register_model("equiformer_v2")
-class EquiformerV2_Flow(BaseModel):
+class EquiformerV2(BaseModel):
     """
     Equiformer with graph attention built upon SO(2) convolution and feedforward network built upon S2 activation
 
@@ -508,7 +508,9 @@ class EquiformerV2_Flow(BaseModel):
         # add time embedding 
         # inject only into the first coefficient (for single-resolution case)
         # (that first index corresponds to l=0,m=0 for the first resolution)
+        print(self.alpha_t)
         t_add = (self.alpha_t * time_embeds).unsqueeze(1)
+        #x.embedding = x.embedding + t_add
         x.embedding[:, 0:1, :] = x.embedding[:, 0:1, :] + t_add
         
         if self.energy_force_conditioning:

@@ -240,13 +240,6 @@ class Config:
     - "debug": debug mode with additional checks
     """
 
-    regressor: Literal["GemNet-OC", "EquiformerV2"] = "EquiformerV2"
-    """
-    Neural network architecture for velocity field prediction:
-    - "EquiformerV2": Equivariant transformer (recommended, state-of-the-art)
-    - "GemNet-OC": Geometric message passing network (baseline)
-    """
-
     x_matching: Literal["flow", "endpoint"] = "flow"
     """
     Loss computation mode:

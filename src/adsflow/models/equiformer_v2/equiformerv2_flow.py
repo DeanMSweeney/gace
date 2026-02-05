@@ -73,7 +73,7 @@ _AVG_NUM_NODES  = 77.81317
 _AVG_DEGREE     = 23.395238876342773    # IS2RE: 100k, max_radius = 5, max_neighbors = 100
 
 @registry.register_model("equiformer_v2")
-class EquiformerV2_Flow(BaseModel):
+class EquiformerV2(BaseModel):
     """
     Equiformer with graph attention built upon SO(2) convolution and feedforward network built upon S2 activation
 
@@ -173,7 +173,6 @@ class EquiformerV2_Flow(BaseModel):
         energy_n_emb_freqs: int=16,
         force_n_emb_freqs: int=16,
         energy_force_conditioning: bool=False,
-        
     ):
         super().__init__()
 
@@ -256,7 +255,6 @@ class EquiformerV2_Flow(BaseModel):
             persistent=False 
         ) 
         
-        
         # Weights for message initialization
         self.sphere_embedding = nn.Embedding(self.max_num_elements, self.sphere_channels_all)
         
@@ -266,7 +264,6 @@ class EquiformerV2_Flow(BaseModel):
             self.energy_emb = nn.Linear(2 * energy_n_emb_freqs, self.sphere_channels)
             self.force_emb = nn.Linear(2 * force_n_emb_freqs, self.sphere_channels)
             
-
         # Initialize the function used to measure the distances between atoms
         assert self.distance_function in [
             'gaussian',
@@ -496,10 +493,9 @@ class EquiformerV2_Flow(BaseModel):
             edge_distance,
             edge_index)
         x.embedding = x.embedding + edge_degree.embedding 
-        #x.embedding = x.embedding + time_embeds.unsqueeze(1)
-        x.embedding[:, 0:1, :] = x.embedding[:, 0:1, :] + time_embeds.unsqueeze(1)
+        x.embedding = x.embedding + time_embeds.unsqueeze(1)
+        #x.embedding[:, 0:1, :] = x.embedding[:, 0:1, :] + time_embeds.unsqueeze(1) # tried this but foudn worse performance 
       
-        
         if self.energy_force_conditioning:
             x.embedding = x.embedding + energy_embeds.unsqueeze(1) + force_embeds.unsqueeze(1)
     
