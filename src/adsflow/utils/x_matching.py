@@ -8,7 +8,6 @@ from typing import Optional, Literal, Union, Tuple
 
 from adsflow.utils.post_processing import config_DFT, write_strucs
 from adsflow.utils.invariance import pbc_aware_delta, hungarian
-from adsflow.utils.eval_metrics import ADwT
 
 class XMatching():
     """
@@ -20,7 +19,8 @@ class XMatching():
         input_data,
         a: Tensor,  # N, 3 - predicted positions
         b: Tensor,  # N, 3 - target positions
-        tao: float=0,  # adsorbate weighting factor (if > 0, upweight adsorbate atoms)
+        loss_fn: str = "mse",
+        tao: float=1,  # adsorbate weighting factor (if > 0, upweight adsorbate atoms)
     ):
         """
         Compute the loss between predicted and target atomic positions.
@@ -41,7 +41,18 @@ class XMatching():
         with torch.no_grad():
             data.fixed = data.fixed.float()
             # Create mask: 0 for frozen atoms, 1 for free atoms (N, 1)
-            mask = (1 - data.fixed).unsqueeze(1)
+     
+            if tao == float('inf'):
+                mask = (data.tags == 2).float().unsqueeze(1)
+                mask_factor = mask 
+                print(tao)
+
+            else:
+                mask = (1 - data.fixed).float().unsqueeze(1)
+                ads_mask = (data.tags == 2).float().unsqueeze(1)  # N, 1
+                # Upweight adsorbate atoms by factor tao: mask * (1 + ads * (tao - 1))
+                # e.g., if tao=2, adsorbate atoms weighted 2x more than catalyst
+                mask_factor = mask * (1 + ads_mask * (tao - 1))
 
         # Compute position difference based on matching mode (needs gradients!)
         if self.x_matching == "endpoint":
@@ -58,34 +69,28 @@ class XMatching():
         else:
             raise ValueError("Invalid x_matching routine")
 
-        # Apply adsorbate weighting if tao > 0 (needs gradients!)
-        if tao > 0:
-            # Identify adsorbate atoms (tags == 2)
-            with torch.no_grad():
-                ads = (data.tags == 2).float().unsqueeze(1)  # N, 1
-            # Upweight adsorbate atoms by factor tao: mask * (1 + ads * (tao - 1))
-            # e.g., if tao=2, adsorbate atoms weighted 2x more than catalyst
-            ads_mask_factor = mask * (1 + ads * (tao - 1))
-        else:
-            ads_mask_factor = mask
-
         # Compute mean squared error per atom (averaged over xyz dimensions)
-        L_per_atom = (diff ** 2).mean(dim=1, keepdim=True)  # N, 1
+        if loss_fn == "mse":
+            L_per_atom = (diff ** 2).mean(dim=1, keepdim=True)  # N, 1
+        elif loss_fn == "mae":
+            L_per_atom = diff.abs().mean(dim=1, keepdim=True)  # N, 1
+        else:
+            raise ValueError(f"Invalid loss function: {loss_fn}")
 
         # Apply time-dependent weighting for cosine interpolation schedules
         # (helps stabilize training by reweighting loss based on interpolation time)
-        time_factor = torch.clamp(self.alpha_t_factor, 0.005, 1.5) if self.schedule_type== "cosine" \
-             else self.alpha_t_factor
+        time_factor = torch.clamp(self.alpha_t_x_factor, 0.005, 1.5) if self.schedule_type== "cosine" \
+             else self.alpha_t_x_factor
 
         # Apply all weighting factors: frozen atom mask, adsorbate weight, time weight
-        weighted_L_per_atom = L_per_atom * ads_mask_factor * time_factor  # N, 1
+        modified_L_per_atom = L_per_atom * mask_factor * time_factor  # N, 1
         # Average over all free (non-frozen) atoms
-        L = weighted_L_per_atom.sum() / mask.sum().clamp_min(1e-8)
+        L = modified_L_per_atom.sum() / mask.sum().clamp_min(1e-8)
 
         with torch.no_grad():
             # Track maximum loss atom for stability monitoring
-            max_L = weighted_L_per_atom.max()
-            max_L_idx = torch.argmax(weighted_L_per_atom)
+            max_L = modified_L_per_atom.max()
+            max_L_idx = torch.argmax(modified_L_per_atom)
 
         return L, max_L, max_L_idx
 
@@ -157,9 +162,9 @@ class XMatching():
                 x0 = data.pos.float() # Initial (unrelaxed) positions
 
                 if hasattr(data, "velocity"):
-                    u = data.velocity.float() # x1 - x0 
+                    u_x = data.velocity.float() # x1 - x0 
                 else:
-                    u = pbc_aware_delta(
+                    u_x = pbc_aware_delta(
                         delta=x1 - x0,
                         cell=data.cell.float(),
                         batch=data.batch,
@@ -183,36 +188,47 @@ class XMatching():
                 )
 
                 delta_xyz = x1 - x0
-                u = pbc_aware_delta(
+                u_x = pbc_aware_delta(
                     delta=delta_xyz,
                     cell=data.cell.float(),
                     batch=data.batch,
                 )
 
             # Sample random interpolation time t for each graph in the batch
-            t_per_graph = torch.rand(len(data.natoms), 1, device=x1.device, dtype=torch.float32)
+            t_x_per_graph = torch.rand(len(data.natoms), 1, device=x1.device, dtype=torch.float32)
             # Broadcast to atoms, clamp max to 0.999
-            t = t_per_graph[data.batch] * 0.999 if self.x_matching == "endpoint" else t_per_graph[data.batch]
+            t_x = t_x_per_graph[data.batch] * 0.999 if self.x_matching == "endpoint" else t_x_per_graph[data.batch]
             # Compute interpolation schedule parameters
-            alpha_t, alpha_t_grad, self.alpha_t_factor = self._interpolant_schedule(
-                t=t,
+            alpha_t_x, alpha_t_x_grad, self.alpha_t_x_factor = self._interpolant_schedule(
+                t=t_x,
                 schedule_type=self.schedule_type,
                 v_x=v_x,
             )
 
-            # Interpolate: xt = x0 + alpha_t * u (position at time t)
-            xt = x0 + alpha_t * u
+            # Interpolate: xt = x0 + alpha_t * u_x(position at time t)
+            xt = x0 + alpha_t_x * u_x
 
             # Rescale velocity for cosine schedule (to account for d(alpha_t)/dt)
-            u = alpha_t_grad * u # alpha_t' * (x1 - x0)
+            u_x = alpha_t_x_grad * u_x # alpha_t' * (x1 - x0)
 
             # Store interpolated data
             data.pos = xt  # Current position (what model sees as input)
             data.pos_init = x0  # Initial position (for reference)
-            data.t = t  # Interpolation time
+            data.t = t_x  # Interpolation time
 
+            """
+            # convert u_x to fractional coordinates
+            u_x = pbc_aware_delta(
+                delta=u_x,
+                cell=data.cell.float(),
+                batch=data.batch,
+                cartesian_to_fractional=True, 
+            )
+            """
+            if self.variant == "relax":
+                return data, u_x
 
-            if self.variant == "forge":
+            elif self.variant == "forge":
                 # Sample  atomic numbers (for conditional generation)
                 z1 = data.atomic_number # N 
 
@@ -239,7 +255,7 @@ class XMatching():
                 # Broadcast to atoms, clamp max to 0.999
                 t_z = t_z_per_graph[data.batch] * 0.999 if self.x_matching == "endpoint" else t_z_per_graph[data.batch]
                 # Compute interpolation schedule parameters
-                alpha_t_z, alpha_t_grad_z, self.alpha_t_z_factor = self._interpolant_schedule(
+                alpha_t_z, alpha_t_z_grad, self.alpha_t_z_factor = self._interpolant_schedule(
                     t=t_z,
                     schedule_type=self.schedule_type,
                     v_z=v_z,
@@ -248,17 +264,14 @@ class XMatching():
                 zt_hot = z0_hot + alpha_t_z * (z1_hot - z0_hot)
 
                 # Rescale velocity for cosine schedule (to account for d(alpha_t)/dt)
-                u_z = alpha_t_grad_z * u_z # alpha_t' * (x1 - x0)
+                u_z = alpha_t_z_grad * u_z # alpha_t' * (x1 - x0)
 
                 # Store interpolated data
                 data.atomic_number = zt_hot  # Current position (what model sees as input)
                 data.atomic_number_init = z0_hot  # Initial position (for reference)
                 data.t_z = t_z  # Interpolation time
 
-                return data, u, u_z
-
-            elif self.variant == "relax":
-                return data, u 
+                return data, u_x, u_z
   
             else:
                 raise ValueError("Invalid model variant")
@@ -268,8 +281,7 @@ class XMatching():
             self,
             input_data: Data,
             t: torch.Tensor,  # Time points for ODE integration (typically [0, 1])
-            threshold: float=0.20,  # Distance threshold for ADwT metric (Angstroms)
-    ) -> Union[Data, Tuple[Data, torch.Tensor]]:
+    ) -> Data:
         """
         Generate relaxed atomic structures by integrating the learned velocity field.
 
@@ -279,8 +291,7 @@ class XMatching():
         - u(x, t) = model-predicted velocity field
 
         Returns:
-            If ground truth available: (data, gen_mae, gen_dwt, gen_adwt, init_mae, init_dwt, init_adwt)
-            Otherwise: data
+            data: Data object with pos_generated attribute containing predicted relaxed positions
         """
 
         data = input_data.clone()
@@ -307,10 +318,10 @@ class XMatching():
                         batch=data.batch,
                     )
                 #alpha_t_factor = torch.clamp(alpha_t_factor, 0.005, 1.5)
-                u =  alpha_t_factor * delta
+                u_x =  alpha_t_factor * delta
             else: 
-                u = self(data)  # Model predicts velocity field
-            return u
+                u_x = self(data)  # Model predicts velocity field
+            return u_x
 
         # Integrate ODE from t=0 to t=1 to generate relaxed positions
         xt = odeint(
@@ -330,52 +341,5 @@ class XMatching():
         frozen_atoms = (data.fixed == 1)
         data.pos_generated[frozen_atoms] = data.pos[frozen_atoms]
 
-        # Write generated structures to files if output paths provided
-        if self.gen_POS:
-                write_strucs(
-                    data=data,
-                    gen_POS=self.gen_POS,  # Generated structure path
-                    in_POS=self.in_POS,  # Initial structure path
-                    rlxd_POS=self.rlxd_POS,  # Relaxed structure path
-                )
-
-                # Optionally configure VASP input files for DFT verification
-                if self.config_vasp:
-                    config_DFT(
-                        data=data,
-                        gen_POS=self.gen_POS,
-                        in_POS=self.in_POS,
-                        rlxd_POS=self.rlxd_POS,
-                    )
-        else:
-            print("Output file not provided... structure will not be saved")
-
-        # Compute evaluation metrics if ground truth relaxed positions available
-        if hasattr(data, "pos_relaxed"):
-            # Compute metrics for generated structure:
-            # - MAE: Mean Absolute Error
-            # - DwT: Distance within Threshold (% atoms within threshold)
-            # - ADwT: Adsorbate Distance within Threshold
-            gen_metrics = ADwT(data=data, pos_predicted=data.pos_generated, threshold=threshold)
-            init_metrics = ADwT(data=data, pos_predicted=data.pos, threshold=threshold)
-
-            # Return metrics as a dictionary for cleaner handling
-            eval_metrics = {
-                "generated_mae": gen_metrics[0],
-                "generated_dwt": gen_metrics[1],
-                "generated_adwt": gen_metrics[2],
-                "generated_ads_mae": gen_metrics[3],
-                "generated_ads_dwt": gen_metrics[4],
-                "generated_ads_adwt": gen_metrics[5],
-                "initial_mae": init_metrics[0],
-                "initial_dwt": init_metrics[1],
-                "initial_adwt": init_metrics[2],
-                "initial_ads_mae": init_metrics[3],
-                "initial_ads_dwt": init_metrics[4],
-                "initial_ads_adwt": init_metrics[5],
-            }
-
-            return data, eval_metrics
-        else:
-            return data
+        return data 
   

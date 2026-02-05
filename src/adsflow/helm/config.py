@@ -22,7 +22,9 @@ class OptimizerConfig:
     """
 
     # ==================== Optimizer Hyperparameters ====================
-
+    loss_fn: Literal["mse", "mae"] = "mae"
+    """Loss function to use for training"""
+    
     lr: float = 1e-3
     """Base learning rate for AdamW optimizer (default: 1e-3)"""
 
@@ -238,13 +240,6 @@ class Config:
     - "debug": debug mode with additional checks
     """
 
-    regressor: Literal["GemNet-OC", "EquiformerV2"] = "EquiformerV2"
-    """
-    Neural network architecture for velocity field prediction:
-    - "EquiformerV2": Equivariant transformer (recommended, state-of-the-art)
-    - "GemNet-OC": Geometric message passing network (baseline)
-    """
-
     x_matching: Literal["flow", "endpoint"] = "flow"
     """
     Loss computation mode:
@@ -304,7 +299,13 @@ class Config:
     Creates INCAR, KPOINTS, POTCAR files for DFT verification workflow
     """
 
+    write_eval_metrics: bool = False
+    """Whether to write evaluation metrics to file"""
+
     # ==================== Miscellaneous ====================
 
     seed: int = 42
     """Random seed for reproducibility (affects PyTorch, NumPy, Python RNGs)""" 
+    
+    num_debug_samples: int = 50_000
+    """Number of samples to use for debugging"""

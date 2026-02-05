@@ -10,16 +10,20 @@ POSCAR*
 
 # BATCH/bash
 *.out
+*.qmd
 *.err
 *.sif
 *.ckpt*
 *.swp
 *.gz
 *.sh
+*.html
 core
 out-claude.txt
 selected_frames-old.parquet
 selected_frames.parquet
+.DS_Store
+
 
 # Folders
 '$HOME'/
@@ -39,3 +43,6 @@ dense/
 old/
 l-*/
 ocp_checkpoints/
+plots/
+*_files/
+.DS_Store
