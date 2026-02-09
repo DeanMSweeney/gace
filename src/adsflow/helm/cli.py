@@ -254,49 +254,28 @@ def main(cfg: Config) -> None:
 
 
    # === Checkpoint Loading ===
-    ckpt_path_for_trainer = cfg.ckpt_path # resume training from checkpoint
-    if cfg.ckpt_path and not cfg.resume_training: # restart training with pretained model 
-        declare(f">>> Loading model weights only from: {cfg.ckpt_path} 🔄")
+    ckpt_path_for_trainer = cfg.ckpt_path 
+    # In your main training script:
+    if cfg.ckpt_path and not cfg.resume_training:
+        declare(f">>> Loading CLEAN preprocessed weights from: {cfg.ckpt_path}")
+        checkpoint = torch.load(cfg.ckpt_path, map_location="cpu", weights_only=True)
+        load_result = lightning.load_state_dict(checkpoint["state_dict"], strict=False)
 
-        checkpoint = torch.load(cfg.ckpt_path, map_location="cpu")
-        state_dict = checkpoint["state_dict"] if "state_dict" in checkpoint else checkpoint
+        # ⭐ DELETE CHECKPOINT TO FREE MEMORY
+        del checkpoint
+        torch.cuda.empty_cache()  # Clear GPU cache if using CUDA
 
-        # --- Universal Prefix & Renaming Logic ---
-        new_state_dict = {}
-        for k, v in state_dict.items():
-            # 1. Clean nesting
-            clean_key = k.replace("module.module.", "").replace("module.", "")
-            
-            # 2. Rename Force -> Velocity
-            if "force_block" in clean_key:
-                clean_key = clean_key.replace("force_block", "velocity_block")
-            
-            # 3. Prepend 'model.' prefix
-            if not clean_key.startswith("model."):
-                final_key = f"model.{clean_key}"
-            else:
-                final_key = clean_key
-            
-            new_state_dict[final_key] = v
-
-        # Load into the model
-        load_result = lightning.load_state_dict(new_state_dict, strict=False)
-       
         # Verification Reports
-        print("\n--- LOADING REPORT ---")
-        vel_keys = [k for k in new_state_dict.keys() if "velocity_block" in k]
-        print(f"✅ Mapped {len(vel_keys)} weights into velocity_block.")
-
         if load_result.missing_keys:
             print("\n--- MISSING KEYS (Not w/in Checkpoint) ---")
             for key in load_result.missing_keys:
                 print(f"  [!] {key}")
 
         if load_result.unexpected_keys:
-            print("\n--- UNEXPECTED KEYS (Ignored from Checkpoint) ---")
-            for key in load_result.unexpected_keys:
-                print(f"  [?] {key}")
-
+                print("\n--- UNEXPECTED KEYS (Ignored from Checkpoint) ---")
+                for key in load_result.unexpected_keys:
+                    print(f"  [?] {key}")
+        
         declare(">>> Model weights initialized. Training/Eval will proceed.")
         ckpt_path_for_trainer = None
 
