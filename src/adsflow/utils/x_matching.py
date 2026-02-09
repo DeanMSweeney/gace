@@ -45,7 +45,6 @@ class XMatching():
             if tao == float('inf'):
                 mask = (data.tags == 2).float().unsqueeze(1)
                 mask_factor = mask 
-                print(tao)
 
             else:
                 mask = (1 - data.fixed).float().unsqueeze(1)

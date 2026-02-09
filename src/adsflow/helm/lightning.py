@@ -180,7 +180,7 @@ class LightFlowMatch(LightningModule, XMatching):
         # Log average loss (weighted by batch size for multi-GPU training)
         self.log(
             "train/loss",
-            loss,
+            loss.detach(),
             on_step=True,  # Log every step
             on_epoch=True,  # Also compute epoch average
             prog_bar=True,  # Show in progress bar
@@ -191,7 +191,7 @@ class LightFlowMatch(LightningModule, XMatching):
         # Log maximum per-atom loss (for monitoring outliers)
         self.log(
             "train/max_loss",
-            max_loss,
+            max_loss.detach(),
             on_step=True,
             on_epoch=True,
             prog_bar=True,
@@ -226,7 +226,7 @@ class LightFlowMatch(LightningModule, XMatching):
         # Log validation metrics (no on_step to avoid clutter)
         self.log(
             "val/loss",
-            loss,
+            loss.detach(),
             prog_bar=True,
             batch_size=len(data.natoms),
             sync_dist=True,
@@ -234,7 +234,7 @@ class LightFlowMatch(LightningModule, XMatching):
 
         self.log(
             "val/max_loss",
-            max_loss,
+            max_loss.detach(),
             prog_bar=True,
             batch_size=len(data.natoms),
             sync_dist=True,
@@ -278,8 +278,8 @@ class LightFlowMatch(LightningModule, XMatching):
 
         # ==================== Log Test Metrics ====================
 
-        self.log("test/loss", loss, prog_bar=True, batch_size=len(data.natoms), sync_dist=True)
-        self.log("test/max_loss", max_loss, prog_bar=True, batch_size=len(data.natoms), sync_dist=True)
+        self.log("test/loss", loss.detach(), prog_bar=True, batch_size=len(data.natoms), sync_dist=True)
+        self.log("test/max_loss", max_loss.detach(), prog_bar=True, batch_size=len(data.natoms), sync_dist=True)
 
         # Log all evaluation metrics
         if eval_metrics:
