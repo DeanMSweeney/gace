@@ -10,7 +10,6 @@ POSCAR*
 
 # BATCH/bash
 *.qmd
-*.err
 *.sif
 *.ckpt*
 *.swp

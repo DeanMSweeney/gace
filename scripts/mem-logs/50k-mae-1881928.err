@@ -1,0 +1,50 @@
+[rank: 1] Seed set to 42
+[rank: 2] Seed set to 42
+[rank: 0] Seed set to 42
+[rank: 3] Seed set to 42
+Using bfloat16 Automatic Mixed Precision (AMP)
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+`Trainer(val_check_interval=1.0)` was configured so validation will run at the end of the training epoch..
+Initializing distributed: GLOBAL_RANK: 0, MEMBER: 1/4
+Initializing distributed: GLOBAL_RANK: 2, MEMBER: 3/4
+[W210 08:45:29.418270773 CUDAAllocatorConfig.h:28] Warning: expandable_segments not supported on this platform (function operator())
+Initializing distributed: GLOBAL_RANK: 1, MEMBER: 2/4
+Initializing distributed: GLOBAL_RANK: 3, MEMBER: 4/4
+[W210 08:45:29.488143937 CUDAAllocatorConfig.h:28] Warning: expandable_segments not supported on this platform (function operator())
+[W210 08:45:29.490191094 CUDAAllocatorConfig.h:28] Warning: expandable_segments not supported on this platform (function operator())
+[W210 08:45:29.493089516 CUDAAllocatorConfig.h:28] Warning: expandable_segments not supported on this platform (function operator())
+----------------------------------------------------------------------------------------------------
+distributed_backend=nccl
+All distributed processes registered. Starting with 4 processes
+----------------------------------------------------------------------------------------------------
+
+wandb: WARNING The anonymous setting has no effect and will be removed in a future version.
+wandb: Currently logged in as: dmsween (dmsween-university-of-michigan) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run qfk4ons8
+wandb: Tracking run with wandb version 0.23.1
+wandb: Run data is saved locally in wandb/run-20260210_084535-qfk4ons8
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run debug
+wandb: ⭐️ View project at https://wandb.ai/dmsween-university-of-michigan/adsflow
+wandb: 🚀 View run at https://wandb.ai/dmsween-university-of-michigan/adsflow/runs/qfk4ons8
+/usr/local/lib/python3.10/dist-packages/lightning/pytorch/callbacks/model_checkpoint.py:881: Checkpoint directory /workspace/scripts/checkpoints exists and is not empty.
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0,1,2,3]
+LOCAL_RANK: 2 - CUDA_VISIBLE_DEVICES: [0,1,2,3]
+LOCAL_RANK: 1 - CUDA_VISIBLE_DEVICES: [0,1,2,3]
+LOCAL_RANK: 3 - CUDA_VISIBLE_DEVICES: [0,1,2,3]
+Loading `train_dataloader` to estimate number of stepping batches.
+/usr/local/lib/python3.10/dist-packages/lightning/pytorch/utilities/model_summary/model_summary.py:221: mods argument is not needed anymore, you can stop passing it
+/usr/local/lib/python3.10/dist-packages/lightning/pytorch/utilities/model_summary/model_summary.py:221: mods argument is not needed anymore, you can stop passing it
+/usr/local/lib/python3.10/dist-packages/lightning/pytorch/utilities/model_summary/model_summary.py:221: mods argument is not needed anymore, you can stop passing it
+/usr/local/lib/python3.10/dist-packages/lightning/pytorch/utilities/model_summary/model_summary.py:221: mods argument is not needed anymore, you can stop passing it
+/usr/local/lib/python3.10/dist-packages/lightning/pytorch/utilities/model_summary/model_summary.py:242: Precision bf16-mixed is not supported by the model summary.  Estimated model size in MB will not be accurate. Using 32 bits instead.
+SLURM auto-requeueing enabled. Setting signal handlers.
+SLURM auto-requeueing enabled. Setting signal handlers.
+SLURM auto-requeueing enabled. Setting signal handlers.
+SLURM auto-requeueing enabled. Setting signal handlers.
+[2026-02-10T08:51:52.372] error: Detected 1 oom_kill event in StepId=1881928.0. Some of the step tasks have been OOM Killed.
+srun: error: gh103: task 0: Out Of Memory
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+[2026-02-10T09:18:58.356] error: *** STEP 1881928.0 ON gh103 CANCELLED AT 2026-02-10T09:18:58 DUE to SIGNAL Terminated ***
+[2026-02-10T09:18:58.357] error: *** JOB 1881928 ON gh103 CANCELLED AT 2026-02-10T09:18:58 DUE to SIGNAL Terminated ***
