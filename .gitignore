@@ -9,7 +9,6 @@ CONTCAR*
 POSCAR*
 
 # BATCH/bash
-*.out
 *.qmd
 *.err
 *.sif

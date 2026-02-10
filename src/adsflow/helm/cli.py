@@ -19,13 +19,14 @@ The script uses PyTorch Lightning for training orchestration and supports:
 """
 
 # Core dependencies
-import os
+import os, psutil 
 import torch
 from torch import optim
 from torch.utils.data import random_split
 from torch.cuda.amp import autocast
 from torch.optim.lr_scheduler import LinearLR, ExponentialLR, ReduceLROnPlateau, SequentialLR
 import torch.nn as nn
+import torch.distributed as dist
 
 # PyTorch Lightning for training orchestration
 import pytorch_lightning as pl
@@ -252,6 +253,15 @@ def main(cfg: Config) -> None:
         gradient_clip_val=1,  # Gradient clipping value
     )
 
+    def _rank():
+        return dist.get_rank() if dist.is_available() and dist.is_initialized() else 0
+
+    def log_mem(tag: str):
+        rss = psutil.Process(os.getpid()).memory_info().rss / (1024**3)
+        # GPU is optional; the failure is CPU, but this helps correlate
+        gpu = torch.cuda.memory_allocated() / (1024**3) if torch.cuda.is_available() else 0.0
+        print(f"[rank {_rank()}] {tag} | RSS={rss:.2f} GB | GPU_alloc={gpu:.2f} GB", flush=True)
+
 
    # === Checkpoint Loading ===
     ckpt_path_for_trainer = cfg.ckpt_path 
@@ -279,6 +289,8 @@ def main(cfg: Config) -> None:
         declare(">>> Model weights initialized. Training/Eval will proceed.")
         ckpt_path_for_trainer = None
 
+    _rank()
+    log_mem("After loading checkpoint")
     # === Training/Evaluation/Generation Execution ===
     if cfg.mode == "debug" or cfg.mode == "train":
         # Train the model with periodic validation
