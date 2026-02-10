@@ -53,6 +53,8 @@ class XMatching():
                 # e.g., if tao=2, adsorbate atoms weighted 2x more than catalyst
                 mask_factor = mask * (1 + ads_mask * (tao - 1))
 
+                mask_factor_norm = mask_factor / mask_factor.sum().clamp_min(1e-8)
+
         # Compute position difference based on matching mode (needs gradients!)
         if self.x_matching == "endpoint":
             # Compute PBC-aware loss between predicted and target positions
@@ -80,12 +82,14 @@ class XMatching():
         # (helps stabilize training by reweighting loss based on interpolation time)
         time_factor = torch.clamp(self.alpha_t_x_factor, 0.005, 1.5) if self.schedule_type== "cosine" \
              else self.alpha_t_x_factor
-
+        """
         # Apply all weighting factors: frozen atom mask, adsorbate weight, time weight
         modified_L_per_atom = L_per_atom * mask_factor * time_factor  # N, 1
         # Average over all free (non-frozen) atoms
         L = modified_L_per_atom.sum() / mask.sum().clamp_min(1e-8)
+        """
 
+        L = L_per_atom * mask_factor_norm
         with torch.no_grad():
             # Track maximum loss atom for stability monitoring
             max_L = modified_L_per_atom.max()
