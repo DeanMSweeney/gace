@@ -32,28 +32,27 @@ class XMatching():
         - Time-dependent loss weighting for cosine interpolation schedules
         """
         # Force fp32 precision for all operations
+        # Convert to fractional coordinates
         a = a.float()
+        a = pbc_aware_delta(
+            delta=a,
+            cell=input_data.cell.float(),
+            batch=input_data.batch,
+            cartesian_to_fractional=True, 
+        )
+
         b = b.float()
-        tao=torch.tensor(tao, device=a.device, dtype=torch.float32)
+        b = pbc_aware_delta(
+            delta=b,
+            cell=input_data.cell.float(),
+            batch=input_data.batch,
+            cartesian_to_fractional=True, 
+        )
 
         # Compute mask (no gradient needed for mask creation)
         data = input_data
-        with torch.no_grad():
-            data.fixed = data.fixed.float()
-            # Create mask: 0 for frozen atoms, 1 for free atoms (N, 1)
-     
-            if tao == float('inf'):
-                mask = (data.tags == 2).float().unsqueeze(1)
-                mask_factor = mask 
-
-            else:
-                mask = (1 - data.fixed).float().unsqueeze(1)
-                ads_mask = (data.tags == 2).float().unsqueeze(1)  # N, 1
-                # Upweight adsorbate atoms by factor tao: mask * (1 + ads * (tao - 1))
-                # e.g., if tao=2, adsorbate atoms weighted 2x more than catalyst
-                mask_factor = mask * (1 + ads_mask * (tao - 1))
-
-                mask_factor_norm = mask_factor / mask_factor.sum().clamp_min(1e-8)
+        # specify adsorbate weighting factor
+        tao=torch.tensor(tao, device=a.device, dtype=torch.float32)
 
         # Compute position difference based on matching mode (needs gradients!)
         if self.x_matching == "endpoint":
@@ -70,6 +69,21 @@ class XMatching():
         else:
             raise ValueError("Invalid x_matching routine")
 
+        with torch.no_grad():
+            data.fixed = data.fixed.float()
+            # Create mask: 0 for frozen atoms, 1 for free atoms (N, 1)
+     
+            if tao == float('inf'):
+                mask = (data.tags == 2).float().unsqueeze(1)
+                mask_factor = mask 
+
+            else:
+                mask = (1 - data.fixed).float().unsqueeze(1)
+                ads_mask = (data.tags == 2).float().unsqueeze(1)  # N, 1
+                # Upweight adsorbate atoms by factor tao: mask * (1 + ads * (tao - 1))
+                # e.g., if tao=2, adsorbate atoms weighted 2x more than catalyst
+                mask_factor = mask * (1 + ads_mask * (tao - 1))
+
         # Compute mean squared error per atom (averaged over xyz dimensions)
         if loss_fn == "mse":
             L_per_atom = (diff ** 2).mean(dim=1, keepdim=True)  # N, 1
@@ -82,15 +96,12 @@ class XMatching():
         # (helps stabilize training by reweighting loss based on interpolation time)
         time_factor = torch.clamp(self.alpha_t_x_factor, 0.005, 1.5) if self.schedule_type== "cosine" \
              else self.alpha_t_x_factor
-        """
+        
         # Apply all weighting factors: frozen atom mask, adsorbate weight, time weight
         modified_L_per_atom = L_per_atom * mask_factor * time_factor  # N, 1
         # Average over all free (non-frozen) atoms
         L = modified_L_per_atom.sum() / mask.sum().clamp_min(1e-8)
-        """
         
-        modified_L_per_atom = L_per_atom * mask_factor_norm
-        L = modified_L_per_atom.sum() 
         with torch.no_grad():
             # Track maximum loss atom for stability monitoring
             max_L = L.max()
@@ -164,7 +175,7 @@ class XMatching():
              # REFINE variant: refine from initial DFT positions to relaxed positions
             if initial_dist == "fixed":
                 x0 = data.pos.float() # Initial (unrelaxed) positions
-
+                
                 if hasattr(data, "velocity"):
                     u_x = data.velocity.float() # x1 - x0 
                 else:
@@ -173,6 +184,8 @@ class XMatching():
                         cell=data.cell.float(),
                         batch=data.batch,
                     )
+                
+             
 
             elif initial_dist == "noisy":
                 adsorbate = (data.tags == 2)
@@ -219,16 +232,7 @@ class XMatching():
             data.pos = xt  # Current position (what model sees as input)
             data.pos_init = x0  # Initial position (for reference)
             data.t = t_x  # Interpolation time
-
-            """
-            # convert u_x to fractional coordinates
-            u_x = pbc_aware_delta(
-                delta=u_x,
-                cell=data.cell.float(),
-                batch=data.batch,
-                cartesian_to_fractional=True, 
-            )
-            """
+            
             if self.variant == "relax":
                 return data, u_x
 

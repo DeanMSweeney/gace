@@ -81,6 +81,9 @@ def main(cfg: Config) -> None:
     defaults_cfg = OmegaConf.create(asdict(defaults))
     cfg = OmegaConf.merge(defaults_cfg, cfg)
 
+    if cfg.mode == "eval":
+        cfg.precision = 32 
+
     # === Reproducibility & Performance Setup ===
     # Seed RNG for reproducibility across multi-GPU training
     pl.seed_everything(cfg.seed, workers=True)
@@ -179,7 +182,7 @@ def main(cfg: Config) -> None:
         declare(f">>> Activated Evaluation mode with OC20-test: {cfg.oc20_test} 🦉")
         ptst = {"src": cfg.oc20_test}
         test_set = LazyLmdbDataset(ptst)
-        test_set = Subset(test_set, indices=range(1000))
+        test_set = Subset(test_set, indices=range(100))
         test_loader = DataLoader(
             dataset=test_set,
             batch_size=cfg.batch_size,
@@ -268,7 +271,7 @@ def main(cfg: Config) -> None:
     # In your main training script:
     if cfg.ckpt_path and not cfg.resume_training:
         declare(f">>> Loading CLEAN preprocessed weights from: {cfg.ckpt_path}")
-        checkpoint = torch.load(cfg.ckpt_path, map_location="cpu", weights_only=True)
+        checkpoint = torch.load(cfg.ckpt_path, map_location="cpu")
         load_result = lightning.load_state_dict(checkpoint["state_dict"], strict=False)
 
         # ⭐ DELETE CHECKPOINT TO FREE MEMORY
@@ -289,8 +292,7 @@ def main(cfg: Config) -> None:
         declare(">>> Model weights initialized. Training/Eval will proceed.")
         ckpt_path_for_trainer = None
 
-    _rank()
-    log_mem("After loading checkpoint")
+
     # === Training/Evaluation/Generation Execution ===
     if cfg.mode == "debug" or cfg.mode == "train":
         # Train the model with periodic validation
