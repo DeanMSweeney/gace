@@ -88,12 +88,13 @@ class XMatching():
         # Average over all free (non-frozen) atoms
         L = modified_L_per_atom.sum() / mask.sum().clamp_min(1e-8)
         """
-
-        L = L_per_atom * mask_factor_norm
+        
+        modified_L_per_atom = L_per_atom * mask_factor_norm
+        L = modified_L_per_atom.sum() 
         with torch.no_grad():
             # Track maximum loss atom for stability monitoring
-            max_L = modified_L_per_atom.max()
-            max_L_idx = torch.argmax(modified_L_per_atom)
+            max_L = L.max()
+            max_L_idx = torch.argmax(L)
 
         return L, max_L, max_L_idx
 
