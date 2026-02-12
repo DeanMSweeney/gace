@@ -20,7 +20,6 @@ class XMatching():
         a: Tensor,  # N, 3 - predicted positions
         b: Tensor,  # N, 3 - target positions
         loss_fn: str = "mse",
-        tao: float=1,  # adsorbate weighting factor (if > 0, upweight adsorbate atoms)
     ):
         """
         Compute the loss between predicted and target atomic positions.
@@ -72,8 +71,9 @@ class XMatching():
         with torch.no_grad():
             data.fixed = data.fixed.float()
             # Create mask: 0 for frozen atoms, 1 for free atoms (N, 1)
-     
-            if tao == float('inf'):
+            
+            tao = self.hparams.tao
+            if tao  == float('inf'):
                 mask = (data.tags == 2).float().unsqueeze(1)
                 mask_factor = mask 
 
@@ -303,7 +303,9 @@ class XMatching():
         """
 
         data = input_data.clone()
-
+        frozen_atoms = (data.fixed == 1)
+        catalyst = (data.tags != 2)
+        tao = self.hparams.tao
         def dx_dt(t: torch.Tensor, xt: torch.Tensor) -> torch.Tensor:
             """
             ODE right-hand side: dx/dt = u(x, t)
@@ -329,6 +331,13 @@ class XMatching():
                 u_x =  alpha_t_factor * delta
             else: 
                 u_x = self(data)  # Model predicts velocity field
+
+            # freeze frozen atoms during integration
+            u_x[frozen_atoms] = 0
+            # if adsorbate only matching, freeze catalyst atoms
+            if tao  == float('inf'):
+                u_x[catalyst] = 0
+
             return u_x
 
         # Integrate ODE from t=0 to t=1 to generate relaxed positions
@@ -344,10 +353,16 @@ class XMatching():
         # Extract final positions (at t=1)
         data.pos = input_data.pos
         data.pos_generated = xt[-1]
-
+        
+        """
         # Enforce frozen atoms: overwrite generated positions with initial positions
         frozen_atoms = (data.fixed == 1)
         data.pos_generated[frozen_atoms] = data.pos[frozen_atoms]
 
+        # if adsorbate matching only, freeze catalyst atoms
+        if tao  == float('inf'):
+            data.pos_generated[catalyst] = data.pos[catalyst]
+        """
+        
         return data 
   
