@@ -51,7 +51,7 @@ class XMatching():
         # Compute mask (no gradient needed for mask creation)
         data = input_data
         # specify adsorbate weighting factor
-        tao=torch.tensor(tao, device=a.device, dtype=torch.float32)
+        tao=torch.tensor(self.hparams.tao, device=a.device, dtype=torch.float32)
 
         # Compute position difference based on matching mode (needs gradients!)
         if self.x_matching == "endpoint":
@@ -72,7 +72,6 @@ class XMatching():
             data.fixed = data.fixed.float()
             # Create mask: 0 for frozen atoms, 1 for free atoms (N, 1)
             
-            tao = self.hparams.tao
             if tao  == float('inf'):
                 mask = (data.tags == 2).float().unsqueeze(1)
                 mask_factor = mask 
@@ -305,7 +304,7 @@ class XMatching():
         data = input_data.clone()
         frozen_atoms = (data.fixed == 1)
         catalyst = (data.tags != 2)
-        tao = self.hparams.tao
+        tao=torch.tensor(self.hparams.tao, device=data.pos.device, dtype=data.pos.dtype)
         def dx_dt(t: torch.Tensor, xt: torch.Tensor) -> torch.Tensor:
             """
             ODE right-hand side: dx/dt = u(x, t)
