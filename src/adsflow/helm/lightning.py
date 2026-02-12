@@ -157,7 +157,6 @@ class LightFlowMatch(LightningModule, XMatching):
                 a=f,  # Model prediction
                 b=data.pos_relaxed if self.x_matching == "endpoint" else u,  # Target
                 loss_fn=self.hparams.loss_fn,
-                tao=self.hparams.tao,  # Adsorbate weighting factor
             )
 
         return loss, max_loss, max_loss_idx
