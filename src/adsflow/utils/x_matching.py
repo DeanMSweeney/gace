@@ -8,6 +8,7 @@ from typing import Optional, Literal, Union, Tuple
 
 from adsflow.utils.post_processing import config_DFT, write_strucs
 from adsflow.utils.invariance import pbc_aware_delta, hungarian
+from adsflow.utils.utils import adsorbate_neighborhood_mask
 
 class XMatching():
     """
@@ -69,20 +70,16 @@ class XMatching():
             raise ValueError("Invalid x_matching routine")
 
         with torch.no_grad():
-            # Apply time-dependent weighting for endpointinterpolation schedules
+            # Apply time-dependent weighting for endpoint interpolation schedules
             time_factor = self.alpha_t_x_factor
 
-            # specify adsorbate weighting factor
-            tao = torch.tensor(self.hparams.tao, device=a.device, dtype=torch.float32)
-            
-            if tao == float('inf'):
-                mask = (data.tags == 2).float().unsqueeze(1)
-                mask_factor = mask 
-            else:
-                mask = (1 - data.fixed.float()).unsqueeze(1)
-                ads_mask = (data.tags == 2).float().unsqueeze(1)  # N, 1
-                # Upweight adsorbate atoms by factor tao: mask * (1 + ads * (tao - 1))
-                mask_factor = mask * (1 + ads_mask * (tao - 1))
+            # Spatial mask (precomputed in path(), stored on data)
+            mask = data.ads_neighborhood_mask.float().unsqueeze(1)
+
+            # Adsorbate weighting within the selected atoms
+            tao = self.hparams.tao
+            ads_mask = (data.tags == 2).float().unsqueeze(1)  # N, 1
+            mask_factor = mask * (1 + ads_mask * (tao - 1))
 
         # Compute mean squared error per atom (averaged over xyz dimensions)
         if loss_fn == "mse":
@@ -163,7 +160,6 @@ class XMatching():
 
         with torch.no_grad():
             data = input_data.clone()
-            tao = torch.tensor(self.hparams.tao, device=data.pos.device, dtype=torch.float32)
 
             # x1 = final relaxed positions (target)
             x1 = data.pos_relaxed.float()
@@ -181,12 +177,20 @@ class XMatching():
                         batch=data.batch,
                     )
 
-                # If tao is infinite, only interpolate adsorbate positions
-                if tao  == float('inf'):
-                    path_mask = (data.tags == 2).float().unsqueeze(1)
+                # Determine which atoms to supervise based on ads_cutoff
+                ads_cutoff = self.hparams.ads_cutoff
+                if ads_cutoff == 0:
+                    # Adsorbate atoms only
+                    nbhood_mask = (data.tags == 2)
+                elif ads_cutoff == float('inf'):
+                    # All non-frozen atoms
+                    nbhood_mask = (data.fixed == 0)
                 else:
-                    path_mask = (1 - data.fixed).float().unsqueeze(1)
+                    # Adsorbate + catalyst within cutoff
+                    nbhood_mask = adsorbate_neighborhood_mask(data, ads_cutoff)
                 
+                data.ads_neighborhood_mask = nbhood_mask  # store for criterion()
+                path_mask = nbhood_mask.float().unsqueeze(1)
                 u_x = path_mask * u_x 
                     
 
@@ -307,8 +311,15 @@ class XMatching():
 
         data = input_data.clone()
         frozen_atoms = (data.fixed == 1)
-        catalyst = (data.tags != 2)
-        tao = torch.tensor(self.hparams.tao, device=data.pos.device, dtype=torch.float32)
+
+        # Precompute spatial mask based on ads_cutoff
+        ads_cutoff = self.hparams.ads_cutoff
+        if ads_cutoff == 0:
+            outside_neighborhood = (data.tags != 2)
+        elif ads_cutoff == float('inf'):
+            outside_neighborhood = frozen_atoms
+        else:
+            outside_neighborhood = ~adsorbate_neighborhood_mask(data, ads_cutoff)
         
         def dx_dt(t: torch.Tensor, xt: torch.Tensor) -> torch.Tensor:
             """
@@ -336,11 +347,8 @@ class XMatching():
             else: 
                 u_x = self(data)  # Model predicts velocity field
 
-            # freeze frozen atoms during integration
-            u_x[frozen_atoms] = 0
-            # if adsorbate only matching, freeze catalyst atoms
-            if tao  == float('inf'):
-                u_x[catalyst] = 0
+            # Zero velocity for atoms outside the supervised neighborhood
+            u_x[outside_neighborhood] = 0
 
             return u_x
 

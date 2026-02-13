@@ -20,7 +20,8 @@ def pbc_aware_delta(
             delta: Tensor,
             batch: Optional[Tensor]=None,
             naive: bool=True,
-            norm: bool=False,
+            l1_norm: bool=False,
+            l2_norm: bool=False,
             cartesian: bool=True,
             cartesian_to_fractional: bool=False, 
 ) -> Tensor:
@@ -47,8 +48,8 @@ def pbc_aware_delta(
                If None, assumes single structure
         naive: If True, use simple rounding (fast but approximate)
                If False, search 27 neighboring cells (exact but slower)
-        norm: If True, return L1 norm of minimum distance (N, 1)
-              If False, return minimum distance vector (N, 3)
+        l1_norm: If True, return L1 norm (mean absolute value across xyz) (N, 1)
+        l2_norm: If True, return L2 norm (Euclidean distance) (N, 1)
 
     Returns:
         u_min: Minimum image distance vector (N, 3) or norm (N, 1)
@@ -89,9 +90,12 @@ def pbc_aware_delta(
     else:
         u_mic = u_f_mic
 
-    if norm:
+    if l1_norm:
         # Return L1 norm (mean absolute value across xyz)
         return u_mic.abs().mean(dim=1, keepdim=True)  # (N, 1)
+    elif l2_norm:
+        # Return Euclidean distance (L2 norm)
+        return u_mic.norm(dim=1, keepdim=True)  # (N, 1)
     else:
         # Return full minimum image vector
         return u_mic

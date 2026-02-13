@@ -76,11 +76,19 @@ class OptimizerConfig:
 
     # ==================== Loss Weighting ====================
 
-    tao: float = 0
-    """Adsorbate weighting factor for loss computation
-    - 0: equal weighting for all atoms
-    - >0: upweight adsorbate atoms by factor tao
+    tao: float = 1
+    """Adsorbate weighting multiplier for loss computation.
+    Applied within the atoms selected by ads_cutoff.
+    - 1: equal weighting for all selected atoms (default)
+    - >1: upweight adsorbate atoms by factor tao
     E.g., tao=2 means adsorbate atoms contribute 2x more to loss
+    """
+
+    ads_cutoff: float = float('inf')
+    """Spatial cutoff controlling which atoms are supervised.
+    - 0: adsorbate atoms only (no catalyst supervision)
+    - >0 float: adsorbate + catalyst atoms within cutoff Angstroms
+    - inf: all non-frozen atoms (default, backward-compatible)
     """
 
     
