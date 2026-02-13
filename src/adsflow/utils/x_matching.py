@@ -32,26 +32,12 @@ class XMatching():
         """
         # Force fp32 precision for all operations
         # Convert to fractional coordinates
-        a = a.float()
-        a = pbc_aware_delta(
-            delta=a,
-            cell=input_data.cell.float(),
-            batch=input_data.batch,
-            cartesian_to_fractional=True, 
-        )
 
+        a = a.float()
         b = b.float()
-        b = pbc_aware_delta(
-            delta=b,
-            cell=input_data.cell.float(),
-            batch=input_data.batch,
-            cartesian_to_fractional=True, 
-        )
 
         # Compute mask (no gradient needed for mask creation)
         data = input_data
-        # specify adsorbate weighting factor
-        tao=torch.tensor(self.hparams.tao, device=a.device, dtype=torch.float32)
 
         # Compute position difference based on matching mode (needs gradients!)
         if self.x_matching == "endpoint":
@@ -62,25 +48,40 @@ class XMatching():
                 delta=(a - b),
                 batch=data.batch,
             )
+
         elif self.x_matching == "flow":
             # Simple Euclidean difference (for flow-based methods)
+            a = pbc_aware_delta(
+                delta=a,
+                cell=input_data.cell.float(),
+                batch=input_data.batch,
+                cartesian_to_fractional=True, 
+            )
+            b = pbc_aware_delta(
+                delta=b,
+                cell=input_data.cell.float(),
+                batch=input_data.batch,
+                cartesian_to_fractional=True, 
+            )
             diff = a - b
+
         else:
             raise ValueError("Invalid x_matching routine")
 
         with torch.no_grad():
-            data.fixed = data.fixed.float()
-            # Create mask: 0 for frozen atoms, 1 for free atoms (N, 1)
+            # Apply time-dependent weighting for endpointinterpolation schedules
+            time_factor = self.alpha_t_x_factor
+
+            # specify adsorbate weighting factor
+            tao = torch.tensor(self.hparams.tao, device=a.device, dtype=torch.float32)
             
-            if tao  == float('inf'):
+            if tao == float('inf'):
                 mask = (data.tags == 2).float().unsqueeze(1)
                 mask_factor = mask 
-
             else:
-                mask = (1 - data.fixed).float().unsqueeze(1)
+                mask = (1 - data.fixed.float()).unsqueeze(1)
                 ads_mask = (data.tags == 2).float().unsqueeze(1)  # N, 1
                 # Upweight adsorbate atoms by factor tao: mask * (1 + ads * (tao - 1))
-                # e.g., if tao=2, adsorbate atoms weighted 2x more than catalyst
                 mask_factor = mask * (1 + ads_mask * (tao - 1))
 
         # Compute mean squared error per atom (averaged over xyz dimensions)
@@ -90,11 +91,6 @@ class XMatching():
             L_per_atom = diff.abs().mean(dim=1, keepdim=True)  # N, 1
         else:
             raise ValueError(f"Invalid loss function: {loss_fn}")
-
-        # Apply time-dependent weighting for cosine interpolation schedules
-        # (helps stabilize training by reweighting loss based on interpolation time)
-        time_factor = torch.clamp(self.alpha_t_x_factor, 0.005, 1.5) if self.schedule_type== "cosine" \
-             else self.alpha_t_x_factor
         
         # Apply all weighting factors: frozen atom mask, adsorbate weight, time weight
         modified_L_per_atom = L_per_atom * mask_factor * time_factor  # N, 1
@@ -103,8 +99,8 @@ class XMatching():
         
         with torch.no_grad():
             # Track maximum loss atom for stability monitoring
-            max_L = L.max()
-            max_L_idx = torch.argmax(L)
+            max_L = modified_L_per_atom.max()
+            max_L_idx = torch.argmax(modified_L_per_atom)
 
         return L, max_L, max_L_idx
 
@@ -132,18 +128,18 @@ class XMatching():
             # Linear interpolation: alpha_t = t
             alpha_t = t
             alpha_t_grad = torch.tensor(1.0, device=t.device, dtype=torch.float32)
-            alpha_t_factor = 1 / (1 - t) if self.x_matching == "endpoint" else torch.tensor(1.0, device=t.device, dtype=torch.float32)
-
+        
         elif schedule_type == "cosine":
             # Cosine interpolation: slower at start/end, faster in middle
-            # alpha_t = 1 - cos^2(t^v * pi/2)
             alpha_t = 1 - (torch.cos(t ** v_x * torch.pi / 2)) ** 2
-            # Compute d(alpha_t)/dt for velocity rescaling
             alpha_t_grad = torch.pi * v_x * t ** (v_x - 1) * torch.cos(t ** v_x * torch.pi / 2) * torch.sin(t ** v_x * torch.pi / 2)
-            # Store for time-dependent loss weighting
-            alpha_t_factor = alpha_t_grad / (1 - alpha_t).clamp_min(1e-8) # alpha_t'/ (1-alpha)
+        
         else:
             raise ValueError("Invalid interpolant schedule")
+
+        # scale only for endpoint
+        alpha_t_factor = torch.clamp(alpha_t_grad / (1 - alpha_t), 0.005, 1.5) if self.x_matching == "endpoint" \
+            else torch.tensor(1.0, device=t.device, dtype=torch.float32)
 
         return alpha_t, alpha_t_grad, alpha_t_factor
             
@@ -167,6 +163,7 @@ class XMatching():
 
         with torch.no_grad():
             data = input_data.clone()
+            tao = torch.tensor(self.hparams.tao, device=data.pos.device, dtype=torch.float32)
 
             # x1 = final relaxed positions (target)
             x1 = data.pos_relaxed.float()
@@ -183,8 +180,15 @@ class XMatching():
                         cell=data.cell.float(),
                         batch=data.batch,
                     )
+
+                # If tao is infinite, only interpolate adsorbate positions
+                if tao  == float('inf'):
+                    path_mask = (data.tags == 2).float().unsqueeze(1)
+                else:
+                    path_mask = (1 - data.fixed).float().unsqueeze(1)
                 
-             
+                u_x = path_mask * u_x 
+                    
 
             elif initial_dist == "noisy":
                 adsorbate = (data.tags == 2)
@@ -222,7 +226,7 @@ class XMatching():
             )
 
             # Interpolate: xt = x0 + alpha_t * u_x(position at time t)
-            xt = x0 + alpha_t_x * u_x
+            xt = x0 + alpha_t_x * u_x 
 
             # Rescale velocity for cosine schedule (to account for d(alpha_t)/dt)
             u_x = alpha_t_x_grad * u_x # alpha_t' * (x1 - x0)
@@ -304,7 +308,8 @@ class XMatching():
         data = input_data.clone()
         frozen_atoms = (data.fixed == 1)
         catalyst = (data.tags != 2)
-        tao=torch.tensor(self.hparams.tao, device=data.pos.device, dtype=data.pos.dtype)
+        tao = torch.tensor(self.hparams.tao, device=data.pos.device, dtype=torch.float32)
+        
         def dx_dt(t: torch.Tensor, xt: torch.Tensor) -> torch.Tensor:
             """
             ODE right-hand side: dx/dt = u(x, t)
