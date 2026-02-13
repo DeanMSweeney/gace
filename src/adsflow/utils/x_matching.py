@@ -78,8 +78,8 @@ class XMatching():
 
             # Adsorbate weighting within the selected atoms
             tao = self.hparams.tao
-            ads_mask = (data.tags == 2).float().unsqueeze(1)  # N, 1
-            mask_factor = mask * (1 + ads_mask * (tao - 1))
+            adsorbates = (data.tags == 2).float().unsqueeze(1)  # N, 1
+            mask_factor = mask * (1 + adsorbates * (tao - 1))
 
         # Compute mean squared error per atom (averaged over xyz dimensions)
         if loss_fn == "mse":
@@ -181,16 +181,16 @@ class XMatching():
                 ads_cutoff = self.hparams.ads_cutoff
                 if ads_cutoff == 0:
                     # Adsorbate atoms only
-                    nbhood_mask = (data.tags == 2)
+                    ads_neighborhood_mask = (data.tags == 2)
                 elif ads_cutoff == float('inf'):
                     # All non-frozen atoms
-                    nbhood_mask = (data.fixed == 0)
+                    ads_neighborhood_mask = (data.fixed == 0)
                 else:
                     # Adsorbate + catalyst within cutoff
-                    nbhood_mask = adsorbate_neighborhood_mask(data, ads_cutoff)
+                    ads_neighborhood_mask = adsorbate_neighborhood_mask(data, ads_cutoff)
                 
-                data.ads_neighborhood_mask = nbhood_mask  # store for criterion()
-                path_mask = nbhood_mask.float().unsqueeze(1)
+                data.ads_neighborhood_mask = ads_neighborhood_mask  # store for criterion()
+                path_mask = ads_neighborhood_mask.float().unsqueeze(1)
                 u_x = path_mask * u_x 
                     
 
