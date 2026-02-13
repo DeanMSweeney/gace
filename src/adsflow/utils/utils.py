@@ -24,7 +24,9 @@ def adsorbate_neighborhood_mask(
     - Non-frozen catalyst atoms within `cutoff` Angstroms of any adsorbate atom
       (using PBC-aware minimum image distances)
 
-    Fully vectorized — no per-graph loop.
+    NOTE: Uses per-graph loop to avoid O(Nc_total × Na_total) memory from
+    cross-graph pairs. The vectorized version below is faster but requires
+    ~B× more memory (B = batch size). See commented code at end of function.
 
     Args:
         data: Batched PyG Data object with pos, cell, batch, tags, fixed attributes
@@ -43,43 +45,63 @@ def adsorbate_neighborhood_mask(
     # Start with all adsorbate atoms
     mask = adsorbate.clone()
 
-    ads_idx = adsorbate.nonzero(as_tuple=True)[0]
-    cat_idx = (~adsorbate & not_fixed).nonzero(as_tuple=True)[0]
+    num_graphs = batch.max().item() + 1
+    for g in range(num_graphs):
+        g_mask = (batch == g)
+        ads_idx = (g_mask & adsorbate).nonzero(as_tuple=True)[0]
+        cat_idx = (g_mask & ~adsorbate & not_fixed).nonzero(as_tuple=True)[0]
 
-    if len(ads_idx) == 0 or len(cat_idx) == 0:
-        return mask
+        if len(ads_idx) == 0 or len(cat_idx) == 0:
+            continue
 
-    ads_pos = pos[ads_idx]  # (Na, 3)
-    cat_pos = pos[cat_idx]  # (Nc, 3)
-    Nc, Na = len(cat_idx), len(ads_idx)
+        ads_pos = pos[ads_idx]  # (Na, 3)
+        cat_pos = pos[cat_idx]  # (Nc, 3)
+        Nc, Na = len(cat_idx), len(ads_idx)
 
-    # Pairwise deltas: (Nc, Na, 3)
-    delta = cat_pos.unsqueeze(1) - ads_pos.unsqueeze(0)
+        # Pairwise deltas: (Nc, Na, 3)
+        delta = cat_pos.unsqueeze(1) - ads_pos.unsqueeze(0)
 
-    # PBC: use each catalyst atom's graph index for cell lookup
-    cat_batch = batch[cat_idx]
-    pair_batch = cat_batch.unsqueeze(1).expand(-1, Na).reshape(-1)
+        # PBC minimum image distances
+        batch_flat = torch.full(
+            (Nc * Na,), g, device=pos.device, dtype=torch.long
+        )
+        dist = pbc_aware_delta(
+            cell=cell,
+            delta=delta.reshape(-1, 3),
+            batch=batch_flat,
+            l2_norm=True,
+        ).reshape(Nc, Na)
 
-    delta_pbc = pbc_aware_delta(
-        cell=cell,
-        delta=delta.reshape(-1, 3),
-        batch=pair_batch,
-        l2_norm=True,
-    )
+        # Min distance from each catalyst atom to nearest adsorbate
+        min_dist = dist.min(dim=1).values  # (Nc,)
 
-    # Distances: (Nc, Na)
-    dist = delta_pbc.reshape(Nc, Na)
-
-    # Mask out cross-graph pairs (set to inf so they don't affect min)
-    ads_batch = batch[ads_idx]
-    same_graph = (cat_batch.unsqueeze(1) == ads_batch.unsqueeze(0))  # (Nc, Na)
-    dist[~same_graph] = float('inf')
-
-    # Min distance from each catalyst atom to nearest adsorbate in same graph
-    min_dist = dist.min(dim=1).values  # (Nc,)
-
-    # Mark catalyst atoms within cutoff
-    mask[cat_idx[min_dist <= cutoff]] = True
+        # Mark catalyst atoms within cutoff
+        mask[cat_idx[min_dist <= cutoff]] = True
 
     return mask
-    
+
+    # ---------------------------------------------------------------
+    # Vectorized version (faster but higher memory due to cross-graph pairs)
+    # Peak memory: O(Nc_total × Na_total) vs O(max(Nc_g × Na_g)) for loop
+    # ---------------------------------------------------------------
+    # ads_idx = adsorbate.nonzero(as_tuple=True)[0]
+    # cat_idx = (~adsorbate & not_fixed).nonzero(as_tuple=True)[0]
+    # if len(ads_idx) == 0 or len(cat_idx) == 0:
+    #     return mask
+    # ads_pos = pos[ads_idx]
+    # cat_pos = pos[cat_idx]
+    # Nc, Na = len(cat_idx), len(ads_idx)
+    # delta = cat_pos.unsqueeze(1) - ads_pos.unsqueeze(0)
+    # cat_batch = batch[cat_idx]
+    # pair_batch = cat_batch.unsqueeze(1).expand(-1, Na).reshape(-1)
+    # delta_pbc = pbc_aware_delta(
+    #     cell=cell, delta=delta.reshape(-1, 3),
+    #     batch=pair_batch, l2_norm=True,
+    # )
+    # dist = delta_pbc.reshape(Nc, Na)
+    # ads_batch = batch[ads_idx]
+    # same_graph = (cat_batch.unsqueeze(1) == ads_batch.unsqueeze(0))
+    # dist[~same_graph] = float('inf')
+    # min_dist = dist.min(dim=1).values
+    # mask[cat_idx[min_dist <= cutoff]] = True
+    # return mask
