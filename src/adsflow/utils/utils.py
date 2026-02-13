@@ -10,53 +10,76 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.data import Data
 from typing import Optional, Literal, Union, Tuple
+from adsflow.utils.invariance import pbc_aware_delta
 
-def ship_data(
-    input_data: Data,
-    sample: torch.Tensor,
-    idx: Optional[int],
-):
+def adsorbate_neighborhood_mask(
+    data: Data,
+    cutoff: float,
+) -> Tensor:
+    """
+    Compute a boolean mask selecting adsorbate atoms and nearby catalyst atoms.
 
-    dir_name = "shipped_data" # directory to store data       
-    data = input_data.clone()
-    
-    # build mask for selected atoms and output atomic positions 
-    mask = (data.batch == sample)
-    x0 = data.pos_init[mask]
-    x1 = data.pos_relaxed[mask]
-    xt = data.pos[mask]
-    atomic_numbers = data.atomic_numbers[mask]
-    cell = data.cell[sample]
-    
-    # convert atomic positions to ASE objects 
-    x0 = Atoms(
-            positions=x0.detach().cpu().numpy(), # initial
-            numbers=atomic_numbers.detach().cpu().numpy(),
-            cell=cell.squeeze(0).detach().cpu().numpy(),
-            pbc=True,  # or (True,True,False) for a slab
-        )
-    x1 = Atoms(
-            positions=x1.detach().cpu().numpy(), # initial
-            numbers=atomic_numbers.detach().cpu().numpy(),
-            cell=cell.squeeze(0).detach().cpu().numpy(),
-            pbc=True,  # or (True,True,False) for a slab
-        )
-    xt = Atoms(
-            positions=xt.detach().cpu().numpy(), # initial
-            numbers=atomic_numbers.detach().cpu().numpy(),
-            cell=cell.squeeze(0).detach().cpu().numpy(),
-            pbc=True,  # or (True,True,False) for a slab
-        )
+    For each graph in the batch, marks:
+    - All adsorbate atoms (tags == 2)
+    - Non-frozen catalyst atoms within `cutoff` Angstroms of any adsorbate atom
+      (using PBC-aware minimum image distances)
 
-    # write to POSCARs
-    print('>>> Writing POSCARs 👩‍💻')
-    os.makedirs(dir_name, exist_ok=True)
-    write(f"{dir_name}/POSCAR0_{idx}",  x0, direct=False)  # Cartesian
-    write(f"{dir_name}/POSCAR1_{idx}",  x1, direct=False)  # Cartesian
-    write(f"{dir_name}/POSCART_{idx}",  xt, direct=False)  # Cartesian
-    
-    print(f'Wrote POSCARS to ./{dir_name}')
+    Fully vectorized — no per-graph loop.
 
-      
-    
+    Args:
+        data: Batched PyG Data object with pos, cell, batch, tags, fixed attributes
+        cutoff: Distance threshold in Angstroms
+
+    Returns:
+        mask: Boolean tensor (N,) — True for atoms in the adsorbate neighborhood
+    """
+
+    pos = data.pos.float()
+    batch = data.batch
+    cell = data.cell.float()
+    adsorbate = (data.tags == 2)
+    not_fixed = (data.fixed == 0)
+
+    # Start with all adsorbate atoms
+    mask = adsorbate.clone()
+
+    ads_idx = adsorbate.nonzero(as_tuple=True)[0]
+    cat_idx = (~adsorbate & not_fixed).nonzero(as_tuple=True)[0]
+
+    if len(ads_idx) == 0 or len(cat_idx) == 0:
+        return mask
+
+    ads_pos = pos[ads_idx]  # (Na, 3)
+    cat_pos = pos[cat_idx]  # (Nc, 3)
+    Nc, Na = len(cat_idx), len(ads_idx)
+
+    # Pairwise deltas: (Nc, Na, 3)
+    delta = cat_pos.unsqueeze(1) - ads_pos.unsqueeze(0)
+
+    # PBC: use each catalyst atom's graph index for cell lookup
+    cat_batch = batch[cat_idx]
+    pair_batch = cat_batch.unsqueeze(1).expand(-1, Na).reshape(-1)
+
+    delta_pbc = pbc_aware_delta(
+        cell=cell,
+        delta=delta.reshape(-1, 3),
+        batch=pair_batch,
+        l2_norm=True,
+    )
+
+    # Distances: (Nc, Na)
+    dist = delta_pbc.reshape(Nc, Na)
+
+    # Mask out cross-graph pairs (set to inf so they don't affect min)
+    ads_batch = batch[ads_idx]
+    same_graph = (cat_batch.unsqueeze(1) == ads_batch.unsqueeze(0))  # (Nc, Na)
+    dist[~same_graph] = float('inf')
+
+    # Min distance from each catalyst atom to nearest adsorbate in same graph
+    min_dist = dist.min(dim=1).values  # (Nc,)
+
+    # Mark catalyst atoms within cutoff
+    mask[cat_idx[min_dist <= cutoff]] = True
+
+    return mask
     

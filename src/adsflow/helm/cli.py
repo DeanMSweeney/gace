@@ -51,7 +51,6 @@ from typing import Optional, Literal, Union, Tuple
 from adsflow.helm.lightning import LightFlowMatch
 from adsflow.models.gemnet.gemnet_flow import GemNetFlow
 from adsflow.utils.lmdb_loader import LazyLmdbDataset
-from adsflow.utils.utils import ship_data
 from adsflow.helm.config import Config
 
 # FairChem dataset handling
