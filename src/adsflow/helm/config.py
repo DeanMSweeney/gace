@@ -91,7 +91,7 @@ class OptimizerConfig:
     - inf: all non-frozen atoms (default, backward-compatible)
     """
 
-    t0_weight: float = 1.5
+    t0_weight: float = 1.0
     """Weighting multiplier for t=0 in x_matching="endpoint"""
 
     
