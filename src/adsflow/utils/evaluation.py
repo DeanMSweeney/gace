@@ -43,7 +43,6 @@ def compute_eval_metrics(
         delta=pos_predicted - pos_target,
         cell=cell,
         batch=batch,
-        norm=False
     )
     per_atom_mae = per_atom_error.abs().mean(dim=1, keepdim=True)
     per_atom_me = per_atom_error.mean(dim=1, keepdim=True)
@@ -53,7 +52,6 @@ def compute_eval_metrics(
         delta=pos_predicted[adsorbate_mask] - pos_target[adsorbate_mask],
         cell=cell,
         batch=batch[adsorbate_mask],
-        norm=False,
     )
     ads_atom_mae = ads_atom_error.abs().mean(dim=1, keepdim=True)
     ads_atom_me = ads_atom_error.mean(dim=1, keepdim=True)
@@ -62,17 +60,23 @@ def compute_eval_metrics(
     batch_ads = batch[adsorbate_mask]
     num_structures = batch.max().item() + 1
     mae_per_structure = []
+    me_per_structure = []
     ads_mae_per_structure = []
+    ads_me_per_structure = []
 
     for struct_idx in range(num_structures):
         struct_mask = batch == struct_idx
         ads_mask = batch_ads == struct_idx
         if struct_mask.any():
             mae_per_structure.append(per_atom_mae[struct_mask].mean().item())
+            me_per_structure.append(per_atom_me[struct_mask].mean().item())
             ads_mae_per_structure.append(ads_atom_mae[ads_mask].mean().item())
+            ads_me_per_structure.append(ads_atom_me[ads_mask].mean().item())
 
     mae_per_structure = torch.tensor(mae_per_structure)
+    me_per_structure = torch.tensor(me_per_structure)
     ads_mae_per_structure = torch.tensor(ads_mae_per_structure)
+    ads_me_per_structure = torch.tensor(ads_me_per_structure)
 
     # Calculate DwT and ADwT
     thresholds = torch.arange(threshold_min, threshold + threshold_step, threshold_step)
@@ -84,12 +88,12 @@ def compute_eval_metrics(
         ads_dwt_values.append((ads_mae_per_structure < thresh.item()).sum().item() / num_structures * 100.0)
 
     return {
-        "generated_mae": per_atom_mae.mean().item(),
-        "generated_me": per_atom_me.mean().item(),
+        "generated_mae": mae_per_structure.mean().item(),
+        "generated_me": me_per_structure.mean().item(),
         "generated_dwt": dwt_values[-1],
         "generated_adwt": sum(dwt_values) / len(dwt_values),
-        "generated_ads_mae": ads_atom_mae.mean().item(),
-        "generated_ads_me": ads_atom_me.mean().item(),
+        "generated_ads_mae": ads_mae_per_structure.mean().item(),
+        "generated_ads_me": ads_me_per_structure.mean().item(),
         "generated_ads_dwt": ads_dwt_values[-1],
         "generated_ads_adwt": sum(ads_dwt_values) / len(ads_dwt_values),
     }
