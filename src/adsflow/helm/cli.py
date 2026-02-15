@@ -221,6 +221,7 @@ def main(cfg: Config) -> None:
         x_matching=cfg.x_matching,  # Position matching strategy
         schedule_type=cfg.interpolant_schedule,  # Interpolant schedule type, 
         write_eval_metrics=cfg.write_eval_metrics,  # Write evaluation metrics
+        num_refinement_steps=cfg.num_refinement_steps,  # Iterative refinement passes
         **cfg.optimizer_hparams,  # Optimizer hyperparameters (lr, weight_decay, etc.)
     )
 

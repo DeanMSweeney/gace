@@ -76,6 +76,7 @@ class LightFlowMatch(LightningModule, XMatching):
             x_matching: Literal["flow", "endpoint"]="flow",
             schedule_type: Literal["linear", "cosine"]="linear",
             write_eval_metrics: bool=False,
+            num_refinement_steps: int=1,
             **kwargs,
         ):
 
@@ -106,6 +107,7 @@ class LightFlowMatch(LightningModule, XMatching):
         self.x_matching = x_matching  # "flow" or "endpoint"
         self.schedule_type = schedule_type  # "linear" or "cosine"
         self.write_eval_metrics = write_eval_metrics
+        self.num_refinement_steps = num_refinement_steps
 
         # Diagnostic mode: detailed loss analysis for model development
         self.diagnostics = False
@@ -264,9 +266,15 @@ class LightFlowMatch(LightningModule, XMatching):
         data.Fmax = torch.ones_like(data.y_relaxed) * 0.02
         loss, max_loss, max_loss_idx = self._transport_loss(data)
 
-        # Normal test mode: generate structures via ODE integration
+        # Iterative self-refinement: re-apply model to its own output
         t = torch.linspace(0., 1, 2, device=data.pos.device, dtype=data.pos.dtype)
-        opt_graph = self.sample(input_data=data, t=t)
+        refinement_data = data.clone()
+        for step in range(self.num_refinement_steps):
+            opt_graph = self.sample(input_data=refinement_data, t=t)
+            refinement_data.pos = opt_graph.pos_generated  # use prediction as next input
+
+        # Store original positions for evaluation reference
+        opt_graph.pos = data.pos
         eval_metrics = compute_eval_metrics(data=opt_graph, threshold=self.threshold)
 
         if self.write_eval_metrics:

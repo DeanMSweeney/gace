@@ -292,6 +292,13 @@ class Config:
     E.g., 0.20 = count atoms within 0.2 Angstroms of target position
     """
 
+    num_refinement_steps: int = 1
+    """Number of iterative refinement passes during evaluation.
+    - 1: single-pass prediction (default, current behavior)
+    - >1: re-apply the model to its own output for iterative correction
+    Each pass rebuilds the graph and predicts new positions.
+    """
+
     # ==================== Structure Generation/Output ====================
 
     in_POS: Optional[str] = None
