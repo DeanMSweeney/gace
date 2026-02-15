@@ -243,17 +243,8 @@ class EquiformerV2(BaseModel):
             persistent=False 
         ) 
         
-        self.register_buffer(
-            'energy_emb_freqs', 
-            torch.arange(1, energy_n_emb_freqs + 1) * torch.pi,
-            persistent=False 
-        ) 
-        
-        self.register_buffer(
-            'force_emb_freqs', 
-            torch.arange(1, force_n_emb_freqs + 1) * torch.pi,
-            persistent=False 
-        ) 
+        # Energy and force embeddings use simple linear projection (no Fourier features)
+        # The log transform already provides sufficient nonlinearity for these continuous scalars 
         
         # Weights for message initialization
         self.sphere_embedding = nn.Embedding(self.max_num_elements, self.sphere_channels_all)
@@ -261,8 +252,8 @@ class EquiformerV2(BaseModel):
         # Initialize time embedding 
         self.time_emb = nn.Linear(2 * time_n_emb_freqs, self.sphere_channels)
         if self.energy_force_conditioning: 
-            self.energy_emb = nn.Linear(2 * energy_n_emb_freqs, self.sphere_channels)
-            self.force_emb = nn.Linear(2 * force_n_emb_freqs, self.sphere_channels)
+            self.energy_emb = nn.Linear(1, self.sphere_channels)
+            self.force_emb = nn.Linear(1, self.sphere_channels)
             
         # Initialize the function used to measure the distances between atoms
         assert self.distance_function in [
@@ -415,9 +406,9 @@ class EquiformerV2(BaseModel):
         # extract energy and force metrics if included 
         if self.energy_force_conditioning:
             dE = data.dE[data.batch].unsqueeze(1) # (N,1)
-            dE_log = torch.log(dE + 1e-6)
+            dE_log = torch.log1p(dE)
             Fmax = data.Fmax[data.batch].unsqueeze(1) # (N,1)
-            Fmax_log = torch.log(Fmax + 1e-6)
+            Fmax_log = torch.log1p(Fmax)
         
         # Build graph 
         (
@@ -461,8 +452,8 @@ class EquiformerV2(BaseModel):
         
         # enegry and force mebedding when necessayr 
         if self.energy_force_conditioning:
-            energy_embeds = self.energy_emb(self.process_scalar_embeds(s=dE_log, s_emb_freqs=self.energy_emb_freqs))
-            force_embeds = self.force_emb(self.process_scalar_embeds(s=Fmax_log, s_emb_freqs=self.force_emb_freqs))
+            energy_embeds = self.energy_emb(dE_log)
+            force_embeds = self.force_emb(Fmax_log)
         
         offset_res = 0
         offset = 0
