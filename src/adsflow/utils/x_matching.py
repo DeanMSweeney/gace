@@ -360,7 +360,7 @@ class XMatching():
             t=t * 0.999 if self.x_matching == "endpoint" else t,  # Integration time points
             rtol=self.rtol,  # Relative tolerance
             atol=self.atol,  # Absolute tolerance
-            method=euler,  # ODE solver method (e.g., 'dopri5', 'euler')
+            method='euler',  # ODE solver method (e.g., 'dopri5', 'euler')
         )
 
         # Extract final positions (at t=1)
