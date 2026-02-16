@@ -256,16 +256,6 @@ def main(cfg: Config) -> None:
         gradient_clip_val=1,  # Gradient clipping value
     )
 
-    def _rank():
-        return dist.get_rank() if dist.is_available() and dist.is_initialized() else 0
-
-    def log_mem(tag: str):
-        rss = psutil.Process(os.getpid()).memory_info().rss / (1024**3)
-        # GPU is optional; the failure is CPU, but this helps correlate
-        gpu = torch.cuda.memory_allocated() / (1024**3) if torch.cuda.is_available() else 0.0
-        print(f"[rank {_rank()}] {tag} | RSS={rss:.2f} GB | GPU_alloc={gpu:.2f} GB", flush=True)
-
-
    # === Checkpoint Loading ===
     ckpt_path_for_trainer = cfg.ckpt_path 
     # In your main training script:

@@ -231,6 +231,8 @@ if __name__ == "__main__":
         Fmax.append(data.Fmax)
         dS.append(data.dSmax)
 
+        print(data.dE)
+
     # Concatenate lists into single tensors
     dE_tensor = torch.cat(dE, dim=0)
     Fmax_tensor = torch.cat(Fmax, dim=0)
