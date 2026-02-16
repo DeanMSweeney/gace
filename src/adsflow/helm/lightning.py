@@ -218,8 +218,9 @@ class LightFlowMatch(LightningModule, XMatching):
             loss: Validation loss for this batch
         """
         # Initialize energy difference if Fmax exists (for compatibility)
-        data.Fmax = torch.ones_like(data.y_relaxed) * 0.03 
-        data.dE = torch.zeros_like(data.Fmax)
+        if hasattr(data, "Fmax"):
+            data.Fmax = torch.ones_like(data.y_relaxed) * 0.03 
+            data.dE = torch.zeros_like(data.Fmax)
 
         loss, max_loss, _ = self._transport_loss(data)
 
@@ -262,8 +263,7 @@ class LightFlowMatch(LightningModule, XMatching):
         # Compute training-style loss for comparison
 
         data.dE = torch.zeros_like(data.y_relaxed)
-        data.dE = torch.ones_like(data.y_relaxed) * 0.50
-        data.Fmax = torch.ones_like(data.y_relaxed) * 0.50
+        data.Fmax = torch.ones_like(data.y_relaxed) * 0.05
         loss, max_loss, max_loss_idx = self._transport_loss(data)
 
         # Iterative self-refinement: re-apply model to its own output
