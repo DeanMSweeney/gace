@@ -262,7 +262,7 @@ class LightFlowMatch(LightningModule, XMatching):
         """
         # Compute training-style loss for comparison
 
-        data.dE = torch.ones_like(data.y_relaxed) * 0.05
+        data.dE = torch.ones_like(data.y_relaxed) * 0.10
         data.Fmax = torch.ones_like(data.y_relaxed) * 0.10
         loss, max_loss, max_loss_idx = self._transport_loss(data)
 
