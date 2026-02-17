@@ -173,6 +173,7 @@ class EquiformerV2(BaseModel):
         energy_n_emb_freqs: int=16,
         force_n_emb_freqs: int=16,
         energy_force_conditioning: bool=False,
+        remember_x0: bool=False,
     ):
         super().__init__()
 
@@ -235,6 +236,7 @@ class EquiformerV2(BaseModel):
         self.regress_forces=True
         self.direct_forces=True
         self.energy_force_conditioning = energy_force_conditioning
+        self.remember_x0 = remember_x0
 
         # Precompute the frequency as multipliers as a buffer, register time_freq as an attribute
         self.register_buffer(
@@ -256,7 +258,8 @@ class EquiformerV2(BaseModel):
             self.force_emb = nn.Linear(1, self.sphere_channels)
         
         # Displacement-from-initial embedding (scalar distance each atom has traveled from x0)
-        self.disp_emb = nn.Linear(1, self.sphere_channels)
+        if self.remember_x0: 
+            self.disp_emb = nn.Linear(1, self.sphere_channels)
             
         # Initialize the function used to measure the distances between atoms
         assert self.distance_function in [
@@ -454,7 +457,8 @@ class EquiformerV2(BaseModel):
         time_embeds = self.time_emb(self.process_scalar_embeds(s=t, s_emb_freqs=self.time_emb_freqs))
         
         # Displacement embedding (precomputed in path() / sample())
-        disp_embeds = self.disp_emb(torch.log1p(data.disp))
+        if self.remember_x0:
+            disp_embeds = self.disp_emb(torch.log1p(data.disp))
         
         # enegry and force mebedding when necessayr 
         if self.energy_force_conditioning:
