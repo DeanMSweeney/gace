@@ -244,6 +244,7 @@ class XMatching():
             )
             data.disp = disp.norm(dim=-1, keepdim=True)  # (N, 1)
 
+
             # Store interpolated data
             data.pos = xt  # Current position (what model sees as input)
             data.pos_init = x0  # Initial position (for reference)
