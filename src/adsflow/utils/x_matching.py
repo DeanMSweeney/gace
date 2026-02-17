@@ -236,6 +236,14 @@ class XMatching():
             # Rescale velocity for cosine schedule (to account for d(alpha_t)/dt)
             u_x = alpha_t_x_grad * u_x # alpha_t' * (x1 - x0)
 
+            # Compute per-atom displacement from initial position (for displacement embedding)
+            disp = pbc_aware_delta(
+                delta=(xt - x0),
+                cell=data.cell.float(),
+                batch=data.batch,
+            )
+            data.disp = disp.norm(dim=-1, keepdim=True)  # (N, 1)
+
             # Store interpolated data
             data.pos = xt  # Current position (what model sees as input)
             data.pos_init = x0  # Initial position (for reference)
@@ -311,6 +319,7 @@ class XMatching():
         """
 
         data = input_data.clone()
+        x0_ref = input_data.pos.clone().float()  # fixed reference for displacement embedding
         frozen_atoms = (data.fixed == 1)
 
         # Precompute spatial mask based on ads_cutoff
@@ -329,7 +338,15 @@ class XMatching():
             Wraps the PyTorch model to match torchdiffeq's expected signature.
             """
             data.pos = xt
-            data.t = t.view(1,1).expand(len(xt), -1) 
+            data.t = t.view(1,1).expand(len(xt), -1)
+
+            # Compute displacement from initial position for displacement embedding
+            disp = pbc_aware_delta(
+                delta=(xt - x0_ref),
+                cell=data.cell.float(),
+                batch=data.batch,
+            )
+            data.disp = disp.norm(dim=-1, keepdim=True)  # (N, 1)
 
             if self.x_matching == "endpoint":
                 x1_hat = self(data)
