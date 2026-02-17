@@ -110,7 +110,7 @@ class LightFlowMatch(LightningModule, XMatching):
         self.num_refinement_steps = num_refinement_steps
 
         # Diagnostic mode: detailed loss analysis for model development
-        self.diagnostics = False
+        self.velocity_predictions = False
         self.bad_iter, self.good_ter, self.iter = 0, 0, 0
        # ==============================================================================
        
@@ -143,7 +143,7 @@ class LightFlowMatch(LightningModule, XMatching):
             loss: Average loss over batch
             max_loss: Maximum per-atom loss (for monitoring outliers)
             max_loss_idx: Index of atom with maximum loss
-            diagnostics: Dict with t, predicted velocity, target velocity, batch, tags
+            velocity_predictions: Dict with t, predicted velocity, target velocity, batch, tags
         """
         # Generate interpolated training data at random time t
         # data.pos = x(t), u = target velocity dx/dt
@@ -164,7 +164,7 @@ class LightFlowMatch(LightningModule, XMatching):
             )
 
         # DEBUG: collect diagnostic tensors
-        diagnostics = {
+        velocity_predictions = {
             't': data.t.detach().cpu(),              # (N, 1) interpolation time
             'f': f.detach().cpu(),                    # (N, 3) predicted velocity
             'u': target.detach().cpu(),               # (N, 3) target velocity
@@ -172,7 +172,7 @@ class LightFlowMatch(LightningModule, XMatching):
             'tags': data.tags.detach().cpu(),           # (N,)   atom tags
         }
 
-        return loss, max_loss, max_loss_idx, diagnostics
+        return loss, max_loss, max_loss_idx, velocity_predictions
     
     # ==================== Training and Validation Methods ====================
 
@@ -261,7 +261,7 @@ class LightFlowMatch(LightningModule, XMatching):
 
         For each structure:
         1. Compute training loss (for comparison)
-        2. Generate relaxed structure via ODE integration (if not in diagnostics mode)
+        2. Generate relaxed structure via ODE integration (if not in velocity_predictions mode)
         3. Compute evaluation metrics (MAE, DwT, ADwT)
         4. Optionally save structures to files
 
@@ -271,21 +271,23 @@ class LightFlowMatch(LightningModule, XMatching):
 
         Returns:
             loss: Test loss for this batch
-        """
+        
         # Compute training-style loss for comparison
-
+        """
         data.dE = torch.ones_like(data.y_relaxed) * 0.05
         data.Fmax = torch.ones_like(data.y_relaxed) * 0.10
-        loss, max_loss, max_loss_idx, diagnostics = self._transport_loss(data)
-
-        # DEBUG: collect velocity diagnostics for parquet output
-        if not hasattr(self, '_test_diagnostics'):
-            self._test_diagnostics = []
-        self._test_diagnostics.append(diagnostics)
-
+        loss, max_loss, max_loss_idx, velocity_predictions = self._transport_loss(data)
         """
+        
+        # DEBUG: collect velocity velocity_predictions for parquet output
+        if not hasattr(self, '_test_velocity_predictions'):
+            self._test_velocity_predictions = []
+        self._test_velocity_predictions.append(velocity_predictions)
+        """
+        
+        
         # Iterative self-refinement: re-apply model to its own output
-        t = torch.linspace(0., 1, 2, device=data.pos.device, dtype=data.pos.dtype)
+        t = torch.linspace(0., 1, 50, device=data.pos.device, dtype=data.pos.dtype)
         refinement_data = data.clone()
         for step in range(self.num_refinement_steps):
             opt_graph = self.sample(input_data=refinement_data, t=t)
@@ -301,36 +303,32 @@ class LightFlowMatch(LightningModule, XMatching):
             for k, v in eval_metrics.items():
                 self.eval_metrics[k].append(v) # only append updated batch values
 
-        # ==================== Log Test Metrics ====================
-
-        self.log("test/loss", loss.detach(), prog_bar=True, batch_size=len(data.natoms), sync_dist=True)
-        self.log("test/max_loss", max_loss.detach(), prog_bar=True, batch_size=len(data.natoms), sync_dist=True)
+            # ==================== Log Test Metrics ====================
 
         # Log all evaluation metrics
         if eval_metrics:
             for name, value in eval_metrics.items():
                 self.log(f"test/{name}", value, prog_bar=True, batch_size=len(data.natoms), sync_dist=True)
-        """
         
-        return loss    
+        return   
 
     def on_test_end(self):
         """
         Called after all test batches complete.
 
-        Saves evaluation metrics to CSV and velocity diagnostics to parquet.
+        Saves evaluation metrics to CSV and velocity velocity_predictions to parquet.
         """
-        # DEBUG: save velocity diagnostics to parquet
-        if hasattr(self, '_test_diagnostics') and self._test_diagnostics:
-            t = torch.cat([d['t'] for d in self._test_diagnostics], dim=0).squeeze(-1).numpy()
-            f = torch.cat([d['f'] for d in self._test_diagnostics], dim=0).numpy()
-            u = torch.cat([d['u'] for d in self._test_diagnostics], dim=0).numpy()
-            tags = torch.cat([d['tags'] for d in self._test_diagnostics], dim=0).numpy()
+        # DEBUG: save velocity velocity_predictions to parquet
+        if hasattr(self, '_test_velocity_predictions') and self._test_velocity_predictions:
+            t = torch.cat([d['t'] for d in self._test_velocity_predictions], dim=0).squeeze(-1).numpy()
+            f = torch.cat([d['f'] for d in self._test_velocity_predictions], dim=0).numpy()
+            u = torch.cat([d['u'] for d in self._test_velocity_predictions], dim=0).numpy()
+            tags = torch.cat([d['tags'] for d in self._test_velocity_predictions], dim=0).numpy()
 
             # Offset batch indices so they're globally unique across batches
             offset = 0
             batch_global = []
-            for d in self._test_diagnostics:
+            for d in self._test_velocity_predictions:
                 b = d['batch'].numpy()
                 batch_global.append(b + offset)
                 offset += b.max() + 1
@@ -344,10 +342,10 @@ class LightFlowMatch(LightningModule, XMatching):
                 'tags': tags,
             })
 
-            output_path = './velocity_diagnostics.parquet'
+            output_path = './velocity_velocity_predictions.parquet'
             df.to_parquet(output_path, index=False)
             if self.global_rank == 0:
-                print(f"\n[DEBUG] Saved velocity diagnostics to {output_path} ({len(df)} atoms)")
+                print(f"\n[DEBUG] Saved velocity velocity_predictions to {output_path} ({len(df)} atoms)")
 
         if hasattr(self, "eval_metrics"):
             output_dir = './eval_metrics'

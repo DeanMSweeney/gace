@@ -494,7 +494,10 @@ class EquiformerV2(BaseModel):
             edge_distance,
             edge_index)
         x.embedding = x.embedding + edge_degree.embedding 
-        x.embedding = x.embedding + time_embeds.unsqueeze(1) + disp_embeds.unsqueeze(1)
+        x.embedding = x.embedding + time_embeds.unsqueeze(1)
+
+        if self.remember_x0:
+            x.embedding + disp_embeds.unsqueeze(1)
       
         if self.energy_force_conditioning:
             x.embedding = x.embedding + energy_embeds.unsqueeze(1) + force_embeds.unsqueeze(1)
