@@ -143,6 +143,7 @@ class LightFlowMatch(LightningModule, XMatching):
             loss: Average loss over batch
             max_loss: Maximum per-atom loss (for monitoring outliers)
             max_loss_idx: Index of atom with maximum loss
+            diagnostics: Dict with t, predicted velocity, target velocity, batch, tags
         """
         # Generate interpolated training data at random time t
         # data.pos = x(t), u = target velocity dx/dt
@@ -154,14 +155,24 @@ class LightFlowMatch(LightningModule, XMatching):
             # Compute loss between predicted and target
             # For flow matching: loss = |f - u|^2 (velocity matching)
             # For endpoint matching: loss = |f - x1|^2 (position matching)
+            target = data.pos_relaxed if self.x_matching == "endpoint" else u
             loss, max_loss, max_loss_idx = self.criterion(
                 input_data=data,
                 a=f,  # Model prediction
-                b=data.pos_relaxed if self.x_matching == "endpoint" else u,  # Target
+                b=target,  # Target
                 loss_fn=self.hparams.loss_fn,
             )
 
-        return loss, max_loss, max_loss_idx
+        # DEBUG: collect diagnostic tensors
+        diagnostics = {
+            't': data.t.detach().cpu(),              # (N, 1) interpolation time
+            'f': f.detach().cpu(),                    # (N, 3) predicted velocity
+            'u': target.detach().cpu(),               # (N, 3) target velocity
+            'batch': data.batch.detach().cpu(),        # (N,)   graph index
+            'tags': data.tags.detach().cpu(),           # (N,)   atom tags
+        }
+
+        return loss, max_loss, max_loss_idx, diagnostics
     
     # ==================== Training and Validation Methods ====================
 
@@ -176,7 +187,7 @@ class LightFlowMatch(LightningModule, XMatching):
         Returns:
             loss: Loss value for backpropagation
         """
-        loss, max_loss, _ = self._transport_loss(data)
+        loss, max_loss, _, _ = self._transport_loss(data)
 
         # Log average loss (weighted by batch size for multi-GPU training)
         self.log(
@@ -203,6 +214,7 @@ class LightFlowMatch(LightningModule, XMatching):
         return loss
         
 
+
     def validation_step(self, data: Data, batch_idx):
         """
         Single validation step (one batch).
@@ -222,7 +234,7 @@ class LightFlowMatch(LightningModule, XMatching):
             data.Fmax = torch.ones_like(data.y_relaxed) * 0.03 
             data.dE = torch.zeros_like(data.Fmax)
 
-        loss, max_loss, _ = self._transport_loss(data)
+        loss, max_loss, _, _ = self._transport_loss(data)
 
         # Log validation metrics (no on_step to avoid clutter)
         self.log(
@@ -264,10 +276,16 @@ class LightFlowMatch(LightningModule, XMatching):
 
         data.dE = torch.ones_like(data.y_relaxed) * 0.05
         data.Fmax = torch.ones_like(data.y_relaxed) * 0.10
-        loss, max_loss, max_loss_idx = self._transport_loss(data)
+        loss, max_loss, max_loss_idx, diagnostics = self._transport_loss(data)
 
+        # DEBUG: collect velocity diagnostics for parquet output
+        if not hasattr(self, '_test_diagnostics'):
+            self._test_diagnostics = []
+        self._test_diagnostics.append(diagnostics)
+
+        """
         # Iterative self-refinement: re-apply model to its own output
-        t = torch.linspace(0., 1, 4, device=data.pos.device, dtype=data.pos.dtype)
+        t = torch.linspace(0., 1, 2, device=data.pos.device, dtype=data.pos.dtype)
         refinement_data = data.clone()
         for step in range(self.num_refinement_steps):
             opt_graph = self.sample(input_data=refinement_data, t=t)
@@ -292,15 +310,45 @@ class LightFlowMatch(LightningModule, XMatching):
         if eval_metrics:
             for name, value in eval_metrics.items():
                 self.log(f"test/{name}", value, prog_bar=True, batch_size=len(data.natoms), sync_dist=True)
-
+        """
+        
         return loss    
 
     def on_test_end(self):
         """
         Called after all test batches complete.
 
-        Saves evaluation metrics to CSV. Handles multi-GPU gathering.
+        Saves evaluation metrics to CSV and velocity diagnostics to parquet.
         """
+        # DEBUG: save velocity diagnostics to parquet
+        if hasattr(self, '_test_diagnostics') and self._test_diagnostics:
+            t = torch.cat([d['t'] for d in self._test_diagnostics], dim=0).squeeze(-1).numpy()
+            f = torch.cat([d['f'] for d in self._test_diagnostics], dim=0).numpy()
+            u = torch.cat([d['u'] for d in self._test_diagnostics], dim=0).numpy()
+            tags = torch.cat([d['tags'] for d in self._test_diagnostics], dim=0).numpy()
+
+            # Offset batch indices so they're globally unique across batches
+            offset = 0
+            batch_global = []
+            for d in self._test_diagnostics:
+                b = d['batch'].numpy()
+                batch_global.append(b + offset)
+                offset += b.max() + 1
+            batch = np.concatenate(batch_global)
+
+            df = pd.DataFrame({
+                't': t,
+                'f_x': f[:, 0], 'f_y': f[:, 1], 'f_z': f[:, 2],
+                'u_x': u[:, 0], 'u_y': u[:, 1], 'u_z': u[:, 2],
+                'batch': batch,
+                'tags': tags,
+            })
+
+            output_path = './velocity_diagnostics.parquet'
+            df.to_parquet(output_path, index=False)
+            if self.global_rank == 0:
+                print(f"\n[DEBUG] Saved velocity diagnostics to {output_path} ({len(df)} atoms)")
+
         if hasattr(self, "eval_metrics"):
             output_dir = './eval_metrics'
 
