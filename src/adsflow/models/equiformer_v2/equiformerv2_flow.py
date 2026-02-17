@@ -254,6 +254,9 @@ class EquiformerV2(BaseModel):
         if self.energy_force_conditioning: 
             self.energy_emb = nn.Linear(1, self.sphere_channels)
             self.force_emb = nn.Linear(1, self.sphere_channels)
+        
+        # Displacement-from-initial embedding (scalar distance each atom has traveled from x0)
+        self.disp_emb = nn.Linear(1, self.sphere_channels)
             
         # Initialize the function used to measure the distances between atoms
         assert self.distance_function in [
@@ -450,6 +453,9 @@ class EquiformerV2(BaseModel):
         # Time embedding 
         time_embeds = self.time_emb(self.process_scalar_embeds(s=t, s_emb_freqs=self.time_emb_freqs))
         
+        # Displacement embedding (precomputed in path() / sample())
+        disp_embeds = self.disp_emb(torch.log1p(data.disp))
+        
         # enegry and force mebedding when necessayr 
         if self.energy_force_conditioning:
             energy_embeds = self.energy_emb(dE_log)
@@ -484,8 +490,7 @@ class EquiformerV2(BaseModel):
             edge_distance,
             edge_index)
         x.embedding = x.embedding + edge_degree.embedding 
-        x.embedding = x.embedding + time_embeds.unsqueeze(1)
-        #x.embedding[:, 0:1, :] = x.embedding[:, 0:1, :] + time_embeds.unsqueeze(1) # tried this but foudn worse performance 
+        x.embedding = x.embedding + time_embeds.unsqueeze(1) + disp_embeds.unsqueeze(1)
       
         if self.energy_force_conditioning:
             x.embedding = x.embedding + energy_embeds.unsqueeze(1) + force_embeds.unsqueeze(1)
