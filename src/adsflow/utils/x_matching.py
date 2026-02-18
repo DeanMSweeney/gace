@@ -53,6 +53,7 @@ class XMatching():
         elif self.x_matching == "flow":
             # Simple Euclidean difference (for flow-based methods)
             
+            """
             a = pbc_aware_delta(
                 delta=a,
                 cell=input_data.cell.float(),
@@ -65,6 +66,7 @@ class XMatching():
                 batch=input_data.batch,
                 cartesian_to_fractional=True, 
             )
+            """
             
             diff = a - b
 
