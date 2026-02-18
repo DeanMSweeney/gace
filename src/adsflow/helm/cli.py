@@ -277,7 +277,7 @@ def main(cfg: Config) -> None:
                     
                     # Case: Output dimension of first edge MLP layer increased (concatenated x0 features)
                     # We assume the new features are appended, so we pad the weight matrix
-                    if len(param_model.shape) == 2 and param_model.shape[1] > param_chkpt.shape[1]:
+                    if len(param_model.shape) == 2 and param_model.shape[1] > param_ckpt.shape[1]:
                         # e.g. weight matrix [out_dim, in_dim]
                         diff = param_model.shape[1] - param_ckpt.shape[1]
                         print(f"  -> Padding input dimension by {diff} (assuming appended features)")
