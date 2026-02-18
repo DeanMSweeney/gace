@@ -262,7 +262,32 @@ def main(cfg: Config) -> None:
     if cfg.ckpt_path and not cfg.resume_training:
         declare(f">>> Loading CLEAN preprocessed weights from: {cfg.ckpt_path}")
         checkpoint = torch.load(cfg.ckpt_path, map_location="cpu")
-        load_result = lightning.load_state_dict(checkpoint["state_dict"], strict=False)
+        
+        # Manually adapt weights if needed (e.g. for x0 conditioning which changes edge input size)
+        state_dict = checkpoint["state_dict"]
+        model_state_dict = lightning.state_dict()
+        
+        for key in list(state_dict.keys()):
+            if key in model_state_dict:
+                param_ckpt = state_dict[key]
+                param_model = model_state_dict[key]
+                
+                if param_ckpt.shape != param_model.shape:
+                    print(f"Shape mismatch for {key}: checkpoint {param_ckpt.shape} vs model {param_model.shape}")
+                    
+                    # Case: Output dimension of first edge MLP layer increased (concatenated x0 features)
+                    # We assume the new features are appended, so we pad the weight matrix
+                    if len(param_model.shape) == 2 and param_model.shape[1] > param_chkpt.shape[1]:
+                        # e.g. weight matrix [out_dim, in_dim]
+                        diff = param_model.shape[1] - param_ckpt.shape[1]
+                        print(f"  -> Padding input dimension by {diff} (assuming appended features)")
+                        
+                        # Initialize new part with small random values or zeros
+                        # Zero initialization for new features means they are ignored initially
+                        new_weights = torch.cat([param_ckpt, 1e-5 * torch.ones((param_model.shape[0], diff), device=param_ckpt.device, dtype=param_ckpt.dtype)], dim=1)
+                        state_dict[key] = new_weights
+                        
+        load_result = lightning.load_state_dict(state_dict, strict=False)
 
         # ⭐ DELETE CHECKPOINT TO FREE MEMORY
         del checkpoint

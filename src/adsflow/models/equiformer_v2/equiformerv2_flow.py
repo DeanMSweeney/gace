@@ -26,6 +26,7 @@ import torch.nn as nn
 from pyexpat.model import XML_CQUANT_OPT
 
 from fairchem.core.common.registry import registry
+from adsflow.utils.graph import get_pbc_distances, radius_graph_pbc
 from fairchem.core.common.utils import conditional_grad
 from fairchem.core.models.scn.sampling import CalcSpherePoints
 from fairchem.core.models.scn.smearing import (
@@ -258,8 +259,10 @@ class EquiformerV2(BaseModel):
             self.force_emb = nn.Linear(1, self.sphere_channels)
         
         # Displacement-from-initial embedding (scalar distance each atom has traveled from x0)
+        """
         if self.remember_x0: 
             self.disp_emb = nn.Linear(1, self.sphere_channels)
+        """
             
         # Initialize the function used to measure the distances between atoms
         assert self.distance_function in [
@@ -277,7 +280,10 @@ class EquiformerV2(BaseModel):
             raise ValueError
         
         # Initialize the sizes of radial functions (input channels and 2 hidden channels)
-        self.edge_channels_list = [int(self.distance_expansion.num_output)] + [self.edge_channels] * 2
+        if self.remember_x0:
+            self.edge_channels_list = [int(self.distance_expansion.num_output * 2)] + [self.edge_channels] * 2
+        else:
+            self.edge_channels_list = [int(self.distance_expansion.num_output)] + [self.edge_channels] * 2
 
         # Initialize atom edge embedding
         if self.share_atom_edge_embedding and self.use_atom_edge_embedding:
@@ -457,8 +463,11 @@ class EquiformerV2(BaseModel):
         time_embeds = self.time_emb(self.process_scalar_embeds(s=t, s_emb_freqs=self.time_emb_freqs))
         
         # Displacement embedding (precomputed in path() / sample())
+        """
         if self.remember_x0:
             disp_embeds = self.disp_emb(torch.log1p(data.disp))
+        """
+
         
         # enegry and force mebedding when necessayr 
         if self.energy_force_conditioning:
@@ -480,7 +489,26 @@ class EquiformerV2(BaseModel):
             offset_res = offset_res + int((self.lmax_list[i] + 1) ** 2)
 
         # Edge encoding (distance and atom edge)
-        edge_distance = self.distance_expansion(edge_distance)
+        if self.remember_x0:
+             # Compute edge distances for the initial configuration (x0) using the SAME graph structure
+            out_0 = get_pbc_distances(
+                data.pos_init,
+                edge_index,
+                data.cell,
+                cell_offsets, # from current graph
+                neighbors,    # from current graph
+                return_offsets=False,
+                return_distance_vec=False,
+            )
+            edge_distance_0 = out_0["distances"]
+            edge_distance_0 = self.distance_expansion(edge_distance_0)
+            
+            edge_distance = self.distance_expansion(edge_distance)
+            edge_distance = torch.cat([edge_distance, edge_distance_0], dim=-1)
+
+        else:
+            edge_distance = self.distance_expansion(edge_distance)
+
         if self.share_atom_edge_embedding and self.use_atom_edge_embedding:
             source_element = atomic_numbers[edge_index[0]]  # Source atom atomic number
             target_element = atomic_numbers[edge_index[1]]  # Target atom atomic number
@@ -496,8 +524,8 @@ class EquiformerV2(BaseModel):
         x.embedding = x.embedding + edge_degree.embedding 
         x.embedding = x.embedding + time_embeds.unsqueeze(1)
 
-        if self.remember_x0:
-            x.embedding = x.embedding + disp_embeds.unsqueeze(1)
+        # if self.remember_x0:
+        #     x.embedding = x.embedding + disp_embeds.unsqueeze(1)
       
         if self.energy_force_conditioning:
             x.embedding = x.embedding + energy_embeds.unsqueeze(1) + force_embeds.unsqueeze(1)
