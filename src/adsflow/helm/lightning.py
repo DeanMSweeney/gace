@@ -340,7 +340,7 @@ class LightFlowMatch(LightningModule, XMatching):
                 'tags': tags,
             })
 
-            output_path = './velocity_velocity_predictions.parquet'
+            output_path = './velocity_predictions.parquet'
             df.to_parquet(output_path, index=False)
             if self.global_rank == 0:
                 print(f"\n[DEBUG] Saved velocity velocity_predictions to {output_path} ({len(df)} atoms)")

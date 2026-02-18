@@ -236,6 +236,7 @@ class XMatching():
             # Rescale velocity for cosine schedule (to account for d(alpha_t)/dt)
             u_x = alpha_t_x_grad * u_x # alpha_t' * (x1 - x0)
 
+            """           
             # Compute per-atom displacement from initial position (for displacement embedding)
             disp = pbc_aware_delta(
                 delta=(xt - x0),
@@ -243,7 +244,7 @@ class XMatching():
                 batch=data.batch,
             )
             data.disp = disp.norm(dim=-1, keepdim=True)  # (N, 1)
-
+            """           
 
             # Store interpolated data
             data.pos = xt  # Current position (what model sees as input)
@@ -341,6 +342,7 @@ class XMatching():
             data.pos = xt
             data.t = t.view(1,1).expand(len(xt), -1)
 
+            """
             # Compute displacement from initial position for displacement embedding
             disp = pbc_aware_delta(
                 delta=(xt - x0_ref),
@@ -348,6 +350,7 @@ class XMatching():
                 batch=data.batch,
             )
             data.disp = disp.norm(dim=-1, keepdim=True)  # (N, 1)
+            """
 
             if self.x_matching == "endpoint":
                 x1_hat = self(data)
