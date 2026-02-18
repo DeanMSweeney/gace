@@ -286,7 +286,7 @@ class LightFlowMatch(LightningModule, XMatching):
         
         
         # Iterative self-refinement: re-apply model to its own output
-        t = torch.linspace(0., 1, 100, device=data.pos.device, dtype=data.pos.dtype)
+        t = torch.linspace(0., 1, 2, device=data.pos.device, dtype=data.pos.dtype)
         refinement_data = data.clone()
         for step in range(self.num_refinement_steps):
             opt_graph = self.sample(input_data=refinement_data, t=t)
