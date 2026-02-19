@@ -80,28 +80,3 @@ def adsorbate_neighborhood_mask(
 
     return mask
 
-    # ---------------------------------------------------------------
-    # Vectorized version (faster but higher memory due to cross-graph pairs)
-    # Peak memory: O(Nc_total × Na_total) vs O(max(Nc_g × Na_g)) for loop
-    # ---------------------------------------------------------------
-    # ads_idx = adsorbate.nonzero(as_tuple=True)[0]
-    # cat_idx = (~adsorbate & not_fixed).nonzero(as_tuple=True)[0]
-    # if len(ads_idx) == 0 or len(cat_idx) == 0:
-    #     return mask
-    # ads_pos = pos[ads_idx]
-    # cat_pos = pos[cat_idx]
-    # Nc, Na = len(cat_idx), len(ads_idx)
-    # delta = cat_pos.unsqueeze(1) - ads_pos.unsqueeze(0)
-    # cat_batch = batch[cat_idx]
-    # pair_batch = cat_batch.unsqueeze(1).expand(-1, Na).reshape(-1)
-    # delta_pbc = pbc_aware_delta(
-    #     cell=cell, delta=delta.reshape(-1, 3),
-    #     batch=pair_batch, l2_norm=True,
-    # )
-    # dist = delta_pbc.reshape(Nc, Na)
-    # ads_batch = batch[ads_idx]
-    # same_graph = (cat_batch.unsqueeze(1) == ads_batch.unsqueeze(0))
-    # dist[~same_graph] = float('inf')
-    # min_dist = dist.min(dim=1).values
-    # mask[cat_idx[min_dist <= cutoff]] = True
-    # return mask

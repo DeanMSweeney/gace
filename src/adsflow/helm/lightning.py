@@ -12,6 +12,9 @@ from transformers import get_cosine_schedule_with_warmup, get_polynomial_decay_s
 
 from adsflow.utils.x_matching import XMatching
 from adsflow.utils.evaluation import compute_eval_metrics
+from adsflow.utils.post_relaxation import config_DFT, relax_w_mlff
+from adsflow.utils.atoms import data_to_atoms
+from fairchem.core import OCPCalculator
 
 from typing import Optional, Literal, Union, Tuple
 
@@ -76,13 +79,20 @@ class LightFlowMatch(LightningModule, XMatching):
             x_matching: Literal["flow", "endpoint"]="flow",
             schedule_type: Literal["linear", "cosine"]="linear",
             write_eval_metrics: bool=False,
-            num_refinement_steps: int=1,
+            num_integration_steps: int=1,
+            run_mlff: bool=False,
+            mlff_checkpoint: Optional[str]=None,
+            accelerator: str="gpu",
+            seed: int=42,
             **kwargs,
         ):
 
         super().__init__()
         # Save hyperparameters for logging and checkpointing (ignoring model-specific args)
-        self.save_hyperparameters(ignore=["model", "variant", "mode", "rtol", "atol", "ode_method", "track_grad_norms", "in_POS", "gen_POS", "rlxd_POS", "config_vasp", "threshold", "x_matching", "interpolant_schedule", "write_eval_metrics"])
+        self.save_hyperparameters(ignore=["model", "variant", "mode", "rtol", "atol", "ode_method", \
+            "track_grad_norms", "in_POS", "gen_POS", "rlxd_POS", "config_vasp", "threshold", "x_matching", \
+            "interpolant_schedule", "write_eval_metrics", "num_integration_steps", "run_mlff", "mlff_checkpoint", \
+            "accelerator", "seed"])
 
         # Model and training configuration
         self.model = model  # Neural network (e.g., Equiformer)
@@ -107,10 +117,14 @@ class LightFlowMatch(LightningModule, XMatching):
         self.x_matching = x_matching  # "flow" or "endpoint"
         self.schedule_type = schedule_type  # "linear" or "cosine"
         self.write_eval_metrics = write_eval_metrics
-        self.num_refinement_steps = num_refinement_steps
+        self.num_integration_steps = num_integration_steps
+        self.run_mlff = run_mlff
+        self.accelerator = accelerator
+        self.seed = seed
+        self.mlff_checkpoint = mlff_checkpoint
 
         # Diagnostic mode: detailed loss analysis for model development
-        self.velocity_predictions = False
+        self._write_f_u = False
         self.bad_iter, self.good_ter, self.iter = 0, 0, 0
        # ==============================================================================
        
@@ -126,7 +140,7 @@ class LightFlowMatch(LightningModule, XMatching):
         """
         return self.model(data)
 
-    def _transport_loss(self, input_data: Data) -> torch.Tensor:
+    def _transport_loss(self, input_graph: Data) -> torch.Tensor:
         """
         Compute the flow matching loss for a batch of structures.
 
@@ -137,7 +151,7 @@ class LightFlowMatch(LightningModule, XMatching):
         4. Compute loss between predicted and target velocity
 
         Args:
-            input_data: Batch of atomic structures
+            input_graph: Batch of atomic structures
 
         Returns:
             loss: Average loss over batch
@@ -147,7 +161,7 @@ class LightFlowMatch(LightningModule, XMatching):
         """
         # Generate interpolated training data at random time t
         # data.pos = x(t), u = target velocity dx/dt
-        data, u = self.path(input_data=input_data) 
+        data, u = self.path(input_graph=input_graph) 
 
         # Model predicts velocity field (or positions if endpoint matching)
         f = self(data)
@@ -157,22 +171,25 @@ class LightFlowMatch(LightningModule, XMatching):
             # For endpoint matching: loss = |f - x1|^2 (position matching)
             target = data.pos_relaxed if self.x_matching == "endpoint" else u
             loss, max_loss, max_loss_idx = self.criterion(
-                input_data=data,
+                input_graph=data,
                 a=f,  # Model prediction
                 b=target,  # Target
                 loss_fn=self.hparams.loss_fn,
             )
 
         # DEBUG: collect diagnostic tensors
-        velocity_predictions = {
-            't': data.t.detach().cpu(),              # (N, 1) interpolation time
-            'f': f.detach().cpu(),                    # (N, 3) predicted velocity
-            'u': target.detach().cpu(),               # (N, 3) target velocity
-            'batch': data.batch.detach().cpu(),        # (N,)   graph index
-            'tags': data.tags.detach().cpu(),           # (N,)   atom tags
-        }
+        if self._write_f_u: 
+            velocity_predictions = {
+                't': data.t.detach().cpu(),              # (N, 1) interpolation time
+                'f': f.detach().cpu(),                    # (N, 3) predicted velocity
+                'u': target.detach().cpu(),               # (N, 3) target velocity
+                'batch': data.batch.detach().cpu(),        # (N,)   graph index
+                'tags': data.tags.detach().cpu(),           # (N,)   atom tags
+            }
+        else:
+            velocity_predictions = None
 
-        return loss, max_loss, max_loss_idx, velocity_predictions
+        return loss, max_loss, velocity_predictions
     
     # ==================== Training and Validation Methods ====================
 
@@ -187,7 +204,7 @@ class LightFlowMatch(LightningModule, XMatching):
         Returns:
             loss: Loss value for backpropagation
         """
-        loss, max_loss, _, _ = self._transport_loss(data)
+        loss, max_loss, _ = self._transport_loss(data)
 
         # Log average loss (weighted by batch size for multi-GPU training)
         self.log(
@@ -232,8 +249,7 @@ class LightFlowMatch(LightningModule, XMatching):
         # Initialize energy difference if Fmax exists (for compatibility)
         data.Fmax = torch.ones_like(data.y_relaxed) * 0.03 
         data.dE = torch.zeros_like(data.Fmax)
-
-        loss, max_loss, _, _ = self._transport_loss(data)
+        loss, max_loss, _ = self._transport_loss(data)
 
         # Log validation metrics (no on_step to avoid clutter)
         self.log(
@@ -275,38 +291,49 @@ class LightFlowMatch(LightningModule, XMatching):
 
         data.dE = torch.ones_like(data.y_relaxed) * 0.05
         data.Fmax = torch.ones_like(data.y_relaxed) * 0.10
-        loss, max_loss, max_loss_idx, velocity_predictions = self._transport_loss(data)
+        loss, max_loss, velocity_predictions = self._transport_loss(data)
         
-        """
         # DEBUG: collect velocity velocity_predictions for parquet output
-        if not hasattr(self, '_test_velocity_predictions'):
-            self._test_velocity_predictions = []
-        self._test_velocity_predictions.append(velocity_predictions)
-        """
+        if self._write_f_u:
+            if not hasattr(self, 'self._f_u'):
+                self.self._f_u = []
+            self.self._f_u.append(velocity_predictions)
         
-        # Iterative self-refinement: re-apply model to its own output
-        t = torch.linspace(0., 1, 20, device=data.pos.device, dtype=data.pos.dtype)
-        refinement_data = data.clone()
-        for step in range(self.num_refinement_steps):
-            opt_graph = self.sample(input_data=refinement_data, t=t)
-            refinement_data.pos = opt_graph.pos_generated  # use prediction as next input
-        
-        # Store original positions for evaluation reference
-        opt_graph.pos = data.pos
-        eval_metrics = compute_eval_metrics(data=opt_graph, threshold=self.threshold)
+        # else:
+            # Iterative self-refinement: re-apply model to its own output
+            t = torch.linspace(0., 1, self.num_integration_steps, device=data.pos.device, dtype=data.pos.dtype)
+            opt_graph = self.sample(input_graph=data, t=t)
+            
+            if self.run_mlff:
+                calculator = OCPCalculator(
+                    model_name=self.mlff_checkpoint,
+                    local_cache="./mlff_checkpoint_cache",
+                    cpu=(self.accelerator == "cpu"),
+                    seed=self.seed,
+                )
+                atoms = data_to_atoms(opt_graph, pos_type=opt_graph.pos_generated)
+                atoms_relaxed, _, _ = relax_w_mlff(
+                    atoms=atoms,
+                    calculator=calculator,
+                    fmax=0.05,
+                    steps=200,
+                    optimizer="BFGS",
+                )
+                mlff_relaxed_pos = torch.tensor(atoms_relaxed.get_positions(), device=data.pos.device, dtype=data.pos.dtype)
+                opt_graph.pos_generated = mlff_relaxed_pos
 
-        if self.write_eval_metrics:
-            if not hasattr(self, "eval_metrics"):
-                self.eval_metrics = {k: [] for k in eval_metrics.keys()}
-            for k, v in eval_metrics.items():
-                self.eval_metrics[k].append(v) # only append updated batch values
+            eval_metrics = compute_eval_metrics(data=opt_graph, threshold=self.threshold)
 
-            # ==================== Log Test Metrics ====================
+            if self.write_eval_metrics:
+                if not hasattr(self, "eval_metrics"):
+                    self.eval_metrics = {k: [] for k in eval_metrics.keys()}
+                for k, v in eval_metrics.items():
+                    self.eval_metrics[k].append(v) # only append updated batch values
 
-        # Log all evaluation metrics
-        if eval_metrics:
-            for name, value in eval_metrics.items():
-                self.log(f"test/{name}", value, prog_bar=True, batch_size=len(data.natoms), sync_dist=True)
+            # Log all evaluation metrics
+            if eval_metrics:
+                for name, value in eval_metrics.items():
+                    self.log(f"test/{name}", value.detach(), prog_bar=True, batch_size=len(data.natoms), sync_dist=True)
         
         return   
 
@@ -317,16 +344,16 @@ class LightFlowMatch(LightningModule, XMatching):
         Saves evaluation metrics to CSV and velocity velocity_predictions to parquet.
         """
         # DEBUG: save velocity velocity_predictions to parquet
-        if hasattr(self, '_test_velocity_predictions') and self._test_velocity_predictions:
-            t = torch.cat([d['t'] for d in self._test_velocity_predictions], dim=0).squeeze(-1).numpy()
-            f = torch.cat([d['f'] for d in self._test_velocity_predictions], dim=0).numpy()
-            u = torch.cat([d['u'] for d in self._test_velocity_predictions], dim=0).numpy()
-            tags = torch.cat([d['tags'] for d in self._test_velocity_predictions], dim=0).numpy()
+        if self._write_f_u and hasattr(self, 'self._f_u'):
+            t = torch.cat([d['t'] for d in self.self._f_u], dim=0).squeeze(-1).numpy()
+            f = torch.cat([d['f'] for d in self.self._f_u], dim=0).numpy()
+            u = torch.cat([d['u'] for d in self.self._f_u], dim=0).numpy()
+            tags = torch.cat([d['tags'] for d in self.self._f_u], dim=0).numpy()
 
             # Offset batch indices so they're globally unique across batches
             offset = 0
             batch_global = []
-            for d in self._test_velocity_predictions:
+            for d in self.self._f_u:
                 b = d['batch'].numpy()
                 batch_global.append(b + offset)
                 offset += b.max() + 1
@@ -345,7 +372,7 @@ class LightFlowMatch(LightningModule, XMatching):
             if self.global_rank == 0:
                 print(f"\n[DEBUG] Saved velocity velocity_predictions to {output_path} ({len(df)} atoms)")
 
-        if hasattr(self, "eval_metrics"):
+        if self.write_eval_metrics and hasattr(self, "eval_metrics"):
             output_dir = './eval_metrics'
 
             # Check if running distributed

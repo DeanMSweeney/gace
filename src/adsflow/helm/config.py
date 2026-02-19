@@ -292,11 +292,10 @@ class Config:
     E.g., 0.20 = count atoms within 0.2 Angstroms of target position
     """
 
-    num_refinement_steps: int = 1
-    """Number of iterative refinement passes during evaluation.
-    - 1: single-pass prediction (default, current behavior)
-    - >1: re-apply the model to its own output for iterative correction
-    Each pass rebuilds the graph and predicts new positions.
+    num_integration_steps: int = 1
+    """Number of integration steps for ODE solver (for inference)
+    - 1: single-step integration (default, current behavior)
+    - >1: multi-step integration for higher accuracy
     """
 
     # ==================== Structure Generation/Output ====================
@@ -319,6 +318,14 @@ class Config:
 
     write_eval_metrics: bool = False
     """Whether to write evaluation metrics to file"""
+
+    # ==================== MLFF Relaxation ====================
+
+    run_mlff: bool = False
+    """Whether to run MLFF relaxation after generation"""
+
+    mlff_checkpoint: str = "EquiformerV2-153M-S2EF-OC20-All+MD"
+    """Path to MLFF checkpoint for relaxation"""
 
     # ==================== Miscellaneous ====================
 

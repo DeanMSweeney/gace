@@ -17,7 +17,7 @@ class XMatching():
 
     def criterion(
         self,
-        input_data,
+        input_graph,
         a: Tensor,  # N, 3 - predicted positions
         b: Tensor,  # N, 3 - target positions
         loss_fn: str = "mse",
@@ -38,7 +38,7 @@ class XMatching():
         b = b.float()
 
         # Compute mask (no gradient needed for mask creation)
-        data = input_data
+        data = input_graph
 
         # Compute position difference based on matching mode (needs gradients!)
         if self.x_matching == "endpoint":
@@ -56,14 +56,14 @@ class XMatching():
             """
             a = pbc_aware_delta(
                 delta=a,
-                cell=input_data.cell.float(),
-                batch=input_data.batch,
+                cell=input_graph.cell.float(),
+                batch=input_graph.batch,
                 cartesian_to_fractional=True, 
             )
             b = pbc_aware_delta(
                 delta=b,
-                cell=input_data.cell.float(),
-                batch=input_data.batch,
+                cell=input_graph.cell.float(),
+                batch=input_graph.batch,
                 cartesian_to_fractional=True, 
             )
             """
@@ -101,9 +101,8 @@ class XMatching():
         with torch.no_grad():
             # Track maximum loss atom for stability monitoring
             max_L = modified_L_per_atom.max()
-            max_L_idx = torch.argmax(modified_L_per_atom)
-
-        return L, max_L, max_L_idx
+            
+        return L, max_L
 
     def _interpolant_schedule(
         self,
@@ -147,7 +146,7 @@ class XMatching():
             
     def path(
         self,
-        input_data: Data,
+        input_graph: Data,
         v_x: float=1,  # exponent for cosine schedule (controls interpolation curvature)
         v_z: float=1,  # exponent for cosine schedule (controls interpolation curvature)
         initial_dist: Literal["noisy", "fixed"] = "fixed",
@@ -164,7 +163,7 @@ class XMatching():
         """
 
         with torch.no_grad():
-            data = input_data.clone()
+            data = input_graph.clone()
 
             # x1 = final relaxed positions (target)
             x1 = data.pos_relaxed.float()
@@ -238,17 +237,7 @@ class XMatching():
             xt = x0 + alpha_t_x * u_x 
 
             # Rescale velocity for cosine schedule (to account for d(alpha_t)/dt)
-            u_x = alpha_t_x_grad * u_x # alpha_t' * (x1 - x0)
-
-            """           
-            # Compute per-atom displacement from initial position (for displacement embedding)
-            disp = pbc_aware_delta(
-                delta=(xt - x0),
-                cell=data.cell.float(),
-                batch=data.batch,
-            )
-            data.disp = disp.norm(dim=-1, keepdim=True)  # (N, 1)
-            """           
+            u_x = alpha_t_x_grad * u_x # alpha_t' * (x1 - x0)         
 
             # Store interpolated data
             data.pos = xt  # Current position (what model sees as input)
@@ -309,7 +298,7 @@ class XMatching():
 
     def sample(
             self,
-            input_data: Data,
+            input_graph: Data,
             t: torch.Tensor,  # Time points for ODE integration (typically [0, 1])
     ) -> Data:
         """
@@ -324,8 +313,8 @@ class XMatching():
             data: Data object with pos_generated attribute containing predicted relaxed positions
         """
 
-        data = input_data.clone()
-        x0_ref = input_data.pos.clone().float()  # fixed reference for displacement embedding
+        data = input_graph.clone()
+        x0_ref = input_graph.pos.clone().float()  # fixed reference for displacement embedding
         frozen_atoms = (data.fixed == 1)
 
         # Precompute spatial mask based on ads_cutoff
@@ -344,18 +333,7 @@ class XMatching():
             Wraps the PyTorch model to match torchdiffeq's expected signature.
             """
             data.pos = xt
-            data.pos_init = x0_ref # Explicitly set x0 for conditioning
             data.t = t.view(1,1).expand(len(xt), -1)
-
-            """
-            # Compute displacement from initial position for displacement embedding
-            disp = pbc_aware_delta(
-                delta=(xt - x0_ref),
-                cell=data.cell.float(),
-                batch=data.batch,
-            )
-            data.disp = disp.norm(dim=-1, keepdim=True)  # (N, 1)
-            """
 
             if self.x_matching == "endpoint":
                 x1_hat = self(data)
@@ -382,7 +360,7 @@ class XMatching():
         # Integrate ODE from t=0 to t=1 to generate relaxed positions
         xt = odeint(
             func=dx_dt,
-            y0=input_data.pos,  # Start from initial positions
+            y0=input_graph.pos,  # Start from initial positions
             t=t * 0.999 if self.x_matching == "endpoint" else t,  # Integration time points
             rtol=self.rtol,  # Relative tolerance
             atol=self.atol,  # Absolute tolerance
@@ -390,18 +368,8 @@ class XMatching():
         )
 
         # Extract final positions (at t=1)
-        data.pos = input_data.pos
+        data.pos = input_graph.pos
         data.pos_generated = xt[-1]
-        
-        """
-        # Enforce frozen atoms: overwrite generated positions with initial positions
-        frozen_atoms = (data.fixed == 1)
-        data.pos_generated[frozen_atoms] = data.pos[frozen_atoms]
-
-        # if adsorbate matching only, freeze catalyst atoms
-        if tao  == float('inf'):
-            data.pos_generated[catalyst] = data.pos[catalyst]
-        """
         
         return data 
   
