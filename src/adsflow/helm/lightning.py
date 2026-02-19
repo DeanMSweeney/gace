@@ -1,3 +1,5 @@
+import contextlib
+import logging
 import os
 import numpy as np
 import pandas as pd
@@ -307,20 +309,29 @@ class LightFlowMatch(LightningModule, XMatching):
                 opt_graph.pos_generated = opt_graph.pos   
             
             if self.run_mlff:
-                calculator = OCPCalculator(
-                    model_name=self.mlff_checkpoint,
-                    local_cache="./mlff_checkpoint_cache",
-                    cpu=(self.accelerator == "cpu"),
-                    seed=self.seed,
-                )
-                atoms = data_to_atoms(opt_graph, pos_type=opt_graph.pos_generated)
-                atoms_relaxed, _, _ = relax_w_mlff(
-                    atoms=atoms,
-                    calculator=calculator,
-                    fmax=0.05,
-                    steps=200,
-                    optimizer="BFGS",
-                )
+                _fairchem_log = logging.getLogger("fairchem")
+                _ocp_log = logging.getLogger("ocpmodels")
+                _saved_levels = _fairchem_log.level, _ocp_log.level
+                _fairchem_log.setLevel(logging.WARNING)
+                _ocp_log.setLevel(logging.WARNING)
+                with contextlib.redirect_stdout(open(os.devnull, "w")), \
+                     contextlib.redirect_stderr(open(os.devnull, "w")):
+                    calculator = OCPCalculator(
+                        model_name=self.mlff_checkpoint,
+                        local_cache="./mlff_checkpoint_cache",
+                        cpu=(self.accelerator == "cpu"),
+                        seed=self.seed,
+                    )
+                    atoms = data_to_atoms(opt_graph, pos_type=opt_graph.pos_generated)
+                    atoms_relaxed, _, _ = relax_w_mlff(
+                        atoms=atoms,
+                        calculator=calculator,
+                        fmax=0.05,
+                        steps=200,
+                        optimizer="BFGS",
+                    )
+                _fairchem_log.setLevel(_saved_levels[0])
+                _ocp_log.setLevel(_saved_levels[1])
                 mlff_relaxed_pos = torch.tensor(atoms_relaxed.get_positions(), device=data.pos.device, dtype=data.pos.dtype)
                 opt_graph.pos_generated = mlff_relaxed_pos
 
