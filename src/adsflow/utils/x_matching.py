@@ -326,7 +326,6 @@ class XMatching():
 
         data = input_data.clone()
         x0_ref = input_data.pos.clone().float()  # fixed reference for displacement embedding
-        data.pos_init = x0_ref
         frozen_atoms = (data.fixed == 1)
 
         # Precompute spatial mask based on ads_cutoff
@@ -345,6 +344,7 @@ class XMatching():
             Wraps the PyTorch model to match torchdiffeq's expected signature.
             """
             data.pos = xt
+            data.pos_init = x0_ref # Explicitly set x0 for conditioning
             data.t = t.view(1,1).expand(len(xt), -1)
 
             """
