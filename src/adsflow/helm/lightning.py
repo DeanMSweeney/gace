@@ -170,7 +170,7 @@ class LightFlowMatch(LightningModule, XMatching):
             # For flow matching: loss = |f - u|^2 (velocity matching)
             # For endpoint matching: loss = |f - x1|^2 (position matching)
             target = data.pos_relaxed if self.x_matching == "endpoint" else u
-            loss, max_loss, max_loss_idx = self.criterion(
+            loss, max_loss = self.criterion(
                 input_graph=data,
                 a=f,  # Model prediction
                 b=target,  # Target
@@ -288,21 +288,23 @@ class LightFlowMatch(LightningModule, XMatching):
             loss: Test loss for this batch
         """
         # Compute training-style loss for comparison
-
         data.dE = torch.ones_like(data.y_relaxed) * 0.05
         data.Fmax = torch.ones_like(data.y_relaxed) * 0.10
-        loss, max_loss, velocity_predictions = self._transport_loss(data)
         
         # DEBUG: collect velocity velocity_predictions for parquet output
         if self._write_f_u:
+            loss, max_loss, velocity_predictions = self._transport_loss(data)
             if not hasattr(self, 'self._f_u'):
                 self.self._f_u = []
             self.self._f_u.append(velocity_predictions)
-        
-        # else:
-            # Iterative self-refinement: re-apply model to its own output
-            t = torch.linspace(0., 1, self.num_integration_steps, device=data.pos.device, dtype=data.pos.dtype)
-            opt_graph = self.sample(input_graph=data, t=t)
+        else:
+            if self.num_integration_steps > 1:
+                # Iterative self-refinement: re-apply model to its own output
+                t = torch.linspace(0., 1, self.num_integration_steps, device=data.pos.device, dtype=data.pos.dtype)
+                opt_graph = self.sample(input_graph=data, t=t)
+            else:
+                opt_graph = data 
+                opt_graph.pos_generated = opt_graph.pos   
             
             if self.run_mlff:
                 calculator = OCPCalculator(
@@ -333,7 +335,7 @@ class LightFlowMatch(LightningModule, XMatching):
             # Log all evaluation metrics
             if eval_metrics:
                 for name, value in eval_metrics.items():
-                    self.log(f"test/{name}", value.detach(), prog_bar=True, batch_size=len(data.natoms), sync_dist=True)
+                    self.log(f"test/{name}", value, prog_bar=True, batch_size=len(data.natoms), sync_dist=True)
         
         return   
 
