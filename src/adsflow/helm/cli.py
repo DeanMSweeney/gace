@@ -185,7 +185,7 @@ def main(cfg: Config) -> None:
         declare(f">>> Activated Evaluation mode with OC20-test: {cfg.oc20_test} 🦉")
         ptst = {"src": cfg.oc20_test}
         test_set = LazyLmdbDataset(ptst)
-        test_set = Subset(test_set, indices=range(100))
+        test_set = Subset(test_set, indices=range(10))
         test_loader = DataLoader(
             dataset=test_set,
             batch_size=cfg.batch_size,
@@ -270,21 +270,20 @@ def main(cfg: Config) -> None:
     if cfg.ckpt_path and not cfg.resume_training:
         declare(f">>> Loading CLEAN preprocessed weights from: {cfg.ckpt_path}")
         checkpoint = torch.load(cfg.ckpt_path, map_location="cpu")
-        
         load_result = lightning.load_state_dict(checkpoint["state_dict"], strict=False)
 
-        # ⭐ DELETE CHECKPOINT TO FREE MEMORY
+        #  DELETE CHECKPOINT TO FREE MEMORY
         del checkpoint
         torch.cuda.empty_cache()  # Clear GPU cache if using CUDA
 
         # Verification Reports
         if load_result.missing_keys:
-            print("\n--- MISSING KEYS (Not w/in Checkpoint) ---")
+            print("\n--- MISSING KEYS (Not w/in Checkpoint ⭐) ---")
             for key in load_result.missing_keys:
                 print(f"  [!] {key}")
 
         if load_result.unexpected_keys:
-                print("\n--- UNEXPECTED KEYS (Ignored from Checkpoint) ---")
+                print("\n--- UNEXPECTED KEYS (Ignored from Checkpoint ⭐) ---")
                 for key in load_result.unexpected_keys:
                     print(f"  [?] {key}")
         

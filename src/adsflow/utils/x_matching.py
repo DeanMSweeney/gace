@@ -6,7 +6,6 @@ from torch_geometric.data import Data
 from torchdiffeq import odeint
 from typing import Optional, Literal, Union, Tuple
 
-from adsflow.utils.post_processing import config_DFT, write_strucs
 from adsflow.utils.invariance import pbc_aware_delta, hungarian
 from adsflow.utils.utils import adsorbate_neighborhood_mask
 
