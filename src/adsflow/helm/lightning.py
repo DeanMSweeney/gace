@@ -277,13 +277,13 @@ class LightFlowMatch(LightningModule, XMatching):
         data.Fmax = torch.ones_like(data.y_relaxed) * 0.10
         loss, max_loss, max_loss_idx, velocity_predictions = self._transport_loss(data)
         
-        
+        """
         # DEBUG: collect velocity velocity_predictions for parquet output
         if not hasattr(self, '_test_velocity_predictions'):
             self._test_velocity_predictions = []
         self._test_velocity_predictions.append(velocity_predictions)
-        
         """
+        
         # Iterative self-refinement: re-apply model to its own output
         t = torch.linspace(0., 1, 20, device=data.pos.device, dtype=data.pos.dtype)
         refinement_data = data.clone()
@@ -307,7 +307,7 @@ class LightFlowMatch(LightningModule, XMatching):
         if eval_metrics:
             for name, value in eval_metrics.items():
                 self.log(f"test/{name}", value, prog_bar=True, batch_size=len(data.natoms), sync_dist=True)
-        """
+        
         return   
 
     def on_test_end(self):
