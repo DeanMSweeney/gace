@@ -299,6 +299,7 @@ class XMatching():
             self,
             input_graph: Data,
             t: torch.Tensor,  # Time points for ODE integration (typically [0, 1])
+            ode_method: str = "dopri5",
     ) -> Data:
         """
         Generate relaxed atomic structures by integrating the learned velocity field.
@@ -363,7 +364,7 @@ class XMatching():
             t=t * 0.999 if self.x_matching == "endpoint" else t,  # Integration time points
             rtol=self.rtol,  # Relative tolerance
             atol=self.atol,  # Absolute tolerance
-            method=self.ode_method,  # ODE solver method (e.g., 'dopri5', 'euler')
+            method=ode_method,  # ODE solver method (e.g., 'dopri5', 'euler')
         )
 
         # Extract final positions (at t=1)
