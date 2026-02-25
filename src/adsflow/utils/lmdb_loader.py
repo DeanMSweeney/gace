@@ -45,32 +45,41 @@ def dict_to_pyg_data(data_dict: dict) -> Data:
     """
     Convert a dictionary to a PyG Data object.
 
+    Core fields (pos, cell, atomic_numbers, natoms, fixed, tags, sid, fid) are
+    always required. Optional fields are added only if present in the dict,
+    so both new (raw-structure-only) and old (OC20-dense rich) LMDBs load cleanly.
+
     Args:
-        data_dict: Dictionary with LMDB fields (from lmdb_builder.py)
+        data_dict: Dictionary with LMDB fields
 
     Returns:
-        PyG Data object with all fields as torch tensors
+        PyG Data object with all available fields as torch tensors
     """
-    # Convert numpy arrays to torch tensors
-    data = Data(
+    # --- Required core fields ---
+    kwargs = dict(
         pos=torch.from_numpy(data_dict["pos"]),
-        pos_relaxed=torch.from_numpy(data_dict["pos_relaxed"]),
-        velocity=torch.from_numpy(data_dict["velocity"]),
         cell=torch.from_numpy(data_dict["cell"]).unsqueeze(0),
         atomic_numbers=torch.from_numpy(data_dict["atomic_numbers"]),
         natoms=torch.tensor(data_dict["natoms"]),
-        fixed=torch.from_numpy(data_dict["fixed"]),
-        tags=torch.from_numpy(data_dict["tags"]),
-        Fmax=torch.tensor(data_dict["Fmax"]),
-        dE=torch.tensor(data_dict["dE"]),
-        dSmax=torch.tensor(data_dict["dSmax"]),
-        sid=torch.tensor(data_dict["sid"]),
+        fixed=torch.from_numpy(np.array(data_dict["fixed"])),
+        tags=torch.from_numpy(np.array(data_dict["tags"])),
+        sid=data_dict["sid"],
         fid=torch.tensor(data_dict["fid"]),
-        y_init=torch.tensor(data_dict["y_init"]),
-        y_relaxed=torch.tensor(data_dict["y_relaxed"]),
     )
 
-    return data
+    # --- Optional fields: added only when present in the stored dict ---
+    _optional_numpy = ["pos_relaxed", "velocity"]
+    _optional_scalar = ["Fmax", "dE", "dSmax", "y_init", "y_relaxed"]
+
+    for field in _optional_numpy:
+        if field in data_dict:
+            kwargs[field] = torch.from_numpy(np.array(data_dict[field]))
+
+    for field in _optional_scalar:
+        if field in data_dict:
+            kwargs[field] = torch.tensor(data_dict[field])
+
+    return Data(**kwargs)
 
 @registry.register_dataset("lmdb")
 @registry.register_dataset("single_point_lmdb")
