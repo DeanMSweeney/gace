@@ -302,7 +302,7 @@ class LightFlowMatch(LightningModule, XMatching):
             if self.num_integration_steps > 1:
                 # Iterative self-refinement: re-apply model to its own output
                 t = torch.linspace(0., 1, self.num_integration_steps, device=data.pos.device, dtype=data.pos.dtype)
-                opt_graph = self.sample(input_graph=data, t=t)
+                opt_graph = self.sample(input_graph=data, t=t, ode_method=self.ode_method)
             else:
                 opt_graph = data 
                 opt_graph.pos_generated = opt_graph.pos   
