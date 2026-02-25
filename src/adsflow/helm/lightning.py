@@ -14,9 +14,8 @@ from transformers import get_cosine_schedule_with_warmup, get_polynomial_decay_s
 
 from adsflow.utils.x_matching import XMatching
 from adsflow.utils.evaluation import compute_eval_metrics
-from adsflow.utils.post_relaxation import config_DFT, relax_w_mlff
-from adsflow.utils.atoms import data_to_atoms
-from fairchem.core import OCPCalculator
+from adsflow.utils.relaxation import relax_struc
+from adsflow.utils.atoms import write_strucs
 
 from typing import Optional, Literal, Union, Tuple
 
@@ -308,32 +307,24 @@ class LightFlowMatch(LightningModule, XMatching):
                 opt_graph = data 
                 opt_graph.pos_generated = opt_graph.pos   
             
-            if self.run_mlff:
-                _fairchem_log = logging.getLogger("fairchem")
-                _ocp_log = logging.getLogger("ocpmodels")
-                _saved_levels = _fairchem_log.level, _ocp_log.level
-                _fairchem_log.setLevel(logging.WARNING)
-                _ocp_log.setLevel(logging.WARNING)
-                with contextlib.redirect_stdout(open(os.devnull, "w")), \
-                     contextlib.redirect_stderr(open(os.devnull, "w")):
-                    calculator = OCPCalculator(
-                        model_name=self.mlff_checkpoint,
-                        local_cache="./mlff_checkpoint_cache",
-                        cpu=(self.accelerator == "cpu"),
-                        seed=self.seed,
-                    )
-                    atoms = data_to_atoms(opt_graph, pos_type=opt_graph.pos_generated)
-                    atoms_relaxed, _, _ = relax_w_mlff(
-                        atoms=atoms,
-                        calculator=calculator,
-                        fmax=0.05,
-                        steps=200,
-                        optimizer="BFGS",
-                    )
-                _fairchem_log.setLevel(_saved_levels[0])
-                _ocp_log.setLevel(_saved_levels[1])
-                mlff_relaxed_pos = torch.tensor(atoms_relaxed.get_positions(), device=data.pos.device, dtype=data.pos.dtype)
-                opt_graph.pos_generated = mlff_relaxed_pos
+            opt_graph = relax_struc(
+                opt_graph,
+                run_mlff=self.run_mlff,
+                config_vasp=self.config_vasp,
+                mlff_checkpoint=self.mlff_checkpoint,
+                accelerator=self.accelerator,
+                seed=self.seed,
+                gen_POS=self.gen_POS,
+                in_POS=self.in_POS,
+                rlxd_POS=self.rlxd_POS,
+            )
+
+            write_strucs(
+                data=opt_graph,
+                gen_POS=self.gen_POS,
+                in_POS=self.in_POS,
+                rlxd_POS=self.rlxd_POS,
+            )
 
             eval_metrics = compute_eval_metrics(data=opt_graph, threshold=self.threshold)
 

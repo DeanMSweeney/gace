@@ -54,28 +54,16 @@ def write_strucs(
     in_POS: Optional[str]=None, 
     rlxd_POS: Optional[str]=None,  
 ):
-    atoms = data_to_atoms(data)
-    ase.io.write(gen_POS, atoms)  # Cartesian
     
     if in_POS:
-        # Save to current directory
-        atoms = Atoms(
-            positions=x0_np, # initial
-            numbers=z_np,
-            cell=cell_np,
-            pbc=True,  # or (True, True, False) for a slab
-            )
-        atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
+        atoms = data_to_atoms(data, pos_type=data.pos)
         ase.io.write(in_POS, atoms)  # Cartesian
     
+    if gen_POS:
+        atoms = data_to_atoms(data, pos_type=data.pos_generated)
+        ase.io.write(gen_POS, atoms)  # Cartesian
+    
     if rlxd_POS:
-        # Save to current directory
-        atoms = Atoms(
-            positions=xdft_np, # initial
-            numbers=z_np,
-            cell=cell_np,
-            pbc=True,  # 
-            )
-        atoms.set_constraint(FixAtoms(mask=f_np.astype(bool)))
+        atoms = data_to_atoms(data, pos_type=data.pos_relaxed)
         ase.io.write(rlxd_POS, atoms)  # Cartesian
         
