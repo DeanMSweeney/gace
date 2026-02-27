@@ -160,30 +160,25 @@ class LightFlowMatch(LightningModule, XMatching):
             max_loss_idx: Index of atom with maximum loss
             velocity_predictions: Dict with t, predicted velocity, target velocity, batch, tags
         """
-        # Generate interpolated training data at random time t
-        # data.pos = x(t), u = target velocity dx/dt
-        data, u = self.path(input_graph=input_graph) 
+        # Generate interpolated training data at random time t.
+        # path() stores supervision targets on the returned data object.
+        data = self.path(input_graph=input_graph) 
 
-        # Model predicts velocity field (or positions if endpoint matching)
+        # Model predicts velocity field (or dict for forge with z_logits)
         f = self(data)
-        if self.variant == "relax":
-            # Compute loss between predicted and target
-            # For flow matching: loss = |f - u|^2 (velocity matching)
-            # For endpoint matching: loss = |f - x1|^2 (position matching)
-            target = data.pos_relaxed if self.x_matching == "endpoint" else u
-            loss, max_loss = self.criterion(
-                input_graph=data,
-                a=f,  # Model prediction
-                b=target,  # Target
-                loss_fn=self.hparams.loss_fn,
-            )
+        loss, max_loss = self.criterion(
+            input_graph=data,
+            pred=f,  # Model prediction
+        )
 
         # DEBUG: collect diagnostic tensors
         if self._write_f_u: 
+            f_x = f["u_x"] if isinstance(f, dict) else f
+            target_x = data.pos_relaxed if self.x_matching == "endpoint" else data.u_x
             velocity_predictions = {
                 't': data.t.detach().cpu(),              # (N, 1) interpolation time
-                'f': f.detach().cpu(),                    # (N, 3) predicted velocity
-                'u': target.detach().cpu(),               # (N, 3) target velocity
+                'f': f_x.detach().cpu(),                  # (N, 3) predicted velocity
+                'u': target_x.detach().cpu(),             # (N, 3) target field/endpoint
                 'batch': data.batch.detach().cpu(),        # (N,)   graph index
                 'tags': data.tags.detach().cpu(),           # (N,)   atom tags
             }

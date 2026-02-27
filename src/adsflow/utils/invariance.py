@@ -140,17 +140,28 @@ def hungarian(
         Typically called per atom type (e.g., separately for C, O, H atoms).
     """
 
+    if set0.size(0) != set1.size(0):
+        raise ValueError("set0 and set1 must have the same number of rows.")
+
     N = set0.size(0)
+    if N == 0:
+        return set0
 
     # Compute pairwise cost matrix: C[i,j] = distance from s0[i] to s1[j]
     C = set1.unsqueeze(0) - set0.unsqueeze(1)  # (N, N, 3)
 
-    # Expand batch indices for all N*N pairwise distances
-    # Each row i uses cell from batch[i]
-    batch_expanded = batch.unsqueeze(1).expand(-1, N).reshape(-1)  # (N*N,)
-
     # Apply PBC to get minimum image distances
-    if cell: 
+    if cell is not None:
+        if batch is None:
+            batch = torch.zeros(N, dtype=torch.long, device=set0.device)
+        else:
+            batch = batch.long().to(set0.device)
+            if batch.size(0) != N:
+                raise ValueError("batch length must match set0/set1 length.")
+
+        # Expand batch indices for all N*N pairwise distances
+        # Each row i uses cell from batch[i]
+        batch_expanded = batch.unsqueeze(1).expand(-1, N).reshape(-1)  # (N*N,)
         C = pbc_aware_delta(
             delta=C.reshape(-1, 3),  # (N*N, 3)
             cell=cell,
@@ -161,10 +172,11 @@ def hungarian(
     C_l2 = torch.linalg.norm(C, dim=-1)  # (N, N)
 
     # Solve linear assignment problem using Hungarian algorithm
-    _, col_ind = assignment_to_indices(cost=C_l2)
+    row_ind, col_ind = assignment_to_indices(cost=C_l2)
 
-    # Apply optimal permutation to t0
-    set0_aligned = set0[col_ind]
+    # Reorder set0 into set1 ordering: aligned[col] = source[row]
+    set0_aligned = torch.empty_like(set0)
+    set0_aligned[col_ind.long()] = set0[row_ind.long()]
 
     return set0_aligned
    
