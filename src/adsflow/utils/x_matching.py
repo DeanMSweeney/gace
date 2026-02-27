@@ -17,9 +17,7 @@ class XMatching():
     def criterion(
         self,
         input_graph,
-        a: Tensor,  # N, 3 - predicted positions
-        b: Tensor,  # N, 3 - target positions
-        loss_fn: str = "mse",
+        pred: Union[Tensor, dict],  # N, 3 positions or dict with {"u_x", "z_logits"}
     ):
         """
         Compute the loss between predicted and target atomic positions.
@@ -30,14 +28,18 @@ class XMatching():
         - PBC-aware distance computation for endpoint matching
         - Time-dependent loss weighting for cosine interpolation schedules
         """
-        # Force fp32 precision for all operations
-        # Convert to fractional coordinates
-
-        a = a.float()
-        b = b.float()
-
         # Compute mask (no gradient needed for mask creation)
         data = input_graph
+        pred_x = pred["u_x"] if isinstance(pred, dict) else pred
+        pred_z = pred.get("z_logits", None) if isinstance(pred, dict) else None
+
+        pred_x = pred_x.float()
+        if self.x_matching == "endpoint":
+            target_x = data.pos_relaxed.float()
+        else:
+            if not hasattr(data, "u_x"):
+                raise ValueError("Flow criterion requires `data.u_x` to be set in path().")
+            target_x = data.u_x.float()
 
         # Compute position difference based on matching mode (needs gradients!)
         if self.x_matching == "endpoint":
@@ -45,39 +47,27 @@ class XMatching():
             # (handles periodic boundary conditions for crystalline structures)
             diff = pbc_aware_delta(
                 cell=data.cell.float(),
-                delta=(a - b),
+                delta=(pred_x - target_x),
                 batch=data.batch,
             )
 
         elif self.x_matching == "flow":
-            # Simple Euclidean difference (for flow-based methods)
-            
-            """
-            a = pbc_aware_delta(
-                delta=a,
-                cell=input_graph.cell.float(),
-                batch=input_graph.batch,
-                cartesian_to_fractional=True, 
-            )
-            b = pbc_aware_delta(
-                delta=b,
-                cell=input_graph.cell.float(),
-                batch=input_graph.batch,
-                cartesian_to_fractional=True, 
-            )
-            """
-            
-            diff = a - b
+            # Simple Euclidean difference (for flow-based methods
+            diff = pred_x - target_x
 
         else:
             raise ValueError("Invalid x_matching routine")
 
         with torch.no_grad():
-            # Apply time-dependent weighting for endpoint interpolation schedules
-            time_factor = self.alpha_t_x_factor
+            # Apply time-dependent weighting for endpoint interpolation schedules.
+            # During forge training, alpha_t_x_factor is set in path().
+            alpha_t_x_factor = getattr(self, "alpha_t_x_factor", 1.0)
 
             # Spatial mask (precomputed in path(), stored on data)
-            mask = data.ads_neighborhood_mask.float().unsqueeze(1)
+            if hasattr(data, "ads_neighborhood_mask"):
+                mask = data.ads_neighborhood_mask.float().unsqueeze(1)
+            else:
+                mask = (data.fixed == 0).float().unsqueeze(1)
 
             # Adsorbate weighting within the selected atoms
             tao = self.hparams.tao
@@ -85,30 +75,48 @@ class XMatching():
             mask_factor = mask * (1 + adsorbates * (tao - 1))
 
         # Compute mean squared error per atom (averaged over xyz dimensions)
-        if loss_fn == "mse":
-            L_per_atom = (diff ** 2).mean(dim=1, keepdim=True)  # N, 1
-        elif loss_fn == "mae":
-            L_per_atom = diff.abs().mean(dim=1, keepdim=True)  # N, 1
-        else:
-            raise ValueError(f"Invalid loss function: {loss_fn}")
+        L_per_atom = diff.abs().mean(dim=1, keepdim=True)  # N, 1
         
-        # Apply all weighting factors: frozen atom mask, adsorbate weight, time weight
-        modified_L_per_atom = L_per_atom * mask_factor * time_factor  # N, 1
+        # Apply all weighting factors: frozen atom mask, adsorbate weight, time weight.
+        modified_L_per_atom = L_per_atom * mask_factor * alpha_t_x_factor  # N, 1
         # Average over all free (non-frozen) atoms
-        L = modified_L_per_atom.sum() / mask.sum().clamp_min(1e-8)
+        x_loss = modified_L_per_atom.sum() / mask.sum().clamp_min(1e-8)
         
         with torch.no_grad():
             # Track maximum loss atom for stability monitoring
-            max_L = modified_L_per_atom.max()
-            
-        return L, max_L
+            x_max_L = modified_L_per_atom.max()
+
+        # Forge adds atomic-number endpoint loss.
+        if self.variant == "relax":
+            return x_loss, x_max_L
+
+        if pred_z is None:
+            raise ValueError("Forge criterion requires predictions dict with `z_logits`.")
+        if not hasattr(data, "atomic_numbers_true"):
+            raise ValueError("Forge criterion requires `data.atomic_numbers_true`.")
+
+        z_targets = data.atomic_numbers_true.long()
+        z_ce_per_atom = F.cross_entropy(pred_z.float(), z_targets, reduction="none").unsqueeze(1)
+
+        # Adsorbate types are conditioned/fixed in forge; supervise catalyst types.
+        z_mask = (data.tags != 2).float().unsqueeze(1)
+        z_loss = (z_ce_per_atom * z_mask).sum() / z_mask.sum().clamp_min(1.0)
+
+        lambda_z = float(getattr(self.hparams, "lambda_z", 1.0))
+        total_loss = x_loss + lambda_z * z_loss
+
+        with torch.no_grad():
+            z_max_L = (lambda_z * z_ce_per_atom * z_mask).max()
+            max_L = torch.maximum(x_max_L, z_max_L)
+        
+        return total_loss, max_L
 
     def _interpolant_schedule(
         self,
         t: Tensor,
         schedule_type: str,
-        v_x: float = 1,
-        v_z: float = 1,
+        v: float = 1,
+        x_matching: str = "flow",
     ) -> Tuple[Tensor, Tensor, Tensor]:
         """
         Compute interpolation schedule parameters.
@@ -130,15 +138,15 @@ class XMatching():
         
         elif schedule_type == "cosine":
             # Cosine interpolation: slower at start/end, faster in middle
-            alpha_t = 1 - (torch.cos(t ** v_x * torch.pi / 2)) ** 2
-            alpha_t_grad = torch.pi * v_x * t ** (v_x - 1) * torch.cos(t ** v_x * torch.pi / 2) * torch.sin(t ** v_x * torch.pi / 2)
+            alpha_t = 1 - (torch.cos(t ** v * torch.pi / 2)) ** 2
+            alpha_t_grad = torch.pi * v * t ** (v - 1) * torch.cos(t ** v * torch.pi / 2) * torch.sin(t ** v * torch.pi / 2)
         
         else:
             raise ValueError("Invalid interpolant schedule")
 
         # scale only for endpoint
         t0_weight = self.hparams.t0_weight
-        alpha_t_factor = torch.clamp(alpha_t_grad / (1 - alpha_t), 0.005, 1.5) if self.x_matching == "endpoint" \
+        alpha_t_factor = torch.clamp(alpha_t_grad / (1 - alpha_t), 0.005, 1.5) if x_matching == "endpoint" \
             else torch.clamp(1 / t, 1.0, t0_weight) #torch.tensor(1.0, device=t.device, dtype=torch.float32)
 
         return alpha_t, alpha_t_grad, alpha_t_factor
@@ -149,7 +157,7 @@ class XMatching():
         v_x: float=1,  # exponent for cosine schedule (controls interpolation curvature)
         v_z: float=1,  # exponent for cosine schedule (controls interpolation curvature)
         initial_dist: Literal["noisy", "fixed"] = "fixed",
-    ) -> Tuple[Data, Tensor]:
+    ) -> Data:
         """
         Generate interpolated training data along a path from initial to relaxed positions.
 
@@ -157,8 +165,7 @@ class XMatching():
         For "forge" variant: interpolates from noise/initial positions to relaxed positions
 
         Returns:
-            data: Modified data object with interpolated positions at time t
-            u: Target velocity field (dx/dt) for the model to predict
+            data: Modified data object with interpolated inputs/targets at time t
         """
 
         with torch.no_grad():
@@ -229,7 +236,8 @@ class XMatching():
             alpha_t_x, alpha_t_x_grad, self.alpha_t_x_factor = self._interpolant_schedule(
                 t=t_x,
                 schedule_type=self.schedule_type,
-                v_x=v_x,
+                v=v_x,
+                x_matching=self.x_matching,
             )
 
             # Interpolate: xt = x0 + alpha_t * u_x(position at time t)
@@ -242,54 +250,90 @@ class XMatching():
             data.pos = xt  # Current position (what model sees as input)
             data.pos_init = x0  # Initial position (for reference)
             data.t = t_x  # Interpolation time
+            data.u_x = u_x
             
             if self.variant == "relax":
-                return data, u_x
+                return data
 
             elif self.variant == "forge":
-                # Sample  atomic numbers (for conditional generation)
-                z1 = data.atomic_number # N 
+                """
+                Atomic number endpoint matching on the simplex (SimplexFlow).
 
-                z1_hot = F.one_hot(z1, num_classes=55) # N , 55
-                
-                # Sample noise by defining initial one-hot-encoded vectors 
-                z0_hot = torch.zeros_like(z1_hot, dtype=torch.float32) # N , 55
-                z0_row_idx = torch.arange(z0_hot.size(0), device=x1.device)
-                z0_rand_int = torch.randint(low=0, high=55, size=(z0_hot.size(0),), device=x1.device) # N
-                z0_hot[z0_row_idx, z0_rand_int] = 1 # randomly replace one element in each row with 1 
-                z0_hot[adsorbate] = z1_hot[adsorbate] # reassign adsorabte atom types to match target
+                Catalyst atom types are discrete labels, lifted onto the
+                probability simplex via one-hot encoding.  The model sees an
+                interpolated soft distribution zt_hot as input and predicts
+                the true element z1 directly (logits → softmax → simplex).
+                Loss: cross-entropy against the true label z1.
 
+                This endpoint parameterization guarantees that generated
+                trajectories remain on the simplex by construction.
+                """
+                # Define adsorbate/catalyst masks (may not exist if initial_dist == "fixed")
+                adsorbate = (data.tags == 2)
+                catalyst  = (data.tags != 2)
+
+                # --- Target: true atomic numbers ---
+                num_classes = 90  # matches max_num_elements in EquiformerV2
+                z1_raw = data.atomic_numbers.long()                           # (N,)
+                # Accept either chemical atomic numbers (1..K) or zero-based indices (0..K-1).
+                if z1_raw.min() >= 1 and z1_raw.max() <= num_classes:
+                    z1 = z1_raw - 1
+                elif z1_raw.min() >= 0 and z1_raw.max() < num_classes:
+                    z1 = z1_raw
+                else:
+                    raise ValueError(
+                        f"atomic_numbers out of range for num_classes={num_classes}: "
+                        f"[{int(z1_raw.min())}, {int(z1_raw.max())}]"
+                    )
+                z1_hot = F.one_hot(z1, num_classes=num_classes).float()        # (N, 90)
+
+                # --- Initial: random one-hot noise for catalyst atoms ---
+                z0_hot = torch.zeros_like(z1_hot)                             # (N, 90)
+                z0_rand_int = torch.randint(
+                    low=0, high=num_classes,
+                    size=(z0_hot.size(0),), device=x1.device,
+                )
+                z0_hot[torch.arange(z0_hot.size(0), device=x1.device), z0_rand_int] = 1.0
+
+                # Adsorbate atoms keep their true type (conditioning)
+                z0_hot[adsorbate] = z1_hot[adsorbate]
+
+                # Hungarian matching for permutation invariance over catalyst atoms
                 z0_hot[catalyst] = hungarian(
                     set0=z0_hot[catalyst],
                     set1=z1_hot[catalyst],
-                    batch=data.batch,
+                    batch=data.batch[catalyst],
                 )
 
-                # compute velocity field for atomic numbers 
-                u_z = z1_hot - z0_hot
+                # --- Sample interpolation time (independent of position time) ---
+                t_z_per_graph = torch.rand(
+                    len(data.natoms), 1, device=x1.device, dtype=torch.float32,
+                )
+                t_z = t_z_per_graph[data.batch] * 0.999
 
-                # Sample random interpolation time t for each graph in the batch
-                t_z_per_graph = torch.rand(len(data.natoms), 1, device=x1.device, dtype=torch.float32)
-                # Broadcast to atoms, clamp max to 0.999
-                t_z = t_z_per_graph[data.batch] * 0.999 if self.x_matching == "endpoint" else t_z_per_graph[data.batch]
-                # Compute interpolation schedule parameters
-                alpha_t_z, alpha_t_z_grad, self.alpha_t_z_factor = self._interpolant_schedule(
+                # Compute interpolation schedule
+                alpha_t_z, _, _= self._interpolant_schedule(
                     t=t_z,
                     schedule_type=self.schedule_type,
-                    v_z=v_z,
+                    v=v_z,
+                    x_matching=self.x_matching,
                 )
 
-                zt_hot = z0_hot + alpha_t_z * (z1_hot - z0_hot)
+                # Interpolated soft distribution at time t (stays on the simplex)
+                zt_hot = (1 - alpha_t_z) * z0_hot + alpha_t_z * z1_hot       # (N, 90)
 
-                # Rescale velocity for cosine schedule (to account for d(alpha_t)/dt)
-                u_z = alpha_t_z_grad * u_z # alpha_t' * (x1 - x0)
+                # Keep noisy hard labels for modules that still require integer indexing.
+                data.atomic_numbers_noisy = zt_hot.argmax(dim=-1).long()      # (N,) noisy element
+                data.atomic_numbers = data.atomic_numbers_noisy
+                data.atomic_numbers_true = z1                                 # (N,) true labels (for CE loss)
+                data.atomic_numbers_hot  = zt_hot                             # soft distribution (for soft embedding)
+                data.t_z = t_z
 
-                # Store interpolated data
-                data.atomic_number = zt_hot  # Current position (what model sees as input)
-                data.atomic_number_init = z0_hot  # Initial position (for reference)
-                data.t_z = t_z  # Interpolation time
+                """
+                Unit cell flow matching — TODO
+                """
 
-                return data, u_x, u_z
+                return data
   
             else:
                 raise ValueError("Invalid model variant")
@@ -337,10 +381,13 @@ class XMatching():
 
             if self.x_matching == "endpoint":
                 x1_hat = self(data)
+                if isinstance(x1_hat, dict):
+                    x1_hat = x1_hat["u_x"]
                 _, _, alpha_t_factor = self._interpolant_schedule(
                     t=data.t,
                     schedule_type=self.schedule_type,
-                    v_x=1,
+                    v=1,
+                    x_matching=self.x_matching,
                 )   
                 delta = pbc_aware_delta(
                         delta=x1_hat - xt,
@@ -351,6 +398,8 @@ class XMatching():
                 u_x =  alpha_t_factor * delta
             else: 
                 u_x = self(data)  # Model predicts velocity field
+                if isinstance(u_x, dict):
+                    u_x = u_x["u_x"]
 
             # Zero velocity for atoms outside the supervised neighborhood
             u_x[outside_neighborhood] = 0
