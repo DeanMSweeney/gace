@@ -17,7 +17,36 @@ from ase.optimize import BFGS, LBFGS, FIRE
 from fairchem.core import OCPCalculator
 
 from adsflow.utils.atoms import data_to_atoms
-from adsflow.utils.utils import Silent
+
+class Silent:
+    def __enter__(self):
+        self._original_stdout = sys.stdout
+        self._original_stderr = sys.stderr
+        sys.stdout = open(os.devnull, 'w')
+        sys.stderr = open(os.devnull, 'w')
+
+        # Save original file descriptors
+        self._original_stdout_fd = os.dup(1)
+        self._original_stderr_fd = os.dup(2)
+
+        # Redirect low-level file descriptors
+        devnull_fd = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull_fd, 1)
+        os.dup2(devnull_fd, 2)
+        os.close(devnull_fd)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # Restore low-level file descriptors
+        os.dup2(self._original_stdout_fd, 1)
+        os.dup2(self._original_stderr_fd, 2)
+        os.close(self._original_stdout_fd)
+        os.close(self._original_stderr_fd)
+
+        # Restore Python streams
+        sys.stdout.close()
+        sys.stderr.close()
+        sys.stdout = self._original_stdout
+        sys.stderr = self._original_stderr
 
 def config_DFT(
     data: Data,

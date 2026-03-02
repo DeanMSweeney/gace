@@ -4,6 +4,7 @@ import sys
 import numpy as np 
 from ase import Atoms
 from ase.io import read, write
+from ase.data import atomic_masses
 
 import torch
 from torch import Tensor
@@ -81,32 +82,57 @@ def adsorbate_neighborhood_mask(
 
     return mask
 
-class Silent:
-    def __enter__(self):
-        self._original_stdout = sys.stdout
-        self._original_stderr = sys.stderr
-        sys.stdout = open(os.devnull, 'w')
-        sys.stderr = open(os.devnull, 'w')
 
-        # Save original file descriptors
-        self._original_stdout_fd = os.dup(1)
-        self._original_stderr_fd = os.dup(2)
+def adsorbate_center_of_mass(
+    data: Data,
+    adsorbate_tag: int = 2,
+) -> Tensor:
+    """
+    Compute adsorbate center of mass (COM) for batched PyG data.
 
-        # Redirect low-level file descriptors
-        devnull_fd = os.open(os.devnull, os.O_WRONLY)
-        os.dup2(devnull_fd, 1)
-        os.dup2(devnull_fd, 2)
-        os.close(devnull_fd)
+    Args:
+        data: PyG Data/Batch with at least `pos`, `tags`, and optional `batch`,
+              `atomic_numbers`.
+        adsorbate_tag: Value in `data.tags` identifying adsorbate atoms.
+        mass_weighted: If True, use atomic masses from `data.atomic_numbers`.
+                       If False, returns geometric center of adsorbate atoms.
+        expand_to_atoms: If True, return per-atom COM tensor of shape (N, 3),
+                         where each atom receives its graph's adsorbate COM.
+                         If False, return per-graph COM tensor of shape (B, 3).
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        # Restore low-level file descriptors
-        os.dup2(self._original_stdout_fd, 1)
-        os.dup2(self._original_stderr_fd, 2)
-        os.close(self._original_stdout_fd)
-        os.close(self._original_stderr_fd)
+    Returns:
+        Tensor of shape (B, 3) or (N, 3) depending on `expand_to_atoms`.
+    """
+    pos = data.pos.float()
+    N = pos.size(0)
+    if hasattr(data, "batch"):
+        batch = data.batch.long()
+    else:
+        batch = torch.zeros(N, dtype=torch.long, device=pos.device)
 
-        # Restore Python streams
-        sys.stdout.close()
-        sys.stderr.close()
-        sys.stdout = self._original_stdout
-        sys.stderr = self._original_stderr
+    ads_mask = (data.tags == adsorbate_tag)
+    if not torch.any(ads_mask):
+        raise ValueError(f"No adsorbate atoms found with tag={adsorbate_tag}.")
+
+    graph_ids = batch[ads_mask]
+    pos_ads = pos[ads_mask]
+
+    weights = torch.ones((pos_ads.size(0), 1), dtype=pos.dtype, device=pos.device)
+
+    num_graphs = int(batch.max().item()) + 1
+    com = torch.zeros((num_graphs, 3), dtype=pos.dtype, device=pos.device)
+    weight_sum = torch.zeros((num_graphs, 1), dtype=pos.dtype, device=pos.device)
+
+    com.index_add_(0, graph_ids, pos_ads * weights)
+    weight_sum.index_add_(0, graph_ids, weights)
+
+    missing = (weight_sum.squeeze(1) == 0)
+    if torch.any(missing):
+        missing_graphs = torch.where(missing)[0].tolist()
+        raise ValueError(
+            f"Missing adsorbate atoms in graph(s): {missing_graphs}. "
+            "Each graph must contain at least one adsorbate atom."
+        )
+
+    com = com / weight_sum
+    return com

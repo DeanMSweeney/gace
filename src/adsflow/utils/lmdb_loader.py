@@ -35,51 +35,14 @@ from fairchem.core.datasets._utils import rename_data_object_keys
 from fairchem.core.datasets.base_dataset import BaseDataset
 from fairchem.core.modules.transforms import DataTransforms
 
+from adsflow.utils.is2s_builders.pyg_converter import dict_to_pyg_data
+
 if TYPE_CHECKING:
     from pathlib import Path
     from torch_geometric.data.data import BaseData
 
 T_co = TypeVar("T_co", covariant=True)
 
-def dict_to_pyg_data(data_dict: dict) -> Data:
-    """
-    Convert a dictionary to a PyG Data object.
-
-    Core fields (pos, cell, atomic_numbers, natoms, fixed, tags, sid, fid) are
-    always required. Optional fields are added only if present in the dict,
-    so both new (raw-structure-only) and old (OC20-dense rich) LMDBs load cleanly.
-
-    Args:
-        data_dict: Dictionary with LMDB fields
-
-    Returns:
-        PyG Data object with all available fields as torch tensors
-    """
-    # --- Required core fields ---
-    kwargs = dict(
-        pos=torch.from_numpy(data_dict["pos"]),
-        cell=torch.from_numpy(data_dict["cell"]).unsqueeze(0),
-        atomic_numbers=torch.from_numpy(data_dict["atomic_numbers"]),
-        natoms=torch.tensor(data_dict["natoms"]),
-        fixed=torch.from_numpy(np.array(data_dict["fixed"])),
-        tags=torch.from_numpy(np.array(data_dict["tags"])),
-        sid=data_dict["sid"],
-        fid=torch.tensor(data_dict["fid"]),
-    )
-
-    # --- Optional fields: added only when present in the stored dict ---
-    _optional_numpy = ["pos_relaxed", "velocity"]
-    _optional_scalar = ["Fmax", "dE", "dSmax", "y_init", "y_relaxed"]
-
-    for field in _optional_numpy:
-        if field in data_dict:
-            kwargs[field] = torch.from_numpy(np.array(data_dict[field]))
-
-    for field in _optional_scalar:
-        if field in data_dict:
-            kwargs[field] = torch.tensor(data_dict[field])
-
-    return Data(**kwargs)
 
 @registry.register_dataset("lmdb")
 @registry.register_dataset("single_point_lmdb")
@@ -176,14 +139,20 @@ class LazyLmdbDataset(BaseDataset):
 
         # deserialize
         loaded_data = pickle.loads(raw)
-
+        
         # check if it's a dictionary (from lmdb_builder) and convert to PyG Data
         if isinstance(loaded_data, dict):
-            data = dict_to_pyg_data(loaded_data)
+            if "primitive_slab" in loaded_data:
+                # CatFlow sample: ASE MSONAtoms slab + separate adsorbate arrays
+                from adsflow.utils.catflow_builders.pyg_converter import catflow_dict_to_pyg_data
+                data = catflow_dict_to_pyg_data(loaded_data)
+            else:
+                # OC20-style sample: flat numpy arrays
+                data = dict_to_pyg_data(loaded_data)
         else:
             # already a PyG Data object, apply pyg2 transform
             data = pyg2_data_transform(loaded_data)
-
+        
         # user-postprocessing
         data = self.transforms(data)
         if self.key_mapping:
