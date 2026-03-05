@@ -26,7 +26,7 @@ import torch.nn as nn
 from pyexpat.model import XML_CQUANT_OPT
 
 from fairchem.core.common.registry import registry
-from adsflow.utils.graph import get_pbc_distances, radius_graph_pbc
+from adsflow.utils.graph.build_graph import get_pbc_distances, radius_graph_pbc
 from fairchem.core.common.utils import conditional_grad
 from fairchem.core.models.scn.sampling import CalcSpherePoints
 from fairchem.core.models.scn.smearing import (

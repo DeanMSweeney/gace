@@ -26,7 +26,7 @@ import torch.nn as nn
 from pyexpat.model import XML_CQUANT_OPT
 
 from fairchem.core.common.registry import registry
-from adsflow.utils.graph import get_pbc_distances, radius_graph_pbc
+from adsflow.utils.graphs.build_graph import get_pbc_distances, radius_graph_pbc
 from fairchem.core.common.utils import conditional_grad
 from fairchem.core.models.scn.sampling import CalcSpherePoints
 from fairchem.core.models.scn.smearing import (
@@ -257,13 +257,7 @@ class EquiformerV2(BaseModel):
         if self.energy_force_conditioning: 
             self.energy_emb = nn.Linear(1, self.sphere_channels)
             self.force_emb = nn.Linear(1, self.sphere_channels)
-        
-        # Displacement-from-initial embedding (scalar distance each atom has traveled from x0)
-        """
-        if self.remember_x0: 
-            self.disp_emb = nn.Linear(1, self.sphere_channels)
-        """
-            
+
         # Initialize the function used to measure the distances between atoms
         assert self.distance_function in [
             'gaussian',
@@ -461,13 +455,6 @@ class EquiformerV2(BaseModel):
 
         # Time embedding 
         time_embeds = self.time_emb(self.process_scalar_embeds(s=t, s_emb_freqs=self.time_emb_freqs))
-        
-        # Displacement embedding (precomputed in path() / sample())
-        """
-        if self.remember_x0:
-            disp_embeds = self.disp_emb(torch.log1p(data.disp))
-        """
-
         
         # enegry and force mebedding when necessayr 
         if self.energy_force_conditioning:
