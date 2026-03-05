@@ -106,8 +106,24 @@ def catflow_dict_to_pyg_data(d: dict) -> Data:
     n_slab = int(d["n_slab"])
     n_vac  = int(d["n_vac"])
 
+    # ── Combined pos + tags (OC20-style) ────────────────────────────────────
+    # Concatenate: primitive slab atoms first, adsorbate atoms second.
+    # Tags: 1 = slab atom, 2 = adsorbate atom  (matches OC20 convention)
+    pos_combined = torch.cat([prim_pos, ads_pos], dim=0)            # (N_slab + N_ads, 3)
+    atomic_numbers = torch.cat(
+        [prim_atomic_numbers, ads_atomic_numbers], dim=0
+    )                                                               # (N_slab + N_ads,)
+    tags = torch.cat([
+        torch.ones(prim_natoms, dtype=torch.long),                 # slab  → 1
+        torch.full((len(ads_atomic_numbers),), 2, dtype=torch.long),  # ads → 2
+    ], dim=0)                                                       # (N_slab + N_ads,)
+
     return Data(
-        # Slab
+        # Combined (primary fields used by EquiformerV2 / x_matching)
+        pos_combined=pos_combined,
+        atomic_numbers=atomic_numbers,
+        tags=tags,
+        # Slab (kept separate for CatFlow-specific flow matching)
         prim_pos=prim_pos,
         prim_cell=prim_cell,
         prim_atomic_numbers=prim_atomic_numbers,

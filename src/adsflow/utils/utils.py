@@ -136,3 +136,135 @@ def adsorbate_center_of_mass(
 
     com = com / weight_sum
     return com
+
+
+def tile_supercell(
+    pos: Tensor,
+    cell: Tensor,
+    M: Tensor,
+) -> Tuple[Tensor, Tensor]:
+    """
+    Tile primitive cell positions into a supercell — pure PyTorch, GPU-native.
+
+    Given N atoms in a primitive cell with lattice vectors `cell` (3×3),
+    generates the supercell defined by integer matrix M by enumerating all
+    fractional lattice translations inside the parallelepiped of M.
+
+    Args:
+        pos:   (N, 3) Cartesian positions of primitive cell atoms
+        cell:  (3, 3) primitive cell matrix (rows = lattice vectors)
+        M:     (3, 3) integer supercell matrix (will be rounded)
+
+    Returns:
+        tiled_pos:   (K*N, 3) Cartesian positions of all supercell atoms
+        super_cell:  (3, 3)   supercell lattice matrix = M @ cell
+    """
+    device = pos.device
+    dtype  = pos.dtype
+
+    M_int = torch.round(M).long()
+    M_float = M_int.float().to(device)
+
+    # Supercell lattice: L_super = M @ L_prim  (each row is a lattice vector)
+    super_cell = M_float @ cell                          # (3, 3)
+
+    # Find all integer lattice points inside the parallelepiped of M.
+    # A point n = (n1, n2, n3) is inside if M_inv @ n has all components in [0, 1).
+    M_inv = torch.linalg.inv(M_float)                    # (3, 3)
+
+    # Scan range: use |M| to bound the search space
+    abs_M = M_int.abs()
+    max_range = abs_M.sum(dim=0).max().item() + 1        # conservative bound
+
+    # Generate candidate integer grid
+    r = torch.arange(-max_range, max_range + 1, device=device)
+    grid = torch.stack(torch.meshgrid(r, r, r, indexing='ij'), dim=-1)  # (R, R, R, 3)
+    candidates = grid.reshape(-1, 3).float()             # (C, 3)
+
+    # Filter: keep points where M_inv @ n is in [0, 1) for all components
+    frac = candidates @ M_inv.T                          # (C, 3)
+    eps = 1e-6
+    inside = ((frac >= -eps) & (frac < 1.0 - eps)).all(dim=-1)  # (C,)
+    shifts_frac = candidates[inside]                     # (K, 3)
+
+    # Convert fractional shifts to Cartesian
+    shifts_cart = shifts_frac @ cell                      # (K, 3)
+
+    # Tile: each shift generates a copy of all N atoms
+    # tiled = pos[None, :, :] + shifts[:, None, :]
+    K = shifts_cart.shape[0]
+    N = pos.shape[0]
+    tiled_pos = pos.unsqueeze(0).expand(K, -1, -1) + shifts_cart.unsqueeze(1)  # (K, N, 3)
+    tiled_pos = tiled_pos.reshape(K * N, 3)              # (K*N, 3)
+
+    return tiled_pos, super_cell
+
+
+def build_slab_adsorbate(
+    prim_pos: Tensor,
+    prim_cell: Tensor,
+    supercell_matrix: Tensor,
+    ads_pos: Tensor,
+    prim_atomic_numbers: Tensor,
+    ads_atomic_numbers: Tensor,
+    vacuum: float = 15.0,
+) -> dict:
+    """
+    Build full slab + adsorbate structure from primitive cell data.
+    Pure PyTorch — stays on GPU, no pymatgen or CPU round-trip.
+
+    Pipeline:
+        1. Tile primitive cell using supercell matrix M
+        2. Add vacuum in z direction (fixed, not predicted)
+        3. Tile atomic numbers and build tags
+        4. Concatenate slab + adsorbate
+
+    Args:
+        prim_pos:             (N, 3)   Cartesian positions of primitive slab atoms
+        prim_cell:            (3, 3)   Primitive cell matrix
+        supercell_matrix:     (3, 3)   Supercell matrix (rounded to int internally)
+        ads_pos:              (M, 3)   Adsorbate atom positions
+        prim_atomic_numbers:  (N,)     Atomic numbers of primitive slab
+        ads_atomic_numbers:   (M,)     Atomic numbers of adsorbate
+        vacuum:               float    Vacuum thickness in Å (default 15.0)
+
+    Returns:
+        dict with:
+            pos:              (N_super + M, 3)
+            cell:             (3, 3) with vacuum
+            atomic_numbers:   (N_super + M,)
+            tags:             (N_super + M,)  1=slab, 2=adsorbate
+            natoms:           int
+    """
+    device = prim_pos.device
+
+    # 1. Tile primitive cell
+    slab_pos, super_cell = tile_supercell(prim_pos, prim_cell, supercell_matrix)
+    N_prim = prim_pos.shape[0]
+    K = slab_pos.shape[0] // N_prim   # number of tiling copies
+
+    # 2. Add vacuum in z
+    z_vec = super_cell[2]
+    z_height = z_vec.norm()
+    if z_height > 0:
+        scale = (z_height + vacuum) / z_height
+        super_cell = super_cell.clone()
+        super_cell[2] = z_vec * scale
+
+    # 3. Tile atomic numbers, build tags
+    slab_z = prim_atomic_numbers.repeat(K)                # (K*N,)
+    slab_tags = torch.ones(slab_pos.shape[0], dtype=torch.long, device=device)   # tag=1
+    ads_tags  = torch.full((ads_pos.shape[0],), 2, dtype=torch.long, device=device)  # tag=2
+
+    # 4. Concatenate
+    combined_pos  = torch.cat([slab_pos, ads_pos], dim=0)
+    combined_z    = torch.cat([slab_z, ads_atomic_numbers], dim=0)
+    combined_tags = torch.cat([slab_tags, ads_tags], dim=0)
+
+    return {
+        "pos": combined_pos,               # (N_super + M, 3)
+        "cell": super_cell,                # (3, 3)
+        "atomic_numbers": combined_z,      # (N_super + M,)
+        "tags": combined_tags,             # (N_super + M,)  1=slab, 2=adsorbate
+        "natoms": combined_pos.shape[0],   # int
+    }
