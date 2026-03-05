@@ -171,173 +171,281 @@ class XMatching():
         with torch.no_grad():
             data = input_graph.clone()
 
-            # x1 = final relaxed positions (target)
+            # ── Lattice and supercell (CatFlow data only) ────────────────────
+            if hasattr(data, "prim_cell"):
+                data = self._apply_lattice_flow(data)
+            elif hasattr(data, "supercell_matrix"):
+                data = self._apply_supercell_flow(data)
+            else:
+                raise ValueError("Data must have either 'prim_cell' and 'supercell_matrix'")
+
+            # ── Positions ────────────────────────────────────────────────────
+            data = self._apply_positions_flow(data, v_x)
+
+            if self.variant == "place":
+                return data
+
+            # ── Atomic numbers (forge only) ──────────────────────────────────
+            data = self._apply_atomic_num_flow(data, v_z)
+
+            return data
+
+        raise ValueError("Invalid model variant")
+
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Modular flow helpers — each takes a Data object and returns it updated.
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _apply_lattice_flow(self, data: Data) -> Data:
+        """
+        Flow-match the primitive cell matrix (3×3 Cartesian, Å).
+
+        x0  ~ N(0, I)  scaled to match the RMS magnitude of the true cell.
+        x1  = data.prim_cell  (true primitive cell, shape (3,3) or (B,3,3))
+        xt  = x0 + alpha_t * (x1 - x0)   (schedule-interpolated)
+        u_L = alpha_t_grad * (x1 - x0)   (rescaled target velocity)
+
+        The noisy cell `xt` is stored back as `data.prim_cell` so that
+        downstream graph construction uses it at the current flow time.
+        """
+        device = data.prim_cell.device
+        dtype  = torch.float32
+
+        L1 = data.prim_cell.float()                       # (..., 3, 3)
+
+        # Prior: zero-mean Gaussian scaled to RMS magnitude of a typical cell
+        L0 = torch.randn_like(L1) * L1.norm() / (3 * 3) ** 0.5
+
+        # Per-graph time sample — shape (1,) broadcasts over (3,3)
+        t_L = torch.rand(1, device=device, dtype=dtype)
+
+        alpha_t_L, alpha_t_L_grad, _ = self._interpolant_schedule(
+            t=t_L,
+            schedule_type=self.schedule_type,
+            x_matching="flow",
+        )
+
+        u_L    = L1 - L0
+        cell_t = L0 + alpha_t_L * u_L
+        u_L    = alpha_t_L_grad * u_L  # rescaled velocity
+
+        data.prim_cell        = cell_t
+        data.prim_cell_target = L1
+        data.u_L              = u_L
+        data.t_L              = t_L
+
+        return data
+
+    def _apply_supercell_flow(self, data: Data) -> Data:
+        """
+        Flow-match the supercell matrix M  (3×3, integer-valued targets).
+
+        x0  ~ I + 0.1·N(0,1)  (prior near-identity; supercells are usually close to I)
+        x1  = data.supercell_matrix  (true integer supercell matrix)
+        xt  = x0 + alpha_t * (x1 - x0)   (schedule-interpolated)
+        u_M = alpha_t_grad * (x1 - x0)   (rescaled target velocity)
+
+        Cosine regularisation `cosine_reg_M` encourages integer predictions:
+            reg = mean(1 - cos(2π * M_pred))   (minimised at integers)
+        Add lambda_M * data.cosine_reg_M to the total loss in criterion().
+        """
+        device = data.supercell_matrix.device
+        dtype  = torch.float32
+
+        M1 = data.supercell_matrix.float()                   # (..., 3, 3)
+
+        identity = torch.eye(3, device=device, dtype=dtype).expand_as(M1)
+        M0 = identity + 0.1 * torch.randn_like(M1)
+
+        t_M = torch.rand(1, device=device, dtype=dtype)
+
+        alpha_t_M, alpha_t_M_grad, _ = self._interpolant_schedule(
+            t=t_M,
+            schedule_type=self.schedule_type,
+            x_matching="flow",
+        )
+
+        u_M = M1 - M0
+        M_t = M0 + alpha_t_M * u_M
+        u_M = alpha_t_M_grad * u_M                  # rescaled velocity
+
+        # Cosine regularisation template (evaluated on model output in criterion)
+        cosine_reg_M = (1.0 - torch.cos(2 * torch.pi * M1)).mean()
+
+        data.supercell_matrix        = M_t
+        data.supercell_matrix_target = M1
+        data.u_M                     = u_M
+        data.t_M                     = t_M
+        data.cosine_reg_M            = cosine_reg_M
+        data.cell_target = data.cell 
+        data.cell = data.prim_cell @ data.supercell_matrix
+
+        return data
+
+    def _apply_positions_flow(self, data: Data, v_x: float = 1) -> Data:
+        """
+        Flow-match atomic positions for both 'place' and 'forge' variants.
+
+        place variant:
+            x0 = data.pos  (initial DFT structure)
+            x1 = data.pos_relaxed
+            Supervises only the adsorbate neighbourhood (ads_cutoff).
+
+        forge variant:
+            x0 = Gaussian noise for catalyst atoms, data.pos for adsorbate.
+            Hungarian alignment applied to catalyst atoms.
+            Supervises all non-frozen atoms.
+
+        Stores on data:
+            data.pos        ← noisy x_t  (model input)
+            data.pos_init   ← x0
+            data.t          ← per-atom interpolation time
+            data.u_x        ← target velocity (rescaled by schedule gradient)
+        """
+
+        if hasattr(data, "pos_relaxed"):
             x1 = data.pos_relaxed.float()
+        elif hasattr(data, "pos_prim"):
+            x1 = data.pos_combined.float() # combined primtive cell + adsorbate
+        else:
+            raise ValueError("Data must have 'pos_relaxed' or 'pos_prim' attribute")
 
-             # REFINE variant: refine from initial DFT positions to relaxed positions
-            if initial_dist == "fixed":
-                x0 = data.pos.float() # Initial (unrelaxed) positions
-                
-                if hasattr(data, "velocity"):
-                    u_x = data.velocity.float() # x1 - x0 
-                else:
-                    u_x = pbc_aware_delta(
-                        delta=x1 - x0,
-                        cell=data.cell.float(),
-                        batch=data.batch,
-                    )
+        if self.variant == "relax":
+            x0 = data.pos.float()
 
-                # Determine which atoms to supervise based on ads_cutoff
-                ads_cutoff = self.hparams.ads_cutoff
-                if ads_cutoff == 0:
-                    # Adsorbate atoms only
-                    ads_neighborhood_mask = (data.tags == 2)
-                elif ads_cutoff == float('inf'):
-                    # All non-frozen atoms
-                    ads_neighborhood_mask = (data.fixed == 0)
-                else:
-                    # Adsorbate + catalyst within cutoff
-                    ads_neighborhood_mask = adsorbate_neighborhood_mask(data, ads_cutoff)
-                
-                data.ads_neighborhood_mask = ads_neighborhood_mask  # store for criterion()
-                path_mask = ads_neighborhood_mask.float().unsqueeze(1)
-                u_x = path_mask * u_x 
-                    
-
-            elif initial_dist == "noisy":
-                adsorbate = (data.tags == 2)
-                catalyst = (data.tags != 2)
-
-                # x0 = initial positions (noise for catalyst, actual for adsorbate)
-                x0 = torch.randn_like(x1, dtype=torch.float32)
-                x0[adsorbate] = data.pos[adsorbate].float() # Use actual adsorbate positions
-
-                # Use Hungarian algorithm to optimally align catalyst atoms
-                # (finds permutation that minimizes distance to target)
-                x0[catalyst] = hungarian(
-                    set0=x0[catalyst],
-                    set1=x1[catalyst],
-                    cell=data.cell.float(),
-                    batch=data.batch,
-                )
-
-                delta_xyz = x1 - x0
+            if hasattr(data, "velocity"):
+                u_x = data.velocity.float()
+            else:
                 u_x = pbc_aware_delta(
-                    delta=delta_xyz,
+                    delta=x1 - x0,
                     cell=data.cell.float(),
                     batch=data.batch,
                 )
 
-            # Sample random interpolation time t for each graph in the batch
-            t_x_per_graph = torch.rand(len(data.natoms), 1, device=x1.device, dtype=torch.float32)
-            # Broadcast to atoms, clamp max to 0.999
-            t_x = t_x_per_graph[data.batch] * 0.999 if self.x_matching == "endpoint" else t_x_per_graph[data.batch]
-            # Compute interpolation schedule parameters
-            alpha_t_x, alpha_t_x_grad, self.alpha_t_x_factor = self._interpolant_schedule(
-                t=t_x,
-                schedule_type=self.schedule_type,
-                v=v_x,
-                x_matching=self.x_matching,
+            ads_cutoff = self.hparams.ads_cutoff
+            if ads_cutoff == 0:
+                ads_neighborhood_mask = (data.tags == 2)
+            elif ads_cutoff == float('inf'):
+                ads_neighborhood_mask = (data.fixed == 0)
+            else:
+                ads_neighborhood_mask = adsorbate_neighborhood_mask(data, ads_cutoff)
+
+            data.ads_neighborhood_mask = ads_neighborhood_mask
+            u_x = ads_neighborhood_mask.float().unsqueeze(1) * u_x
+
+        elif self.variant == "forge":
+            adsorbate = (data.tags == 2)
+            catalyst  = (data.tags != 2)
+
+            x0 = torch.randn_like(x1, dtype=torch.float32)
+            # Both slab and adsorbate start from Gaussian noise.
+            # Hungarian alignment applied to catalyst atoms only —
+            # adsorbate atoms have fixed chemical identity and must not be permuted.
+            x0[catalyst] = hungarian(
+                set0=x0[catalyst],
+                set1=x1[catalyst],
+                cell=data.cell.float(),
+                batch=data.batch,
             )
 
-            # Interpolate: xt = x0 + alpha_t * u_x(position at time t)
-            xt = x0 + alpha_t_x * u_x 
+            u_x = pbc_aware_delta(
+                delta=x1 - x0,
+                cell=data.cell.float(),
+                batch=data.batch,
+            )
+        else:
+            raise ValueError(f"Unknown variant '{self.variant}' in _apply_positions_flow")
 
-            # Rescale velocity for cosine schedule (to account for d(alpha_t)/dt)
-            u_x = alpha_t_x_grad * u_x # alpha_t' * (x1 - x0)         
+        # Sample per-graph interpolation time
+        t_per_graph = torch.rand(
+            len(data.natoms), 1, device=x1.device, dtype=torch.float32
+        )
+        t_x = t_per_graph[data.batch] * 0.999 if self.x_matching == "endpoint" \
+              else t_per_graph[data.batch]
 
-            # Store interpolated data
-            data.pos = xt  # Current position (what model sees as input)
-            data.pos_init = x0  # Initial position (for reference)
-            data.t = t_x  # Interpolation time
-            data.u_x = u_x
-            
-            if self.variant == "relax":
-                return data
+        alpha_t_x, alpha_t_x_grad, self.alpha_t_x_factor = self._interpolant_schedule(
+            t=t_x,
+            schedule_type=self.schedule_type,
+            v=v_x,
+            x_matching="flow",
+        )
 
-            elif self.variant == "forge":
-                """
-                Atomic number endpoint matching on the simplex (SimplexFlow).
+        xt  = x0 + alpha_t_x * u_x
+        u_x = alpha_t_x_grad * u_x          # rescaled velocity
 
-                Catalyst atom types are discrete labels, lifted onto the
-                probability simplex via one-hot encoding.  The model sees an
-                interpolated soft distribution zt_hot as input and predicts
-                the true element z1 directly (logits → softmax → simplex).
-                Loss: cross-entropy against the true label z1.
+        data.pos      = xt
+        data.pos_init = x0
+        data.t        = t_x
+        data.u_x      = u_x
 
-                This endpoint parameterization guarantees that generated
-                trajectories remain on the simplex by construction.
-                """
-                # Define adsorbate/catalyst masks (may not exist if initial_dist == "fixed")
-                adsorbate = (data.tags == 2)
-                catalyst  = (data.tags != 2)
+        return data
 
-                # --- Target: true atomic numbers ---
-                num_classes = 90  # matches max_num_elements in EquiformerV2
-                z1_raw = data.atomic_numbers.long()                           # (N,)
-                # Accept either chemical atomic numbers (1..K) or zero-based indices (0..K-1).
-                if z1_raw.min() >= 1 and z1_raw.max() <= num_classes:
-                    z1 = z1_raw - 1
-                elif z1_raw.min() >= 0 and z1_raw.max() < num_classes:
-                    z1 = z1_raw
-                else:
-                    raise ValueError(
-                        f"atomic_numbers out of range for num_classes={num_classes}: "
-                        f"[{int(z1_raw.min())}, {int(z1_raw.max())}]"
-                    )
-                z1_hot = F.one_hot(z1, num_classes=num_classes).float()        # (N, 90)
+    def _apply_atomic_num_flow(self, data: Data, v_z: float = 1) -> Data:
+        """
+        Simplex flow-matching for catalyst atom types (forge variant only).
 
-                # --- Initial: random one-hot noise for catalyst atoms ---
-                z0_hot = torch.zeros_like(z1_hot)                             # (N, 90)
-                z0_rand_int = torch.randint(
-                    low=0, high=num_classes,
-                    size=(z0_hot.size(0),), device=x1.device,
-                )
-                z0_hot[torch.arange(z0_hot.size(0), device=x1.device), z0_rand_int] = 1.0
+        z0 = random one-hot, Hungarian-aligned to z1 for permutation invariance.
+        z1 = true atomic numbers (one-hot).
+        zt = (1-t)*z0 + t*z1   (stays on simplex by convexity).
+        Adsorbate atom types are conditioned (fixed to their true value).
 
-                # Adsorbate atoms keep their true type (conditioning)
-                z0_hot[adsorbate] = z1_hot[adsorbate]
+        Stores on data:
+            data.atomic_numbers_noisy  ← argmax(zt)  (integer, for embedding)
+            data.atomic_numbers        ← same as above (replaces clean labels)
+            data.atomic_numbers_true   ← z1 indices (cross-entropy target)
+            data.atomic_numbers_hot    ← zt  (soft distribution for soft embedding)
+            data.t_z                   ← per-atom interpolation time
+        """
+        adsorbate = (data.tags == 2)
+        catalyst  = (data.tags != 2)
+        device    = data.pos.device
 
-                # Hungarian matching for permutation invariance over catalyst atoms
-                z0_hot[catalyst] = hungarian(
-                    set0=z0_hot[catalyst],
-                    set1=z1_hot[catalyst],
-                    batch=data.batch[catalyst],
-                )
+        num_classes = 90  # matches max_num_elements in EquiformerV2
+        z1_raw = data.atomic_numbers.long()
+        if z1_raw.min() >= 1 and z1_raw.max() <= num_classes:
+            z1 = z1_raw - 1          # shift chemical numbers to 0-based
+        elif z1_raw.min() >= 0 and z1_raw.max() < num_classes:
+            z1 = z1_raw
+        else:
+            raise ValueError(
+                f"atomic_numbers out of range: [{int(z1_raw.min())}, {int(z1_raw.max())}]"
+            )
 
-                # --- Sample interpolation time (independent of position time) ---
-                t_z_per_graph = torch.rand(
-                    len(data.natoms), 1, device=x1.device, dtype=torch.float32,
-                )
-                t_z = t_z_per_graph[data.batch] * 0.999
+        z1_hot = F.one_hot(z1, num_classes=num_classes).float()      # (N, 90)
 
-                # Compute interpolation schedule
-                alpha_t_z, _, _= self._interpolant_schedule(
-                    t=t_z,
-                    schedule_type=self.schedule_type,
-                    v=v_z,
-                    x_matching=self.x_matching,
-                )
+        # Prior: random one-hot per atom
+        z0_hot = torch.zeros_like(z1_hot)
+        rand_idx = torch.randint(0, num_classes, (z0_hot.size(0),), device=device)
+        z0_hot[torch.arange(z0_hot.size(0), device=device), rand_idx] = 1.0
 
-                # Interpolated soft distribution at time t (stays on the simplex)
-                zt_hot = (1 - alpha_t_z) * z0_hot + alpha_t_z * z1_hot       # (N, 90)
+        # Adsorbate types are conditioned — fix to ground truth
+        z0_hot[adsorbate] = z1_hot[adsorbate]
 
-                # Keep noisy hard labels for modules that still require integer indexing.
-                data.atomic_numbers_noisy = zt_hot.argmax(dim=-1).long()      # (N,) noisy element
-                data.atomic_numbers = data.atomic_numbers_noisy
-                data.atomic_numbers_true = z1                                 # (N,) true labels (for CE loss)
-                data.atomic_numbers_hot  = zt_hot                             # soft distribution (for soft embedding)
-                data.t_z = t_z
+        # Hungarian alignment over catalyst for permutation invariance
+        z0_hot[catalyst] = hungarian(
+            set0=z0_hot[catalyst],
+            set1=z1_hot[catalyst],
+            batch=data.batch[catalyst],
+        )
 
-                """
-                Unit cell flow matching — TODO
-                """
+        t_z_per_graph = torch.rand(len(data.natoms), 1, device=device, dtype=torch.float32)
+        t_z = t_z_per_graph[data.batch] * 0.999
 
-                return data
-  
-            else:
-                raise ValueError("Invalid model variant")
+        alpha_t_z, _, _ = self._interpolant_schedule(
+            t=t_z,
+            schedule_type=self.schedule_type,
+            x_matching="endpoint",
+        )
 
+        zt_hot = (1 - alpha_t_z) * z0_hot + alpha_t_z * z1_hot      # (N, 90)
+
+        data.atomic_numbers_hot   = zt_hot
+        data.atomic_numbers       = zt_hot.argmax(dim=-1).long()
+        data.atomic_numbers_true  = z1
+        data.t_z                  = t_z
+        
+        return data
 
     def sample(
             self,
