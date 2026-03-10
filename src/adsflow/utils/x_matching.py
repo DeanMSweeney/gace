@@ -174,10 +174,10 @@ class XMatching():
             # ── Lattice and supercell (CatFlow data only) ────────────────────
             if hasattr(data, "prim_cell"):
                 data = self._apply_lattice_flow(data)
-            elif hasattr(data, "supercell_matrix"):
-                data = self._apply_supercell_flow(data)
+            elif hasattr(data, "transformation_matrix"):
+                data = self._apply_transformation_matrix_flow(data)
             else:
-                raise ValueError("Data must have either 'prim_cell' and 'supercell_matrix'")
+                raise ValueError("Data must have either 'prim_cell' and 'transformation_matrix'")
 
             # ── Positions ────────────────────────────────────────────────────
             data = self._apply_positions_flow(data, v_x)
@@ -208,7 +208,7 @@ class XMatching():
 
         The noisy cell `xt` is stored back as `data.prim_cell` so that
         downstream graph construction uses it at the current flow time.
-        """
+        
         device = data.prim_cell.device
         dtype  = torch.float32
 
@@ -234,10 +234,51 @@ class XMatching():
         data.prim_cell_target = L1
         data.u_L              = u_L
         data.t_L              = t_L
+        """
+
+        # sample edge lenghts and interaxial angles from true and noisy distribution
+        len1 = data.lengths_scaled.float()
+        ang1 = data.angles_radians.float()
+
+        len0 = torch.randn_like(len1) 
+        ang0 = torch.randn_like(ang1) 
+
+        t_l = torch.rand(1, device=device, dtype=dtype)
+
+        alpha_t_l, alpha_t_l_grad, _ = self._interpolant_schedule(
+            t=t_l,
+            schedule_type=self.schedule_type,
+            x_matching=self.x_matching,
+        )
+
+        t_a = torch.rand(1, device=device, dtype=dtype)
+
+        alpha_t_a, alpha_t_a_grad, _ = self._interpolant_schedule(
+            t=t_a,
+            schedule_type=self.schedule_type,
+            x_matching=self.x_matching,
+        )
+
+        len_t = len0 + alpha_t_l * (len1 - len0)
+        ang_t = ang0 + alpha_t_a * (ang1 - ang0)
+
+        u_len = alpha_t_l_grad * (len1 - len0)
+        u_ang = alpha_t_a_grad * (ang1 - ang0)
+
+        data.lengths_scaled = len_t
+        data.angles_radians = ang_t
+        data.lengths_scaled_target = len1
+        data.angles_radians_target = ang1
+        data.t_len = t_l
+        data.t_ang = t_a
+
+        if self.x_matching == "flow":
+            data.u_len = u_len
+            data.u_ang = u_ang
 
         return data
 
-    def _apply_supercell_flow(self, data: Data) -> Data:
+    def _apply_transformation_matrix_flow(self, data: Data) -> Data:
         """
         Flow-match the supercell matrix M  (3×3, integer-valued targets).
 
@@ -273,13 +314,11 @@ class XMatching():
         # Cosine regularisation template (evaluated on model output in criterion)
         cosine_reg_M = (1.0 - torch.cos(2 * torch.pi * M1)).mean()
 
-        data.supercell_matrix        = M_t
-        data.supercell_matrix_target = M1
+        data.transformation_matrix        = M_t
+        data.transformation_matrix_target = M1
         data.u_M                     = u_M
         data.t_M                     = t_M
         data.cosine_reg_M            = cosine_reg_M
-        data.cell_target = data.cell 
-        data.cell = data.prim_cell @ data.supercell_matrix
 
         return data
 
@@ -381,6 +420,22 @@ class XMatching():
 
         return data
 
+    def _apply_ads_com_flow(self, data: Data, v_x: float = 1) -> Data:
+        """
+        Flow-match adsorbate positions (forge variant only).
+
+        x0 = random noise, Hungarian-aligned to x1 for permutation invariance.
+        x1 = true adsorbate positions.
+        xt = (1-t)*x0 + t*x1   (stays on simplex by convexity).
+        Adsorbate atom types are conditioned (fixed to their true value).
+
+        Stores on data:
+            data.pos_noisy  ← argmax(xt)  (integer, for embedding)
+            data.pos        ← same as above (replaces clean labels)
+        """
+        
+        return self._apply_positions_flow(data, v_x)
+
     def _apply_atomic_num_flow(self, data: Data, v_z: float = 1) -> Data:
         """
         Simplex flow-matching for catalyst atom types (forge variant only).
@@ -397,6 +452,7 @@ class XMatching():
             data.atomic_numbers_hot    ← zt  (soft distribution for soft embedding)
             data.t_z                   ← per-atom interpolation time
         """
+        
         adsorbate = (data.tags == 2)
         catalyst  = (data.tags != 2)
         device    = data.pos.device
