@@ -36,6 +36,7 @@ from fairchem.core.datasets.base_dataset import BaseDataset
 from fairchem.core.modules.transforms import DataTransforms
 
 from adsflow.utils.is2s_builders.pyg_converter import dict_to_pyg_data
+from adsflow.utils.catflow_builders.pyg_converter import catflow_dict_to_pyg_data
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -143,8 +144,6 @@ class LazyLmdbDataset(BaseDataset):
         # check if it's a dictionary (from lmdb_builder) and convert to PyG Data
         if isinstance(loaded_data, dict):
             if "primitive_slab" in loaded_data:
-                # CatFlow sample: ASE MSONAtoms slab + separate adsorbate arrays
-                from adsflow.utils.catflow_builders.pyg_converter import catflow_dict_to_pyg_data
                 data = catflow_dict_to_pyg_data(loaded_data)
             else:
                 # OC20-style sample: flat numpy arrays
