@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from .architectures.transformer.common import ChargeSpinEmbedding, SwiGLU
+from .architectures.transformer.common import SwiGLU
 from .architectures.transformer.positional_encoder import (
     SinusoidEncoding,
     TimeFourierEncoding,
@@ -290,21 +290,6 @@ class TransformerModule(nn.Module):
                 self.global_energy_cross_attention = decoder_layer()
                 if self.separate_energy_force_transformers:
                     self.atomic_forces_cross_attention = decoder_layer()
-
-            self.global_energy_charge_proj = ChargeSpinEmbedding(
-                embedding_type="pos_emb",
-                embedding_target="charge",
-                embedding_size=hidden_dim,
-                grad=True,
-                scale=1.0,
-            )
-            self.global_energy_spin_proj = ChargeSpinEmbedding(
-                embedding_type="pos_emb",
-                embedding_target="spin",
-                embedding_size=hidden_dim,
-                grad=True,
-                scale=1.0,
-            )
 
             self.global_energy_transformer = transformer_class(
                 dim=aux_mlip_hidden_dim,
@@ -714,18 +699,12 @@ class TransformerModule(nn.Module):
                     else h_global_energy
                 )
 
-            ce = self.global_energy_charge_proj(feats["charge"])
-            se = self.global_energy_spin_proj(feats["spin"])
-            cse = ce.unsqueeze(-2) + se.unsqueeze(-2)  # (B, 1, C)
-            h_global_energy = h_global_energy + cse
-
             h_global_energy = self.global_energy_transformer(
                 self.global_energy_proj(h_global_energy),
                 padding_mask=padding_mask,
                 **attention_kwargs,
             )
             if self.separate_energy_force_transformers:
-                h_atomic_forces = h_atomic_forces + cse
                 h_atomic_forces = self.atomic_forces_transformer(
                     self.atomic_forces_proj(h_atomic_forces),
                     padding_mask=padding_mask,

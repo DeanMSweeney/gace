@@ -25,8 +25,7 @@ It takes padded multimodal atom tokens plus conditioning, runs transformer atten
   - `angles_radians`: `(B, 1, 3)`
 - `t` as one scalar per modality per sample: `(B,)` for each modality
 - `feats` with at least:
-  - `dataset_idx`, `spacegroup`, `token_is_periodic`
-  - `charge`, `spin` if energy/force aux heads are active
+  - `dataset_idx`, `spacegroup`
 - `padding_mask`: `(B, M)` with `True` for padded tokens
 
 ## `__init__` Structure
