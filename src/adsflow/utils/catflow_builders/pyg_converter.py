@@ -119,6 +119,8 @@ def catflow_dict_to_pyg_data(d: dict) -> Data:
     ], dim=0)                                                       # (N_slab + N_ads,)
 
     return Data(
+        # Explicitly set num_nodes so PyG batching uses the combined count
+        num_nodes=len(pos_combined),
         # Combined (primary fields used by EquiformerV2 / x_matching)
         pos_combined=pos_combined,
         atomic_numbers=atomic_numbers,
