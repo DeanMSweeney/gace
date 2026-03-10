@@ -33,14 +33,10 @@ class PyGToTensorDict:
         num_atom_types: int = 100,
         default_dataset_idx: int = 1,
         default_spacegroup: int = 0,
-        default_charge: float = 0.0,
-        default_spin: int = 0,
     ) -> None:
         self.num_atom_types = num_atom_types
         self.default_dataset_idx = default_dataset_idx
         self.default_spacegroup = default_spacegroup
-        self.default_charge = default_charge
-        self.default_spin = default_spin
 
     # ── public entry point ───────────────────────────────────────────────────
 
@@ -137,7 +133,6 @@ class PyGToTensorDict:
             structure_dict=x_prim.data,
             batch_size=batch_size,
             device=device,
-            is_periodic=True,
         )
 
         f_ads = self._build_feats_dict(
@@ -146,7 +141,6 @@ class PyGToTensorDict:
             structure_dict=x_ads.data,
             batch_size=batch_size,
             device=device,
-            is_periodic=False,
         )
 
         return x_prim, x_ads, t_prim, t_ads, f_prim, f_ads
@@ -194,7 +188,7 @@ class PyGToTensorDict:
         else:
             # Node-level: fractional coordinates
             sd["frac_coords"], _ = to_dense_batch(
-                data.pos[atom_mask],
+                data.frac_coords[atom_mask],
                 atom_batch,
                 max_num_nodes=max_num_nodes,
             )
@@ -240,7 +234,7 @@ class PyGToTensorDict:
                 td["t_ads_center"] = data.t_ads_center.unsqueeze(1)  # (B, 1)
         else:
             # Graph-level lattice times (prim only)
-            for key in ["t_Lengths", "t_angles", "t_transformation_matrix"]:
+            for key in ["t_len", "t_ang", "t_transformation_matrix"]:
                 if hasattr(data, key):
                     td[key] = getattr(data, key).unsqueeze(1)  # (B, 1, …)
 
@@ -253,40 +247,15 @@ class PyGToTensorDict:
         structure_dict: TensorDict,
         batch_size: int,
         device: torch.device,
-        is_periodic: bool,
     ) -> TensorDictBatch:
         """Build a dense feats TensorDict for one group of atoms."""
         fd = TensorDict({}, batch_size=[batch_size], device=device)
 
-        num_tokens = structure_dict["atomic_numbers_hot"].size(1)  # padded seq len
-        atom_to_token_idx = torch.arange(num_tokens, device=device).expand(batch_size, -1)
-        atom_to_token = F.one_hot(atom_to_token_idx, num_classes=num_tokens).to(torch.float32)
-        max_num_tokens = mask.sum(dim=1).to(torch.long)
-        padding_mask = ~mask
-
-        fd["token_is_periodic"] = torch.full(
-            (batch_size, num_tokens), is_periodic, device=device, dtype=torch.bool,
-        )
         fd["dataset_idx"] = torch.full(
             (batch_size,), self.default_dataset_idx, device=device, dtype=torch.long,
         )
         fd["spacegroup"] = torch.full(
             (batch_size,), self.default_spacegroup, device=device, dtype=torch.long,
         )
-        fd["charge"] = torch.full(
-            (batch_size,), self.default_charge, device=device, dtype=torch.float32,
-        )
-        fd["spin"] = torch.full(
-            (batch_size,), self.default_spin, device=device, dtype=torch.long,
-        )
-        fd["ref_pos"] = torch.zeros_like(
-            structure_dict["atom_pos"], dtype=torch.float32,
-        )
-        fd["ref_space_uid"] = atom_to_token_idx
-        fd["atom_to_token"] = atom_to_token
-        fd["atom_to_token_idx"] = atom_to_token_idx
-        fd["token_index"] = atom_to_token_idx
-        fd["max_num_tokens"] = max_num_tokens
-        fd["padding_mask"] = padding_mask
 
         return TensorDictBatch(data=fd, mask=mask, batch_index=batch_index)

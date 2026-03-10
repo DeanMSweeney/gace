@@ -27,6 +27,9 @@ Emitted Data fields
     prim_cell           : (1, 3, 3)   float32 unit cell
     prim_atomic_numbers : (N_slab,)   int64
     prim_natoms         : scalar int
+    frac_coords         : (N_slab, 3)  float32 fractional coordinates
+    lengths             : (3,)         float32 lattice edge lengths (a, b, c)
+    angles_radians      : (3,)         float32 interaxial angles in radians (alpha, beta, gamma)
     ads_pos             : (N_ads, 3)  float32 Cartesian positions
     ads_atomic_numbers  : (N_ads,)    int64
     ref_energy          : scalar float
@@ -43,6 +46,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 from torch_geometric.data import Data
+from adsflow.utils.utils import adsorbate_center_of_mass
 
 
 def catflow_dict_to_pyg_data(d: dict) -> Data:
@@ -77,6 +81,41 @@ def catflow_dict_to_pyg_data(d: dict) -> Data:
     )  # (N_slab,)
 
     prim_natoms = len(slab)  # scalar int
+
+    # ── Fractional coordinates ───────────────────────────────────────────────
+    # Compute fractional coordinates: solve cell.T @ frac = pos for frac
+    # Broadcast prim_cell from (1, 3, 3) to (N_slab, 3, 3)
+    cell_broadcasted = prim_cell.expand(prim_natoms, -1, -1)  # (N_slab, 3, 3)
+    frac_coords = torch.linalg.solve(
+        cell_broadcasted.transpose(1, 2), prim_pos.unsqueeze(-1)
+    ).squeeze(-1)  # (N_slab, 3)
+
+    # ── Lattice parameters (lengths and angles) ──────────────────────────────
+    # Extract lattice vectors from cell matrix
+    # prim_cell is (1, 3, 3) where each row is a lattice vector
+    cell_matrix = prim_cell.squeeze(0)  # (3, 3)
+    a_vec = cell_matrix[0, :]  # (3,)
+    b_vec = cell_matrix[1, :]  # (3,)
+    c_vec = cell_matrix[2, :]  # (3,)
+
+    # Compute edge lengths
+    a = torch.linalg.norm(a_vec)  # scalar
+    b = torch.linalg.norm(b_vec)  # scalar
+    c = torch.linalg.norm(c_vec)  # scalar
+    lengths = torch.stack([a, b, c])  # (3,)
+
+    # Compute interaxial angles (in radians)
+    # alpha = angle between b and c
+    # beta  = angle between a and c
+    # gamma = angle between a and b
+    cos_alpha = torch.dot(b_vec, c_vec) / (b * c)
+    cos_beta = torch.dot(a_vec, c_vec) / (a * c)
+    cos_gamma = torch.dot(a_vec, b_vec) / (a * b)
+
+    alpha = torch.acos(torch.clamp(cos_alpha, -1.0, 1.0))  # scalar, radians
+    beta = torch.acos(torch.clamp(cos_beta, -1.0, 1.0))    # scalar, radians
+    gamma = torch.acos(torch.clamp(cos_gamma, -1.0, 1.0))  # scalar, radians
+    angles_radians = torch.stack([alpha, beta, gamma])  # (3,)
 
     # ── Adsorbate fields (ads_*) ─────────────────────────────────────────────
     ads_pos = torch.from_numpy(
@@ -130,6 +169,9 @@ def catflow_dict_to_pyg_data(d: dict) -> Data:
         prim_cell=prim_cell,
         prim_atomic_numbers=prim_atomic_numbers,
         prim_natoms=prim_natoms,
+        frac_coords=frac_coords,
+        lengths_scaled=lengths,
+        angles_radians=angles_radians,
         # Adsorbate
         ads_pos=ads_pos,
         ads_atomic_numbers=ads_atomic_numbers,
