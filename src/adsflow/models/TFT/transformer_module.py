@@ -104,7 +104,8 @@ class TransformerModule(nn.Module):
 
         self.input_dim = spatial_dim + atom_dim
         self.time_dim = 1
-        self.cond_dim = 7
+        self.prim_cond_dim = 8  # atom_types, frac_coords, lengths, angles, T_matrix, supercell_lattice, posenc, conditions
+        self.ads_cond_dim = 5   # ads_atom_types, ads_center, ads_rel_pos, posenc, conditions
         self.comb_input_dim = self.input_dim + self.time_dim
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
@@ -125,12 +126,18 @@ class TransformerModule(nn.Module):
         self.dataset_embedder = dataset_embedder
         self.spacegroup_embedder = spacegroup_embedder
 
-        # Embeddings for each modality
+        # Embeddings for each the primitive cell
         self.atom_type_embed = nn.Embedding(atom_dim, hidden_dim)
-        self.pos_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
         self.frac_coords_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
         self.lengths_scaled_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
         self.angles_radians_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
+        self.transformation_matrix_embed = nn.Linear(9, hidden_dim, bias=False) # matrix is 3 x 3 = 9 total values
+        self.supercell_lattice_embed = nn.Linear(9, hidden_dim, bias=False)      # S @ L, also 3 x 3 = 9
+
+        # Embeddings for the adsorbate 
+        self.ads_atom_type = nn.Embedding(atom_dim, hidden_dim)
+        self.ads_center_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)   # COM (B, 1, 3) → (B, 1, C)
+        self.ads_rel_pos_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)  # rel pos (B, N, 3) → (B, N, C)
 
         if self.add_sinusoid_posenc:
             self.positional_encoding = SinusoidEncoding(
@@ -138,7 +145,8 @@ class TransformerModule(nn.Module):
             )
 
         if self.concat_combine_input:
-            self.combine_input = nn.Linear(self.cond_dim * hidden_dim, hidden_dim)
+            self.combine_input_prim = nn.Linear(self.prim_cond_dim * hidden_dim, hidden_dim)
+            self.combine_input_ads = nn.Linear(self.ads_cond_dim * hidden_dim, hidden_dim)
 
         self.time_encoding = TimeFourierEncoding(posenc_dim=hidden_dim, max_len=200)
 
@@ -178,16 +186,11 @@ class TransformerModule(nn.Module):
         else:
             raise ValueError(f"Invalid implementation: {self.implementation}")
         
-        # Output heads for each modality
+        # ── Prim output heads ────────────────────────────────────────────────
         self.out_atom_types = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.SiLU(inplace=False),
             nn.Linear(hidden_dim, atom_dim),
-        )
-        self.out_pos = nn.Sequential(
-            # TODO: Maybe replace LayerNorm with RMSNorm
-            nn.LayerNorm(hidden_dim),
-            nn.Linear(hidden_dim, spatial_dim, bias=False),
         )
         self.out_frac_coords = nn.Sequential(
             nn.LayerNorm(hidden_dim),
@@ -201,8 +204,27 @@ class TransformerModule(nn.Module):
             nn.LayerNorm(hidden_dim),
             nn.Linear(hidden_dim, spatial_dim, bias=False),
         )
+        self.out_transformation_matrix = nn.Sequential(
+            nn.LayerNorm(hidden_dim),
+            nn.Linear(hidden_dim, 9, bias=False),
+        )
 
-        # Add cross attention layers
+        # ── Ads output heads ─────────────────────────────────────────────────
+        self.out_ads_atom_types = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.SiLU(inplace=False),
+            nn.Linear(hidden_dim, atom_dim),
+        )
+        self.out_ads_center = nn.Sequential(
+            nn.LayerNorm(hidden_dim),
+            nn.Linear(hidden_dim, spatial_dim, bias=False),
+        )
+        self.out_ads_rel_pos = nn.Sequential(
+            nn.LayerNorm(hidden_dim),
+            nn.Linear(hidden_dim, spatial_dim, bias=False),
+        )
+
+        # ── Cross attention layers ───────────────────────────────────────────
         if self.cross_attention:
             decoder_layer = partial(
                 nn.TransformerDecoderLayer,
@@ -224,11 +246,17 @@ class TransformerModule(nn.Module):
                     jvp_attn=jvp_attn,
                 )
 
+            # Prim cross-attention
             self.atom_types_cross_attention = decoder_layer()
-            self.pos_cross_attention = decoder_layer()
             self.frac_coords_cross_attention = decoder_layer()
             self.lengths_scaled_cross_attention = decoder_layer()
             self.angles_radians_cross_attention = decoder_layer()
+            self.transformation_matrix_cross_attention = decoder_layer()
+
+            # Ads cross-attention
+            self.ads_atom_types_cross_attention = decoder_layer()
+            self.ads_center_cross_attention = decoder_layer()
+            self.ads_rel_pos_cross_attention = decoder_layer()
 
         # Add auxiliary task heads
         self.global_property_proj = (
@@ -329,235 +357,323 @@ class TransformerModule(nn.Module):
     @typecheck
     def forward(
         self,
-        x: (
+        x_prim: (
             Tuple[
                 Int["b m v"],  # type: ignore - atom_types
-                Float["b m 3"],  # type: ignore - pos
                 Float["b m 3"],  # type: ignore - frac_coords
                 Float["b 1 3"],  # type: ignore - lengths_scaled
                 Float["b 1 3"],  # type: ignore - angles_radians
+                Float["b 3 3"],  # type: ignore - transformation_matrix
+                Float["b 3 3"],  # type: ignore - supercell_lattice (S @ L)
             ]
             | List[torch.Tensor]
         ),
-        t: (
+        x_ads: (
+            Tuple[
+                Int["b n v"],  # type: ignore - ads_atom_types
+                Float["b 1 3"],  # type: ignore - ads_center (COM)
+                Float["b n 3"],  # type: ignore - ads_rel_pos
+            ]
+            | List[torch.Tensor]
+        ),
+        t_prim: (
             Tuple[
                 Float[" b"],  # type: ignore - atom_types_t
-                Float[" b"],  # type: ignore - pos_t
                 Float[" b"],  # type: ignore - frac_coords_t
                 Float[" b"],  # type: ignore - lengths_scaled_t
                 Float[" b"],  # type: ignore - angles_radians_t
             ]
-            | List[torch.Tensor | Tuple[torch.Tensor, torch.Tensor]]
+            | List[torch.Tensor]
+        ),
+        t_ads: (
+            Tuple[
+                Float[" b"],  # type: ignore - ads_atom_types_t
+                Float[" b"],  # type: ignore - ads_center_t
+                Float[" b"],  # type: ignore - ads_rel_pos_t
+            ]
+            | List[torch.Tensor]
         ),
         feats: Dict[str, Tensor],
-        padding_mask: Bool["b m"],  # type: ignore
+        prim_padding_mask: Bool["b m"],  # type: ignore
+        ads_padding_mask: Bool["b n"],  # type: ignore
         **kwargs: Any,
     ) -> Tuple[
         Tuple[
             Float["b m v"],  # type: ignore - atom_types
-            Float["b m 3"],  # type: ignore - pos
             Float["b m 3"],  # type: ignore - frac_coords
             Float["b 1 3"],  # type: ignore - lengths_scaled
             Float["b 1 3"],  # type: ignore - angles_radians
+            Float["b 1 3"],  # type: ignore - transformation_matrix
+        ],
+        Tuple[
+            Float["b n v"],  # type: ignore - ads_atom_types
+            Float["b n 3"],  # type: ignore - ads_pos
         ],
         Tuple[
             Float["b 1 p"],  # type: ignore - global_property
             Float["b 1 1"],  # type: ignore - global_energy
-            Float["b m 3"],  # type: ignore - atomic_forces
+            Float["b s 3"],  # type: ignore - atomic_forces (s = m + n)
         ],
     ]:
         """Forward pass of the module.
 
+        Primitive-cell and adsorbate atoms are embedded as **separate sequences**,
+        concatenated along the token dimension for the shared transformer trunk,
+        then split back for modality-specific cross-attention and output heads.
+
         Args:
-            x: Tuple or list of input tensors for each modality:
-                atom_types: Atom types tensor (B, M, V), where V is the number of atom types.
-                pos: Atom positions tensor (B, M, 3).
-                frac_coords: Fractional coordinates tensor (B, M, 3).
-                lengths_scaled: Scaled lengths tensor (B, 1, 3).
-                angles_radians: Angles in radians tensor (B, 1, 3).
-            t: Tuple or list of time tensors for each modality:
-                atom_types_t: Time t for atom types (B,).
-                pos_t: Time t for positions (B,).
-                frac_coords_t: Time t for fractional coordinates (B,).
-                lengths_scaled_t: Time t for lengths (B,).
-                angles_radians_t: Time t for angles (B,).
-            feats: Features for conditioning including:
-                dataset_idx: Dataset index for each sample.
-                spacegroup: Spacegroup index for each sample.
-                token_is_periodic: Whether each token corresponds to a periodic sample (B, M).
-            padding_mask: True if padding token, False otherwise (B, M).
-            kwargs: Any additional keyword arguments.
+            x_prim: Prim modalities (atom_types, frac_coords, lengths, angles, T-matrix).
+            x_ads: Ads modalities (ads_atom_types, ads_pos).
+            t_prim: Per-modality flow times for prim (atom_types_t, frac_coords_t,
+                lengths_t, angles_t).
+            t_ads: Per-modality flow times for ads (ads_atom_types_t, ads_pos_t).
+            feats: Graph-level conditioning features.
+            prim_padding_mask: True = padding for prim tokens (B, M).
+            ads_padding_mask: True = padding for ads tokens (B, N).
 
         Returns:
-            A tuple containing output velocity fields for each modality as an inner tuple
-            and auxiliary task outputs as another inner tuple.
+            ``(pred_prim, pred_ads, pred_aux)``
         """
-        atom_types, pos, frac_coords, lengths_scaled, angles_radians = x
-        atom_types_t, pos_t, frac_coords_t, lengths_scaled_t, angles_radians_t = t
+        # primitive cell data at time t 
+        atom_types, frac_coords, lengths_scaled, angles_radians, transformation_matrix, supercell_lattice = x_prim
+        atom_types_t, frac_coords_t, lengths_scaled_t, angles_radians_t = t_prim
 
-        device = padding_mask.device
-        batch_size, seq_len = padding_mask.shape
+
+        # adsorbate data at time t
+        ads_atom_types, ads_center, ads_rel_pos = x_ads
+        ads_atom_types_t, ads_center_t, ads_rel_pos_t = t_ads
+
+        device = prim_padding_mask.device
+        batch_size, prim_seq_len = prim_padding_mask.shape
+        _, ads_seq_len = ads_padding_mask.shape
+        total_seq_len = prim_seq_len + ads_seq_len
 
         dataset_idx = feats["dataset_idx"]
         spacegroup = feats["spacegroup"]
 
-        token_is_periodic = feats["token_is_periodic"].unsqueeze(-1)
-        sample_is_periodic = token_is_periodic.any(-2, keepdim=True)
+        # ── Prim real-token mask ─────────────────────────────────────────────
+        prim_real_mask = 1 - prim_padding_mask.int()  # (B, M)
+        ads_real_mask = 1 - ads_padding_mask.int()     # (B, N)
+        combined_real_mask = torch.cat([prim_real_mask, ads_real_mask], dim=1)  # (B, M+N)
+        global_mask = combined_real_mask.any(-1, keepdim=True).unsqueeze(-1)  # (B, 1, 1)
 
-        # Ensure atom positions are masked out for periodic samples and the
-        # remaining continuous modalities are masked out for non-periodic samples
-        frac_coords = frac_coords * token_is_periodic
-        lengths_scaled = lengths_scaled * sample_is_periodic
-        angles_radians = angles_radians * sample_is_periodic
-        # Optionally mask Euclidean coordinates for materials
-        if self.mask_material_coords:
-            pos = pos * ~token_is_periodic
+        # ── Prim embeddings ──────────────────────────────────────────────────
+        embed_atom_types = self.atom_type_embed(atom_types.argmax(dim=-1))  # (B, M, C)
+        embed_frac_coords = self.frac_coords_embed(frac_coords)            # (B, M, C)
+        embed_lengths_scaled = self.lengths_scaled_embed(lengths_scaled)    # (B, 1, C)
+        embed_angles_radians = self.angles_radians_embed(angles_radians)    # (B, 1, C)
+        # transformation_matrix: (B, 3, 3) → flatten to (B, 9) → embed → (B, C) → unsqueeze → (B, 1, C)
+        embed_transformation_matrix = self.transformation_matrix_embed(
+            transformation_matrix.reshape(batch_size, 9)
+        ).unsqueeze(1)  # (B, 1, C)
+        # supercell_lattice: S @ L, same approach
+        embed_supercell_lattice = self.supercell_lattice_embed(
+            supercell_lattice.reshape(batch_size, 9)
+        ).unsqueeze(1)  # (B, 1, C)
 
-        real_mask = 1 - padding_mask.int()
-        global_mask = real_mask.any(-1, keepdim=True).unsqueeze(-1)  # (B, 1, 1)
+        # ── Ads embeddings ───────────────────────────────────────────────────
+        embed_ads_atom_types = self.ads_atom_type(ads_atom_types.argmax(dim=-1))  # (B, N, C)
+        embed_ads_center = self.ads_center_embed(ads_center)                       # (B, 1, C) — global
+        embed_ads_rel_pos = self.ads_rel_pos_embed(ads_rel_pos)                    # (B, N, C)
 
-        embed_atom_types = self.atom_type_embed(atom_types.argmax(dim=-1))
-        embed_pos = self.pos_embed(pos)
-        embed_frac_coords = self.frac_coords_embed(frac_coords)
-        embed_lengths_scaled = self.lengths_scaled_embed(lengths_scaled)
-        embed_angles_radians = self.angles_radians_embed(angles_radians)
-
+        # ── Positional encoding (over combined seq) ──────────────────────────
         if self.add_sinusoid_posenc:
-            embed_posenc = self.positional_encoding(batch_size=batch_size, seq_len=seq_len)
+            embed_posenc = self.positional_encoding(batch_size=batch_size, seq_len=total_seq_len)
         else:
-            embed_posenc = torch.zeros(batch_size, seq_len, self.hidden_dim, device=device)
+            embed_posenc = torch.zeros(batch_size, total_seq_len, self.hidden_dim, device=device)
+        embed_posenc_prim = embed_posenc[:, :prim_seq_len, :]  # (B, M, C)
+        embed_posenc_ads = embed_posenc[:, prim_seq_len:, :]   # (B, N, C)
 
-        modals_t = torch.cat(
-            [
-                t.unsqueeze(-1)
-                for t in [atom_types_t, pos_t, frac_coords_t, lengths_scaled_t, angles_radians_t]
-            ],
+        # ── Time embeddings (average prim + ads times) ───────────────────────
+        prim_modals_t = torch.cat(
+            [t_.unsqueeze(-1) for t_ in [atom_types_t, frac_coords_t, lengths_scaled_t, angles_radians_t]],
             dim=-1,
         )
+        ads_modals_t = torch.cat(
+            [t_.unsqueeze(-1) for t_ in [ads_atom_types_t, ads_center_t, ads_rel_pos_t]],
+            dim=-1,
+        )
+        all_modals_t = torch.cat([prim_modals_t, ads_modals_t], dim=-1)  # (B, num_modals)
         embed_time = (
-            self.time_encoding(modals_t.reshape(-1))
-            .reshape(batch_size, modals_t.shape[1], -1)
+            self.time_encoding(all_modals_t.reshape(-1))
+            .reshape(batch_size, all_modals_t.shape[1], -1)
             .mean(-2)
-        )  # (B, C), average over modalities
-        embed_dataset = self.dataset_embedder(dataset_idx, self.training)  # (B, C)
+        )  # (B, C)
+
+        embed_dataset = self.dataset_embedder(dataset_idx, self.training)      # (B, C)
         embed_spacegroup = self.spacegroup_embedder(spacegroup, self.training)  # (B, C)
-        embed_conditions = (embed_time + embed_dataset + embed_spacegroup).unsqueeze(
-            -2
-        )  # (B, 1, C)
+        embed_conditions = (embed_time + embed_dataset + embed_spacegroup).unsqueeze(-2)  # (B, 1, C)
 
-        assert all(
-            embed.shape == (batch_size, seq_len, self.hidden_dim)
-            for embed in [
-                embed_atom_types,
-                embed_pos,
-                embed_frac_coords,
-                embed_posenc,
-            ]
-        ), f"Embedding shapes are inconsistent. Shapes: {[embed.shape for embed in [embed_atom_types, embed_pos, embed_frac_coords, embed_posenc]]}"
-
+        # ── Build h_in for prim sequence ─────────────────────────────────────
         if self.concat_combine_input:
-            embed_lengths_scaled = embed_lengths_scaled.repeat(1, seq_len, 1)
-            embed_angles_radians = embed_angles_radians.repeat(1, seq_len, 1)
-            embed_conditions = embed_conditions.repeat(1, seq_len, 1)
-            h_in = torch.cat(
-                [
-                    embed_atom_types,
-                    embed_pos,
-                    embed_frac_coords,
-                    embed_lengths_scaled,
-                    embed_angles_radians,
-                    embed_posenc,
-                    embed_conditions,
-                ],
-                dim=-1,
-            )
-            assert h_in.shape == (
-                batch_size,
-                seq_len,
-                self.cond_dim * self.hidden_dim,
-            ), f"h_in.shape: {h_in.shape}"
-            h_in = self.combine_input(h_in)
-            assert h_in.shape == (
-                batch_size,
-                seq_len,
-                self.hidden_dim,
-            ), f"h_in.shape: {h_in.shape}"
-        else:
-            h_in = (
-                embed_atom_types
-                + embed_pos
-                + embed_frac_coords
-                + embed_lengths_scaled
-                + embed_angles_radians
-                + embed_posenc
-                + embed_conditions
-            )
-        h_in = h_in * real_mask.unsqueeze(-1)
+            # Broadcast graph-level embeddings to match prim seq length
+            embed_lengths_scaled_bc = embed_lengths_scaled.expand(-1, prim_seq_len, -1)
+            embed_angles_radians_bc = embed_angles_radians.expand(-1, prim_seq_len, -1)
+            embed_transformation_matrix_bc = embed_transformation_matrix.expand(-1, prim_seq_len, -1)
+            embed_supercell_lattice_bc = embed_supercell_lattice.expand(-1, prim_seq_len, -1)
+            embed_conditions_prim = embed_conditions.expand(-1, prim_seq_len, -1)
 
-        pos_ids = torch.arange(seq_len, device=device).unsqueeze(0).repeat(batch_size, 1)
+            h_in_prim = torch.cat([
+                embed_atom_types,               # (B, M, C)
+                embed_frac_coords,              # (B, M, C)
+                embed_lengths_scaled_bc,        # (B, M, C)
+                embed_angles_radians_bc,        # (B, M, C)
+                embed_transformation_matrix_bc, # (B, M, C)
+                embed_supercell_lattice_bc,     # (B, M, C)
+                embed_posenc_prim,              # (B, M, C)
+                embed_conditions_prim,          # (B, M, C)
+            ], dim=-1)  # (B, M, 8*C)
+            h_in_prim = self.combine_input_prim(h_in_prim)  # (B, M, C)
+        else:
+            h_in_prim = (
+                embed_atom_types             # (B, M, C)
+                + embed_frac_coords          # (B, M, C)
+                + embed_lengths_scaled       # (B, 1, C) → broadcasts
+                + embed_angles_radians       # (B, 1, C) → broadcasts
+                + embed_transformation_matrix # (B, 1, C) → broadcasts
+                + embed_supercell_lattice    # (B, 1, C) → broadcasts
+                + embed_posenc_prim          # (B, M, C)
+                + embed_conditions           # (B, 1, C) → broadcasts
+            )
+        h_in_prim = h_in_prim * prim_real_mask.unsqueeze(-1)  # (B, M, C)
+
+        # ── Build h_in for ads sequence ──────────────────────────────────────
+        if self.concat_combine_input:
+            embed_ads_center_bc = embed_ads_center.expand(-1, ads_seq_len, -1)
+            embed_conditions_ads = embed_conditions.expand(-1, ads_seq_len, -1)
+
+            h_in_ads = torch.cat([
+                embed_ads_atom_types,   # (B, N, C)
+                embed_ads_center_bc,    # (B, N, C)
+                embed_ads_rel_pos,      # (B, N, C)
+                embed_posenc_ads,       # (B, N, C)
+                embed_conditions_ads,   # (B, N, C)
+            ], dim=-1)  # (B, N, 5*C)
+            h_in_ads = self.combine_input_ads(h_in_ads)  # (B, N, C)
+        else:
+            h_in_ads = (
+                embed_ads_atom_types  # (B, N, C)
+                + embed_ads_center    # (B, 1, C) → broadcasts
+                + embed_ads_rel_pos   # (B, N, C)
+                + embed_posenc_ads    # (B, N, C)
+                + embed_conditions    # (B, 1, C) → broadcasts
+            )
+        h_in_ads = h_in_ads * ads_real_mask.unsqueeze(-1)  # (B, N, C)
+
+        # ── Concatenate prim + ads into single sequence ──────────────────────
+        h_in = torch.cat([h_in_prim, h_in_ads], dim=1)  # (B, M+N, C)
+        padding_mask = torch.cat([prim_padding_mask, ads_padding_mask], dim=1)  # (B, M+N)
+
+        pos_ids = torch.arange(total_seq_len, device=device).unsqueeze(0).repeat(batch_size, 1)
         attention_kwargs = {"pos_ids": pos_ids}
 
         if self.implementation == "transformer":
             attention_kwargs.pop("pos_ids")
 
+        # ── Shared transformer trunk ─────────────────────────────────────────
         if self.implementation in ("transformer", "modern_transformer"):
             h_in = self.transformer_norm(h_in)
             h_out, h_aux = self.transformer(h_in, padding_mask=padding_mask, **attention_kwargs)
         else:
             raise ValueError(f"Invalid implementation: {self.implementation}")
 
-        h_out = h_out * real_mask.unsqueeze(-1)
+        h_out = h_out * combined_real_mask.unsqueeze(-1)  # (B, M+N, C)
 
+        # ── Split transformer output back into prim / ads ────────────────────
+        h_out_prim = h_out[:, :prim_seq_len, :]  # (B, M, C)
+        h_out_ads = h_out[:, prim_seq_len:, :]   # (B, N, C)
+
+        # ── Cross-attention & output heads ────────────────────────────────────
         if self.cross_attention:
+            # Prim cross-attention (query = prim output, memory = full sequence)
             h_atom = self.atom_types_cross_attention(
-                h_out,
+                h_out_prim, 
                 h_in,
-                tgt_key_padding_mask=padding_mask,
-                memory_key_padding_mask=padding_mask,
-                **attention_kwargs,
-            )
-            h_pos = self.pos_cross_attention(
-                h_out,
-                h_in,
-                tgt_key_padding_mask=padding_mask,
+                tgt_key_padding_mask=prim_padding_mask,
                 memory_key_padding_mask=padding_mask,
                 **attention_kwargs,
             )
             h_frac_coords = self.frac_coords_cross_attention(
-                h_out,
+                h_out_prim, 
                 h_in,
-                tgt_key_padding_mask=padding_mask,
+                tgt_key_padding_mask=prim_padding_mask,
                 memory_key_padding_mask=padding_mask,
                 **attention_kwargs,
             )
             h_lengths_scaled = self.lengths_scaled_cross_attention(
-                h_out,
+                h_out_prim, 
                 h_in,
-                tgt_key_padding_mask=padding_mask,
+                tgt_key_padding_mask=prim_padding_mask,
                 memory_key_padding_mask=padding_mask,
                 **attention_kwargs,
             )
             h_angles_radians = self.angles_radians_cross_attention(
-                h_out,
-                h_in,
-                tgt_key_padding_mask=padding_mask,
+                h_out_prim, h_in,
+                tgt_key_padding_mask=prim_padding_mask,
+                memory_key_padding_mask=padding_mask,
+                **attention_kwargs,
+            )
+            h_transformation_matrix = self.transformation_matrix_cross_attention(
+                h_out_prim, h_in,
+                tgt_key_padding_mask=prim_padding_mask,
                 memory_key_padding_mask=padding_mask,
                 **attention_kwargs,
             )
 
             out_atom_types = self.out_atom_types(h_atom)
-            out_pos = self.out_pos(h_pos)
-            frac_coords = self.out_frac_coords(h_frac_coords)
-            lengths_scaled = self.out_lengths_scaled(h_lengths_scaled.mean(-2, keepdim=True))
-            angles_radians = self.out_angles_radians(h_angles_radians.mean(-2, keepdim=True))
+            out_frac_coords = self.out_frac_coords(h_frac_coords)
+            out_lengths_scaled = self.out_lengths_scaled(h_lengths_scaled.mean(-2, keepdim=True))
+            out_angles_radians = self.out_angles_radians(h_angles_radians.mean(-2, keepdim=True))
+            out_transformation_matrix = self.out_transformation_matrix(
+                h_transformation_matrix.mean(-2, keepdim=True)
+            )
+
+            # Ads cross-attention (query = ads output, memory = full sequence)
+            h_ads_atom = self.ads_atom_types_cross_attention(
+                h_out_ads, h_in,
+                tgt_key_padding_mask=ads_padding_mask,
+                memory_key_padding_mask=padding_mask,
+                **attention_kwargs,
+            )
+            h_ads_center = self.ads_center_cross_attention(
+                h_out_ads, h_in,
+                tgt_key_padding_mask=ads_padding_mask,
+                memory_key_padding_mask=padding_mask,
+                **attention_kwargs,
+            )
+            h_ads_rel_pos = self.ads_rel_pos_cross_attention(
+                h_out_ads, h_in,
+                tgt_key_padding_mask=ads_padding_mask,
+                memory_key_padding_mask=padding_mask,
+                **attention_kwargs,
+            )
+
+            out_ads_atom_types = self.out_ads_atom_types(h_ads_atom)
+            # Pool over ads tokens for the global center prediction
+            ads_center_pooled = (h_ads_center * ads_real_mask.unsqueeze(-1)).sum(1, keepdim=True) / (
+                ads_real_mask.sum(1, keepdim=True).unsqueeze(-1) + 1e-8
+            )  # (B, 1, C)
+            out_ads_center = self.out_ads_center(ads_center_pooled)  # (B, 1, 3)
+            out_ads_rel_pos = self.out_ads_rel_pos(h_ads_rel_pos)
 
         else:
-            out_atom_types = self.out_atom_types(h_out)
-            out_pos = self.out_pos(h_out)
-            frac_coords = self.out_frac_coords(h_out)
-            lengths_scaled = self.out_lengths_scaled(h_out.mean(-2, keepdim=True))
-            angles_radians = self.out_angles_radians(h_out.mean(-2, keepdim=True))
+            out_atom_types = self.out_atom_types(h_out_prim)
+            out_frac_coords = self.out_frac_coords(h_out_prim)
+            out_lengths_scaled = self.out_lengths_scaled(h_out_prim.mean(-2, keepdim=True))
+            out_angles_radians = self.out_angles_radians(h_out_prim.mean(-2, keepdim=True))
+            out_transformation_matrix = self.out_transformation_matrix(
+                h_out_prim.mean(-2, keepdim=True)
+            )
 
+            out_ads_atom_types = self.out_ads_atom_types(h_out_ads)
+            # Pool over ads tokens for the global center prediction
+            ads_center_pooled = (h_out_ads * ads_real_mask.unsqueeze(-1)).sum(1, keepdim=True) / (
+                ads_real_mask.sum(1, keepdim=True).unsqueeze(-1) + 1e-8
+            )  # (B, 1, C)
+            out_ads_center = self.out_ads_center(ads_center_pooled)  # (B, 1, 3)
+            out_ads_rel_pos = self.out_ads_rel_pos(h_out_ads)
+
+        # ── Auxiliary tasks (operate on full combined sequence) ───────────────
         h_global_property = h_aux
         h_global_energy = h_aux
         h_atomic_forces = h_aux
@@ -565,8 +681,7 @@ class TransformerModule(nn.Module):
         if self.num_aux_layers > 0:
             if self.cross_attention:
                 h_global_property = self.global_property_cross_attention(
-                    h_aux,
-                    h_in,
+                    h_aux, h_in,
                     tgt_key_padding_mask=padding_mask,
                     memory_key_padding_mask=padding_mask,
                     **attention_kwargs,
@@ -583,16 +698,14 @@ class TransformerModule(nn.Module):
         if self.num_aux_mlip_layers > 0:
             if self.cross_attention:
                 h_global_energy = self.global_energy_cross_attention(
-                    h_aux,
-                    h_in,
+                    h_aux, h_in,
                     tgt_key_padding_mask=padding_mask,
                     memory_key_padding_mask=padding_mask,
                     **attention_kwargs,
                 )
                 h_atomic_forces = (
                     self.atomic_forces_cross_attention(
-                        h_aux,
-                        h_in,
+                        h_aux, h_in,
                         tgt_key_padding_mask=padding_mask,
                         memory_key_padding_mask=padding_mask,
                         **attention_kwargs,
@@ -603,7 +716,6 @@ class TransformerModule(nn.Module):
 
             ce = self.global_energy_charge_proj(feats["charge"])
             se = self.global_energy_spin_proj(feats["spin"])
-
             cse = ce.unsqueeze(-2) + se.unsqueeze(-2)  # (B, 1, C)
             h_global_energy = h_global_energy + cse
 
@@ -634,122 +746,121 @@ class TransformerModule(nn.Module):
 
         global_property = self.global_property_head(h_global_property_pooled) * global_mask
         global_energy = self.global_energy_head(h_global_energy_pooled) * global_mask
-        if self.is_conservative:
-            # Compute conservative atomic forces as negative gradient of global energy w.r.t. 3D coordinates
-            # NOTE: No need to explicitly include grad_outputs in the autograd call, since we're summing up the energies anyway
-            atomic_forces = -torch.autograd.grad(
-                global_energy.sum(), pos, create_graph=True, retain_graph=True
-            )[0] * real_mask.unsqueeze(-1)
-        else:
-            atomic_forces = self.atomic_forces_head(h_atomic_forces) * real_mask.unsqueeze(-1)
+        atomic_forces = self.atomic_forces_head(h_atomic_forces) * combined_real_mask.unsqueeze(-1)
 
-        pred_modals = (
-            out_atom_types * real_mask.unsqueeze(-1),  # (B, M, V=self.vocab_size)
-            out_pos * real_mask.unsqueeze(-1) * ~token_is_periodic,  # (B, M, 3)
-            frac_coords * real_mask.unsqueeze(-1) * token_is_periodic,  # (B, M, 3)
-            lengths_scaled * global_mask * sample_is_periodic,  # (B, 1, 3)
-            angles_radians * global_mask * sample_is_periodic,  # (B, 1, 3)
+        # ── Assemble outputs ─────────────────────────────────────────────────
+        pred_prim = (
+            out_atom_types * prim_real_mask.unsqueeze(-1),    # (B, M, V)
+            out_frac_coords * prim_real_mask.unsqueeze(-1),   # (B, M, 3)
+            out_lengths_scaled * global_mask,                 # (B, 1, 3)
+            out_angles_radians * global_mask,                 # (B, 1, 3)
+            out_transformation_matrix * global_mask,          # (B, 1, 3)
+        )
+        pred_ads = (
+            out_ads_atom_types * ads_real_mask.unsqueeze(-1),  # (B, N, V)
+            out_ads_center * global_mask,                      # (B, 1, 3)
+            out_ads_rel_pos * ads_real_mask.unsqueeze(-1),     # (B, N, 3)
         )
         pred_aux_outputs = (
-            global_property,  # (B, 1, P)
-            global_energy,  # (B, 1, 1)
-            atomic_forces,  # (B, M, 3)
+            global_property,   # (B, 1, P)
+            global_energy,     # (B, 1, 1)
+            atomic_forces,     # (B, M+N, 3)
         )
 
-        return pred_modals, pred_aux_outputs
+        return pred_prim, pred_ads, pred_aux_outputs
 
     @typecheck
     def forward_with_cfg(
         self,
-        x: (
+        x_prim: (
             Tuple[
                 Int["b m v"],  # type: ignore - atom_types
-                Float["b m 3"],  # type: ignore - pos
                 Float["b m 3"],  # type: ignore - frac_coords
                 Float["b 1 3"],  # type: ignore - lengths_scaled
                 Float["b 1 3"],  # type: ignore - angles_radians
+                Float["b 3 3"],  # type: ignore - transformation_matrix
+                Float["b 3 3"],  # type: ignore - supercell_lattice
             ]
             | List[torch.Tensor]
         ),
-        t: (
+        x_ads: (
+            Tuple[
+                Int["b n v"],  # type: ignore - ads_atom_types
+                Float["b 1 3"],  # type: ignore - ads_center (COM)
+                Float["b n 3"],  # type: ignore - ads_rel_pos
+            ]
+            | List[torch.Tensor]
+        ),
+        t_prim: (
             Tuple[
                 Float[" b"],  # type: ignore - atom_types_t
-                Float[" b"],  # type: ignore - pos_t
                 Float[" b"],  # type: ignore - frac_coords_t
                 Float[" b"],  # type: ignore - lengths_scaled_t
                 Float[" b"],  # type: ignore - angles_radians_t
             ]
-            | List[torch.Tensor | Tuple[torch.Tensor, torch.Tensor]]
+            | List[torch.Tensor]
+        ),
+        t_ads: (
+            Tuple[
+                Float[" b"],  # type: ignore - ads_atom_types_t
+                Float[" b"],  # type: ignore - ads_center_t
+                Float[" b"],  # type: ignore - ads_rel_pos_t
+            ]
+            | List[torch.Tensor]
         ),
         feats: Dict[str, Tensor],
-        padding_mask: Bool["b m"],  # type: ignore
+        prim_padding_mask: Bool["b m"],  # type: ignore
+        ads_padding_mask: Bool["b n"],  # type: ignore
         cfg_scale: float,
         **kwargs: Any,
     ) -> Tuple[
         Tuple[
             Float["b m v"],  # type: ignore - atom_types
-            Float["b m 3"],  # type: ignore - pos
             Float["b m 3"],  # type: ignore - frac_coords
             Float["b 1 3"],  # type: ignore - lengths_scaled
             Float["b 1 3"],  # type: ignore - angles_radians
+            Float["b 1 9"],  # type: ignore - transformation_matrix
+        ],
+        Tuple[
+            Float["b n v"],  # type: ignore - ads_atom_types
+            Float["b 1 3"],  # type: ignore - ads_center
+            Float["b n 3"],  # type: ignore - ads_rel_pos
         ],
         Tuple[
             Float["b 1 p"],  # type: ignore - global_property
             Float["b 1 1"],  # type: ignore - global_energy
-            Float["b m 3"],  # type: ignore - atomic_forces
+            Float["b s 3"],  # type: ignore - atomic_forces (s = m + n)
         ],
     ]:
-        """Forward pass of TransformerModule, but also batches the unconditional forward pass for
-        classifier-free guidance.
+        """Classifier-free guidance forward pass.
 
-        NOTE: Assumes batch x's and class labels are ordered such that the first half are the conditional
-        samples and the second half are the unconditional samples.
-
-        Args:
-            x: Tuple or list of input tensors for each modality:
-                atom_types: Atom types tensor (B, M, V), where V is the number of atom types.
-                pos: Atom positions tensor (B, M, 3).
-                frac_coords: Fractional coordinates tensor (B, M, 3).
-                lengths_scaled: Scaled lengths tensor (B, 1, 3).
-                angles_radians: Angles in radians tensor (B, 1, 3).
-            t: Tuple or list of time tensors for each modality:
-                atom_types_t: Time t for atom types (B,).
-                pos_t: Time t for positions (B,).
-                frac_coords_t: Time t for fractional coordinates (B,).
-                lengths_scaled_t: Time t for lengths (B,).
-                angles_radians_t: Time t for angles (B,).
-            feats: Features for conditioning including:
-                dataset_idx: Dataset index for each sample.
-                spacegroup: Spacegroup index for each sample.
-                token_is_periodic: Whether each token corresponds to a periodic sample (B, M).
-            padding_mask: True if padding token, False otherwise (B, M).
-            cfg_scale: Classifier-free guidance scale.
-            kwargs: Any additional keyword arguments.
-
-        Returns:
-            A tuple containing output velocity fields for each modality as an inner tuple
-            and auxiliary task outputs as another inner tuple.
+        Doubles the batch (conditional + unconditional) and interpolates
+        outputs with ``cfg_scale``.
         """
-        half_x = tuple(x_[: len(x_) // 2] for x_ in x)
-        combined_x = tuple(torch.cat([half_x_, half_x_], dim=0) for half_x_ in half_x)
-        model_out, model_aux_out = self.forward(
-            combined_x,
-            t,
+        half_prim = tuple(x_[: len(x_) // 2] for x_ in x_prim)
+        combined_prim = tuple(torch.cat([h, h], dim=0) for h in half_prim)
+
+        half_ads = tuple(x_[: len(x_) // 2] for x_ in x_ads)
+        combined_ads = tuple(torch.cat([h, h], dim=0) for h in half_ads)
+
+        pred_prim, pred_ads, pred_aux = self.forward(
+            combined_prim,
+            combined_ads,
+            t_prim,
+            t_ads,
             feats,
-            padding_mask,
+            prim_padding_mask,
+            ads_padding_mask,
             **kwargs,
         )
 
-        eps = []
-        for modal in model_out:
-            cond_eps, uncond_eps = torch.split(modal, len(modal) // 2, dim=0)
-            half_eps = uncond_eps + cfg_scale * (cond_eps - uncond_eps)
-            eps.append(torch.cat([half_eps, half_eps], dim=0))
+        def _apply_cfg(outputs):
+            guided = []
+            for modal in outputs:
+                cond, uncond = torch.split(modal, len(modal) // 2, dim=0)
+                half = uncond + cfg_scale * (cond - uncond)
+                guided.append(torch.cat([half, half], dim=0))
+            return tuple(guided)
 
-        eps_aux = []
-        for aux in model_aux_out:
-            cond_aux, uncond_aux = torch.split(aux, len(aux) // 2, dim=0)
-            half_aux = uncond_aux + cfg_scale * (cond_aux - uncond_aux)
-            eps_aux.append(torch.cat([half_aux, half_aux], dim=0))
+        return _apply_cfg(pred_prim), _apply_cfg(pred_ads), _apply_cfg(pred_aux)
 
-        return tuple(eps), tuple(eps_aux)
