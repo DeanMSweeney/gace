@@ -138,6 +138,62 @@ def adsorbate_center_of_mass(
     return com
 
 
+def lattice_params_to_matrix(
+    lengths: Tensor,
+    angles: Tensor,
+) -> Tensor:
+    """
+    Convert lattice parameters (lengths and angles) to lattice matrix.
+
+    Args:
+        lengths: (B, 3) or (3,) edge lengths [a, b, c] in Angstroms
+        angles: (B, 3) or (3,) angles [alpha, beta, gamma] in radians
+                alpha = angle between b and c
+                beta = angle between a and c
+                gamma = angle between a and b
+
+    Returns:
+        cell: (B, 3, 3) or (3, 3) lattice matrix where rows are lattice vectors
+    """
+    # Handle both batched and unbatched inputs
+    if lengths.dim() == 1:
+        lengths = lengths.unsqueeze(0)
+        angles = angles.unsqueeze(0)
+        squeeze_output = True
+    else:
+        squeeze_output = False
+
+    a, b, c = lengths[:, 0], lengths[:, 1], lengths[:, 2]
+    alpha, beta, gamma = angles[:, 0], angles[:, 1], angles[:, 2]
+
+    # First lattice vector along x-axis
+    ax = a
+    ay = torch.zeros_like(a)
+    az = torch.zeros_like(a)
+
+    # Second lattice vector in xy-plane
+    bx = b * torch.cos(gamma)
+    by = b * torch.sin(gamma)
+    bz = torch.zeros_like(b)
+
+    # Third lattice vector
+    cx = c * torch.cos(beta)
+    cy = c * (torch.cos(alpha) - torch.cos(beta) * torch.cos(gamma)) / torch.sin(gamma)
+    cz = torch.sqrt(c**2 - cx**2 - cy**2)
+
+    # Stack into matrix (B, 3, 3)
+    cell = torch.stack([
+        torch.stack([ax, ay, az], dim=-1),
+        torch.stack([bx, by, bz], dim=-1),
+        torch.stack([cx, cy, cz], dim=-1),
+    ], dim=1)
+
+    if squeeze_output:
+        cell = cell.squeeze(0)
+
+    return cell
+
+
 def tile_supercell(
     pos: Tensor,
     cell: Tensor,

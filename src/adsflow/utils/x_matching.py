@@ -7,7 +7,7 @@ from torchdiffeq import odeint
 from typing import Optional, Literal, Union, Tuple
 
 from adsflow.utils.invariance import pbc_aware_delta, hungarian
-from adsflow.utils.utils import adsorbate_neighborhood_mask
+from adsflow.utils.utils import adsorbate_neighborhood_mask, lattice_params_to_matrix
 
 class XMatching():
     """
@@ -111,6 +111,50 @@ class XMatching():
         
         return total_loss, max_L
 
+    def path(
+        self,
+        input_graph: Data,
+        initial_dist: Literal["noisy", "fixed"] = "fixed",
+    ) -> Data:
+        """
+        Generate interpolated training data along a path from initial to relaxed positions.
+
+        For "refine" variant: interpolates between initial (x0) and relaxed (x1) positions
+        For "forge" variant: interpolates from noise/initial positions to relaxed positions
+
+        Returns:
+            data: Modified data object with interpolated inputs/targets at time t
+        """
+
+        with torch.no_grad():
+            data = input_graph.clone()
+
+            # define time 
+            t = torch.rand(len(torch.unique(data.batch)), 1, device=data.device, dtype=torch.float32) # B , 1 
+            data.t = t 
+
+            # ── Lattice and supercell (CatFlow data only) ────────────────────
+            catalyst_mask = (data.tags == 1)
+            adsorbate_mask = (data.tags == 2)
+            
+            if hasattr(data, "prim_cell"):
+                data = self._build_lattice_path(data, t=t)
+                data = self._build_transformation_matrix_path(data, t=t)
+                data = self._build_ads_path(data, t=t, catalyst_mask = catalyst_mask, adsorbate_mask = adsorbate_mask)
+                data = self._build_atomic_num_path(data, t=t, catalyst_mask = catalyst_mask, adsorbate_mask = adsorbate_mask)
+
+            # ── Positions ────────────────────────────────────────────────────
+            data = self._build_positions_path(data, t=t, catalyst_mask = catalyst_mask, adsorbate_mask = adsorbate_mask)
+
+            if self.variant == "place":
+                return data
+
+            return data
+
+        raise ValueError("Invalid model variant")
+
+
+
     def _interpolant_schedule(
         self,
         t: Tensor,
@@ -151,53 +195,11 @@ class XMatching():
 
         return alpha_t, alpha_t_grad, alpha_t_factor
             
-    def path(
-        self,
-        input_graph: Data,
-        v_x: float=1,  # exponent for cosine schedule (controls interpolation curvature)
-        v_z: float=1,  # exponent for cosine schedule (controls interpolation curvature)
-        initial_dist: Literal["noisy", "fixed"] = "fixed",
-    ) -> Data:
-        """
-        Generate interpolated training data along a path from initial to relaxed positions.
-
-        For "refine" variant: interpolates between initial (x0) and relaxed (x1) positions
-        For "forge" variant: interpolates from noise/initial positions to relaxed positions
-
-        Returns:
-            data: Modified data object with interpolated inputs/targets at time t
-        """
-
-        with torch.no_grad():
-            data = input_graph.clone()
-
-            # ── Lattice and supercell (CatFlow data only) ────────────────────
-            if hasattr(data, "prim_cell"):
-                data = self._apply_lattice_flow(data)
-            elif hasattr(data, "transformation_matrix"):
-                data = self._apply_transformation_matrix_flow(data)
-            else:
-                raise ValueError("Data must have either 'prim_cell' and 'transformation_matrix'")
-
-            # ── Positions ────────────────────────────────────────────────────
-            data = self._apply_positions_flow(data, v_x)
-
-            if self.variant == "place":
-                return data
-
-            # ── Atomic numbers (forge only) ──────────────────────────────────
-            data = self._apply_atomic_num_flow(data, v_z)
-
-            return data
-
-        raise ValueError("Invalid model variant")
-
-
     # ─────────────────────────────────────────────────────────────────────────
     # Modular flow helpers — each takes a Data object and returns it updated.
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _apply_lattice_flow(self, data: Data) -> Data:
+    def _build_lattice_path(self, data: Data, t: Tensor, cosine_schd_freq: Tensor=1) -> Data:
         """
         Flow-match the primitive cell matrix (3×3 Cartesian, Å).
 
@@ -208,77 +210,73 @@ class XMatching():
 
         The noisy cell `xt` is stored back as `data.prim_cell` so that
         downstream graph construction uses it at the current flow time.
-        
-        device = data.prim_cell.device
-        dtype  = torch.float32
 
-        L1 = data.prim_cell.float()                       # (..., 3, 3)
-
-        # Prior: zero-mean Gaussian scaled to RMS magnitude of a typical cell
-        L0 = torch.randn_like(L1) * L1.norm() / (3 * 3) ** 0.5
-
-        # Per-graph time sample — shape (1,) broadcasts over (3,3)
-        t_L = torch.rand(1, device=device, dtype=dtype)
-
-        alpha_t_L, alpha_t_L_grad, _ = self._interpolant_schedule(
-            t=t_L,
-            schedule_type=self.schedule_type,
-            x_matching="flow",
-        )
-
-        u_L    = L1 - L0
-        cell_t = L0 + alpha_t_L * u_L
-        u_L    = alpha_t_L_grad * u_L  # rescaled velocity
-
-        data.prim_cell        = cell_t
-        data.prim_cell_target = L1
-        data.u_L              = u_L
-        data.t_L              = t_L
         """
 
         # sample edge lenghts and interaxial angles from true and noisy distribution
-        len1 = data.lengths_scaled.float()
-        ang1 = data.angles_radians.float()
+        len1 = data.lengths_scaled.float() # B, 3
+        ang1 = data.angles_radians.float() # B, 3
 
-        len0 = torch.randn_like(len1) 
-        ang0 = torch.randn_like(ang1) 
+        len0 = torch.randn_like(len1) # B, 3
+        ang0 = torch.randn_like(ang1) # B, 3
 
-        t_l = torch.rand(1, device=device, dtype=dtype)
+        # Hungarian alignment for lattice lengths and angles (permutation invariance)
+        # Note: lengths and angles are per-graph (B, 3), so batch indices are just range(B)
+        # These are scalar values, not spatial positions, so pbc_aware=False
 
-        alpha_t_l, alpha_t_l_grad, _ = self._interpolant_schedule(
-            t=t_l,
-            schedule_type=self.schedule_type,
-            x_matching=self.x_matching,
+        len0 = hungarian(
+            set0=len0,
+            set1=len1,
+            pbc_aware=False,
         )
 
-        t_a = torch.rand(1, device=device, dtype=dtype)
-
-        alpha_t_a, alpha_t_a_grad, _ = self._interpolant_schedule(
-            t=t_a,
-            schedule_type=self.schedule_type,
-            x_matching=self.x_matching,
+        ang0 = hungarian(
+            set0=ang0,
+            set1=ang1,
+            pbc_aware=False,
         )
 
-        len_t = len0 + alpha_t_l * (len1 - len0)
-        ang_t = ang0 + alpha_t_a * (ang1 - ang0)
+        t_len_per_graph = t # B, 1
+        t_len = t_len_per_graph
 
-        u_len = alpha_t_l_grad * (len1 - len0)
-        u_ang = alpha_t_a_grad * (ang1 - ang0)
+        alpha_t_len, alpha_t_len_grad, alpha_t_len_loss_coeff = self._interpolant_schedule(
+            t=t_len,
+            schedule_type=self.schedule_type,
+            x_matching=self.x_matching,
+            v=cosine_schd_freq, 
+        )
+
+        t_ang_per_graph = t # B, 1
+        t_ang = t_ang_per_graph
+
+        alpha_t_ang, alpha_t_ang_grad, alpha_t_ang_loss_coeff = self._interpolant_schedule(
+            t=t_ang,
+            schedule_type=self.schedule_type,
+            x_matching=self.x_matching,
+            v=cosine_schd_freq, 
+        )
+
+        u_len = (len1 - len0)
+        u_ang = (ang1 - ang0)
+
+        len_t = len0 + alpha_t_len * u_len
+        ang_t = ang0 + alpha_t_ang * u_ang
 
         data.lengths_scaled = len_t
         data.angles_radians = ang_t
         data.lengths_scaled_target = len1
         data.angles_radians_target = ang1
-        data.t_len = t_l
-        data.t_ang = t_a
 
+
+        # store velocity fields 
         if self.x_matching == "flow":
-            data.u_len = u_len
-            data.u_ang = u_ang
+            data.u_len = alpha_t_len_grad * u_len
+            data.u_ang =alpha_t_ang_grad * u_ang
+
 
         return data
 
-    def _apply_transformation_matrix_flow(self, data: Data) -> Data:
+    def _build_transformation_matrix_path(self, data: Data, t: Tensor, cosine_schd_freq: Tensor=1)-> Data:
         """
         Flow-match the supercell matrix M  (3×3, integer-valued targets).
 
@@ -291,38 +289,71 @@ class XMatching():
             reg = mean(1 - cos(2π * M_pred))   (minimised at integers)
         Add lambda_M * data.cosine_reg_M to the total loss in criterion().
         """
-        device = data.supercell_matrix.device
+        device = data.transformation_matrix.device
         dtype  = torch.float32
 
-        M1 = data.supercell_matrix.float()                   # (..., 3, 3)
+        M1 = data.transformation_matrix.float() # B, 3, 3
 
-        identity = torch.eye(3, device=device, dtype=dtype).expand_as(M1)
+        identity = torch.eye(3, device=device, dtype=dtype).expand_as(M1) # B, 3, 3
         M0 = identity + 0.1 * torch.randn_like(M1)
 
-        t_M = torch.rand(1, device=device, dtype=dtype)
+        # Hungarian alignment for transformation matrix (permutation invariance)
+        # Reshape (B, 3, 3) -> (B*3, 3) for Hungarian, then reshape back
+        # Matrix elements are not spatial positions, so pbc_aware=False
+        batch_size = M1.size(0)
+        M0_flat = M0.view(batch_size * 3, 3)
+        M1_flat = M1.view(batch_size * 3, 3)
 
-        alpha_t_M, alpha_t_M_grad, _ = self._interpolant_schedule(
+        M0_flat = hungarian(
+            set0=M0_flat,
+            set1=M1_flat,
+            pbc_aware=False,
+        )
+
+        M0 = M0_flat.view(batch_size, 3, 3)
+
+        t_M_per_graph = t # B, 1
+        t_M = t_M_per_graph
+
+        alpha_t_M, alpha_t_M_grad, alpha_t_M_loss_coeff = self._interpolant_schedule(
             t=t_M,
             schedule_type=self.schedule_type,
-            x_matching="flow",
+            x_matching=self.x_matching,
+            v=cosine_schd_freq, 
         )
 
         u_M = M1 - M0
-        M_t = M0 + alpha_t_M * u_M
-        u_M = alpha_t_M_grad * u_M                  # rescaled velocity
+        M_t = M0 + alpha_t_M.unsqueeze(-1) * u_M
+
+        data.transformation_matrix = M_t
+        data.transformation_matrix_target = M1
 
         # Cosine regularisation template (evaluated on model output in criterion)
         cosine_reg_M = (1.0 - torch.cos(2 * torch.pi * M1)).mean()
+        data.cosine_reg_M  = cosine_reg_M
 
-        data.transformation_matrix        = M_t
-        data.transformation_matrix_target = M1
-        data.u_M                     = u_M
-        data.t_M                     = t_M
-        data.cosine_reg_M            = cosine_reg_M
+        # Build supercell lattice from primitive cell and transformation matrix
+        # prim_cell_t: (B, 3, 3) from lattice parameters
+        # M_t: (B, 3, 3) transformation matrix
+        # supercell = M_t @ prim_cell_t
+
+        # First, build primitive cell from lattice parameters
+        prim_cell_t = lattice_params_to_matrix(
+            lengths=data.lengths_scaled,  # (B, 3)
+            angles=data.angles_radians,   # (B, 3)
+        )  # (B, 3, 3)
+
+        # Then apply transformation matrix to get supercell lattice
+        # Supercell lattice: L_super = M @ L_prim
+        data.supercell_lattice = torch.bmm(M_t, prim_cell_t)  # (B, 3, 3)
+        data.cell = prim_cell_t  # Store primitive cell as well
+
+        if self.x_matching == "flow":
+            data.u_M = u_M * alpha_t_M_grad.unsqueeze(-1)
 
         return data
 
-    def _apply_positions_flow(self, data: Data, v_x: float = 1) -> Data:
+    def _build_positions_path(self, data: Data, t: Tensor, catalyst_mask: Tensor, adsorbate_mask: Tensor, cosine_schd_freq: Tensor=1) -> Data:
         """
         Flow-match atomic positions for both 'place' and 'forge' variants.
 
@@ -342,85 +373,83 @@ class XMatching():
             data.t          ← per-atom interpolation time
             data.u_x        ← target velocity (rescaled by schedule gradient)
         """
-
-        if hasattr(data, "pos_relaxed"):
-            x1 = data.pos_relaxed.float()
-        elif hasattr(data, "pos_prim"):
-            x1 = data.pos_combined.float() # combined primtive cell + adsorbate
-        else:
-            raise ValueError("Data must have 'pos_relaxed' or 'pos_prim' attribute")
-
         if self.variant == "relax":
-            x0 = data.pos.float()
+            if hasattr(data, "pos_relaxed"):
+                x1 = data.pos_relaxed.float() # N, 3
+                x0 = data.pos.float() # N, 3
 
-            if hasattr(data, "velocity"):
-                u_x = data.velocity.float()
-            else:
+                if hasattr(data, "velocity"):
+                    u_x = data.velocity.float()
+                else:
+                    u_x = pbc_aware_delta(
+                        delta=x1 - x0,
+                        cell=data.cell.float(),
+                        batch=data.batch,
+                    )
+
+                ads_cutoff = self.hparams.ads_cutoff
+                if ads_cutoff == 0:
+                    ads_neighborhood_mask = (adsorbate_mask)
+                elif ads_cutoff == float('inf'):
+                    ads_neighborhood_mask = (data.fixed == 0)
+                else:
+                    ads_neighborhood_mask = adsorbate_neighborhood_mask(data, ads_cutoff)
+
+                data.ads_neighborhood_mask = ads_neighborhood_mask
+                u_x = ads_neighborhood_mask.float().unsqueeze(1) * u_x
+
+                t_x_per_graph = t
+
+                # broadcast to per atom
+                t_x = t_x_per_graph[data.batch] # N, 1
+
+        elif self.variant == "forge":
+            if hasattr(data, "pos_prim"):
+                x1 = data.pos_prim.float() # combined primtive cell + adsorbat
+                x0 = torch.randn_like(x1, dtype=torch.float32)
+
+                # Hungarian alignment applied to catalyst atoms 
+                x0 = hungarian(
+                    set0=x0,
+                    set1=x1,
+                    cell=data.cell.float(),
+                    batch=data.batch[catalyst_mask],
+                )
+
                 u_x = pbc_aware_delta(
                     delta=x1 - x0,
                     cell=data.cell.float(),
-                    batch=data.batch,
+                    batch=data.batch[catalyst_mask],
                 )
 
-            ads_cutoff = self.hparams.ads_cutoff
-            if ads_cutoff == 0:
-                ads_neighborhood_mask = (data.tags == 2)
-            elif ads_cutoff == float('inf'):
-                ads_neighborhood_mask = (data.fixed == 0)
-            else:
-                ads_neighborhood_mask = adsorbate_neighborhood_mask(data, ads_cutoff)
+                # Sample per-graph interpolation time
+                t_x_per_graph = t # B, 1 
 
-            data.ads_neighborhood_mask = ads_neighborhood_mask
-            u_x = ads_neighborhood_mask.float().unsqueeze(1) * u_x
-
-        elif self.variant == "forge":
-            adsorbate = (data.tags == 2)
-            catalyst  = (data.tags != 2)
-
-            x0 = torch.randn_like(x1, dtype=torch.float32)
-            # Both slab and adsorbate start from Gaussian noise.
-            # Hungarian alignment applied to catalyst atoms only —
-            # adsorbate atoms have fixed chemical identity and must not be permuted.
-            x0[catalyst] = hungarian(
-                set0=x0[catalyst],
-                set1=x1[catalyst],
-                cell=data.cell.float(),
-                batch=data.batch,
-            )
-
-            u_x = pbc_aware_delta(
-                delta=x1 - x0,
-                cell=data.cell.float(),
-                batch=data.batch,
-            )
+                # broadcast to per atom
+                t_x = t_x_per_graph[data.batch[catalyst_mask]] # Nprim, 1
+        
         else:
-            raise ValueError(f"Unknown variant '{self.variant}' in _apply_positions_flow")
+            raise ValueError("Unrecognized variant selected")
 
-        # Sample per-graph interpolation time
-        t_per_graph = torch.rand(
-            len(data.natoms), 1, device=x1.device, dtype=torch.float32
-        )
-        t_x = t_per_graph[data.batch] * 0.999 if self.x_matching == "endpoint" \
-              else t_per_graph[data.batch]
-
-        alpha_t_x, alpha_t_x_grad, self.alpha_t_x_factor = self._interpolant_schedule(
+        alpha_t_x, alpha_t_x_grad, self.alpha_t_x_loss_coeff = self._interpolant_schedule(
             t=t_x,
             schedule_type=self.schedule_type,
-            v=v_x,
-            x_matching="flow",
+            x_matching=self.x_matching,
+            v=cosine_schd_freq, 
         )
 
-        xt  = x0 + alpha_t_x * u_x
-        u_x = alpha_t_x_grad * u_x          # rescaled velocity
+        # interpolation 
+        xt  = x0 + alpha_t_x * u_x       # rescaled velocity
 
-        data.pos      = xt
-        data.pos_init = x0
-        data.t        = t_x
-        data.u_x      = u_x
+        data.frac_coords     = xt   
+        data.frac_coords_target = x1
+
+        if self.x_matching == "flow":
+            data.u_x = u_x * alpha_t_x_grad
 
         return data
 
-    def _apply_ads_com_flow(self, data: Data, v_x: float = 1) -> Data:
+    def _build_ads_path(self, data: Data, t: Tensor, catalyst_mask: Tensor, adsorbate_mask: Tensor, cosine_schd_freq: Tensor=1) -> Data:
         """
         Flow-match adsorbate positions (forge variant only).
 
@@ -433,10 +462,65 @@ class XMatching():
             data.pos_noisy  ← argmax(xt)  (integer, for embedding)
             data.pos        ← same as above (replaces clean labels)
         """
-        
-        return self._apply_positions_flow(data, v_x)
 
-    def _apply_atomic_num_flow(self, data: Data, v_z: float = 1) -> Data:
+        adsCOM1 = data.ads_com # B, 3
+        adsRELP1 = data.ads_rel_pos # Nads, 3
+
+        adsCOM0 = torch.randn_like(adsCOM1, dtype=torch.float32) # B, 3
+        adsRELP0 = torch.randn_like(adsRELP1, dtype=torch.float32) # Nads, 3]
+
+        # Hungarian alignment for adsorbate center of mass (permutation invariance)
+        # Note: COM is per-graph (B, 3), so batch indices are just range(B)
+        # Adsorbate COM is in supercell space (not primitive cell), so use simple Euclidean distance
+        adsCOM0 = hungarian(
+            set0=adsCOM0,
+            set1=adsCOM1,
+            pbc_aware=False,
+        )
+
+        # Hungarian alignment for adsorbate relative positions (permutation invariance)
+        # Relative positions are not in absolute space, so pbc_aware=False
+        adsRELP0 = hungarian(
+            set0=adsRELP0,
+            set1=adsRELP1,
+            pbc_aware=False,
+        )
+
+        t_COM_per_graph = t
+        t_COM = t_COM_per_graph # B, 1
+        alpha_t_COM, alpha_t_COM_grad, alpha_t_COM_loss_coeff = self._interpolant_schedule(
+            t=t_COM,
+            schedule_type=self.schedule_type,
+            x_matching=self.x_matching,
+            v=cosine_schd_freq, 
+        )
+
+        t_RELP_per_graph = t # B, 1
+        t_RELP = t_RELP_per_graph[data.batch[adsorbate_mask]] # N_ads, 1
+        alpha_t_RELP, alpha_t_RELP_grad, alpha_t_RELP_loss_coeff = self._interpolant_schedule(
+            t=t_RELP,
+            schedule_type=self.schedule_type,
+            x_matching=self.x_matching,
+            v=cosine_schd_freq, 
+        )
+
+        u_COM = adsCOM1 - adsCOM0
+        u_RELP = adsRELP1 - adsRELP0
+
+        # interpolation 
+        adsCOM_t = adsCOM0 + alpha_t_COM * u_COM
+        adsRELP_t = adsRELP0 + alpha_t_RELP * u_RELP
+
+        data.ads_com = adsCOM_t
+        data.ads_rel_pos = adsRELP_t
+
+        if self.x_matching == "flow":
+            data.u_ads_com = alpha_t_COM_grad * u_COM 
+            data.u_ads_rel_pos = alpha_t_RELP_grad * u_RELP
+
+        return data
+
+    def _build_atomic_num_path(self, data: Data, t: Tensor, catalyst_mask: Tensor, adsorbate_mask: Tensor, cosine_schd_freq: Tensor=1) -> Data:
         """
         Simplex flow-matching for catalyst atom types (forge variant only).
 
@@ -452,55 +536,63 @@ class XMatching():
             data.atomic_numbers_hot    ← zt  (soft distribution for soft embedding)
             data.t_z                   ← per-atom interpolation time
         """
-        
-        adsorbate = (data.tags == 2)
-        catalyst  = (data.tags != 2)
-        device    = data.pos.device
 
-        num_classes = 90  # matches max_num_elements in EquiformerV2
-        z1_raw = data.atomic_numbers.long()
-        if z1_raw.min() >= 1 and z1_raw.max() <= num_classes:
-            z1 = z1_raw - 1          # shift chemical numbers to 0-based
-        elif z1_raw.min() >= 0 and z1_raw.max() < num_classes:
-            z1 = z1_raw
-        else:
-            raise ValueError(
-                f"atomic_numbers out of range: [{int(z1_raw.min())}, {int(z1_raw.max())}]"
-            )
+        device = data.pos.device
 
-        z1_hot = F.one_hot(z1, num_classes=num_classes).float()      # (N, 90)
+        # shift atomic numbers to start from 0, not 1 
+        # z1 only pertains to the primitive cell 
+        z1 = data.prim_atomic_numbers.long() - 1 # N, 1
 
-        # Prior: random one-hot per atom
-        z0_hot = torch.zeros_like(z1_hot)
-        rand_idx = torch.randint(0, num_classes, (z0_hot.size(0),), device=device)
-        z0_hot[torch.arange(z0_hot.size(0), device=device), rand_idx] = 1.0
-
-        # Adsorbate types are conditioned — fix to ground truth
-        z0_hot[adsorbate] = z1_hot[adsorbate]
+        # Prior: random atomic number indices (much more efficient than one-hot)
+        num_classes = 90
+        z0 = torch.randint(low=0, high=num_classes, size=(z1.size(0), 1), device=device)  # N, 1
 
         # Hungarian alignment over catalyst for permutation invariance
-        z0_hot[catalyst] = hungarian(
-            set0=z0_hot[catalyst],
-            set1=z1_hot[catalyst],
-            batch=data.batch[catalyst],
-        )
+        z0 = hungarian(
+            set0=z0,
+            set1=z1,
+            pbc_aware=False,
+        ).long()  # N, 1
 
-        t_z_per_graph = torch.rand(len(data.natoms), 1, device=device, dtype=torch.float32)
-        t_z = t_z_per_graph[data.batch] * 0.999
+        # Convert to one-hot after alignment
+        # F.one_hot expects (N,) input, so squeeze the (N, 1) tensors
+        z0_hot = F.one_hot(z0.squeeze(1), num_classes=num_classes)      # N, num_classes
+        z1_hot = F.one_hot(z1.squeeze(1), num_classes=num_classes)      # N, num_classes
+        
+        # Sample per-graph interpolation time
+        t_z_per_graph = t
+        t_z = t_z_per_graph[data.batch[catalyst_mask]] # Nprim, 1
 
-        alpha_t_z, _, _ = self._interpolant_schedule(
+        alpha_t_z, alpha_t_z_grad, alpha_t_z_loss_coeff = self._interpolant_schedule(
             t=t_z,
             schedule_type=self.schedule_type,
-            x_matching="endpoint",
+            x_matching="endpoint", # atomic numbers must always use endpoint matching 
+            v=cosine_schd_freq, 
         )
 
-        zt_hot = (1 - alpha_t_z) * z0_hot + alpha_t_z * z1_hot      # (N, 90)
+        corruption_prob_per_graph = torch.rand(t.size(), device=device) #B, 1
+        corruption_prob = corruption_prob_per_graph[data.batch[catalyst_mask]] # Nprim, 1
+        corrupt_mask = (corruption_prob > t_z).int() # Nprim, 1
 
-        data.atomic_numbers_hot   = zt_hot
-        data.atomic_numbers       = zt_hot.argmax(dim=-1).long()
-        data.atomic_numbers_true  = z1
-        data.t_z                  = t_z
-        
+        zt_hot = z0_hot * corrupt_mask + z1_hot * (1 - corrupt_mask)
+
+        data.atomic_numbers_target = z1
+        data.atomic_numbers_hot_target = z1_hot
+
+        # Allocate combined (N_total, num_classes) tensor:
+        # prim atoms get the noisy simplex zt_hot; ads atoms get their true one-hot
+        # (adsorbate types are conditioned — never noisy)
+        atomic_numbers_hot_combined = torch.zeros(
+            data.tags.size(0), num_classes, device=device, dtype=torch.float32
+        )
+        atomic_numbers_hot_combined[catalyst_mask] = zt_hot
+
+        z1_ads = data.atomic_numbers[adsorbate_mask].long() - 1  # N_ads
+        ads_hot = F.one_hot(z1_ads, num_classes=num_classes).float()  # N_ads, 90
+        atomic_numbers_hot_combined[adsorbate_mask] = ads_hot
+
+        data.atomic_numbers_hot = atomic_numbers_hot_combined
+
         return data
 
     def sample(

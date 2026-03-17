@@ -105,6 +105,7 @@ def hungarian(
     set1: Tensor,
     batch: Optional[Tensor]=None,
     cell: Optional[Tensor]=None,
+    pbc_aware: bool=True,
 ) -> Tensor:
     """
     Find optimal atom permutation between two structures using Hungarian algorithm.
@@ -151,7 +152,9 @@ def hungarian(
     C = set1.unsqueeze(0) - set0.unsqueeze(1)  # (N, N, 3)
 
     # Apply PBC to get minimum image distances
-    if cell is not None:
+    if pbc_aware:
+        if cell is None:
+            raise ValueError("cell must be provided for PBC-aware alignment.")
         if batch is None:
             batch = torch.zeros(N, dtype=torch.long, device=set0.device)
         else:
@@ -167,7 +170,7 @@ def hungarian(
             cell=cell,
             batch=batch_expanded,
         ).reshape(N, N, 3) # (N, N, 3)
-
+  
     # Compute L2 distance matrix (cost matrix for Hungarian algorithm)
     C_l2 = torch.linalg.norm(C, dim=-1)  # (N, N)
 

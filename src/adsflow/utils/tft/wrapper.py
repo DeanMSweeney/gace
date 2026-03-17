@@ -162,11 +162,12 @@ class PyGToTensorDict:
         Args:
             atom_mask: Boolean mask selecting atoms from the combined flat tensors.
             atom_batch: Per-atom graph assignment for the selected atoms.
-            is_adsorbate: If True, store ads_center (graph-level) and
+            is_adsorbate: If True, store ads_com (graph-level) and
                 ads_rel_pos (per-atom) instead of raw pos.  If False (prim),
                 include frac_coords and graph-level lattice parameters.
         """
         sd = TensorDict({}, batch_size=[batch_size], device=device)
+
 
         # Node-level: atomic_numbers_hot
         sd["atomic_numbers_hot"], mask = to_dense_batch(
@@ -176,12 +177,12 @@ class PyGToTensorDict:
         )
 
         if is_adsorbate:
-            # Graph-level: adsorbate center of mass
-            sd["ads_center"] = data.ads_center.unsqueeze(1)  # (B, 3) → (B, 1, 3)
+            # Graph-level: adsorbate com of mass
+            sd["ads_com"] = data.ads_com.unsqueeze(1)  # (B, 3) → (B, 1, 3)
 
             # Node-level: positions relative to COM
             sd["ads_rel_pos"], _ = to_dense_batch(
-                data.ads_rel_pos[atom_mask],
+                data.ads_rel_pos,
                 atom_batch,
                 max_num_nodes=max_num_nodes,
             )
@@ -229,9 +230,12 @@ class PyGToTensorDict:
                 )
 
         if is_adsorbate:
-            # Graph-level ads center time
-            if hasattr(data, "t_ads_center"):
-                td["t_ads_center"] = data.t_ads_center.unsqueeze(1)  # (B, 1)
+            # Graph-level ads com time
+            if hasattr(data, "t_ads_com"):
+                td["t_ads_com"] = data.t_ads_com.unsqueeze(1)  # (B, 1)
+                td["t_ads_rel_pos"] = data.t_ads_rel_pos.unsqueeze(1)  # (B, 1)
+            else:
+                raise ValueError("Data must have 't_ads_com' and 't_ads_rel_pos' attributes")
         else:
             # Graph-level lattice times (prim only)
             for key in ["t_len", "t_ang", "t_transformation_matrix"]:
