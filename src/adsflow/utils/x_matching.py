@@ -90,11 +90,6 @@ class XMatching():
         if self.variant == "relax":
             return x_loss, x_max_L
 
-        if pred_z is None:
-            raise ValueError("Forge criterion requires predictions dict with `z_logits`.")
-        if not hasattr(data, "atomic_numbers_true"):
-            raise ValueError("Forge criterion requires `data.atomic_numbers_true`.")
-
         z_targets = data.atomic_numbers_true.long()
         z_ce_per_atom = F.cross_entropy(pred_z.float(), z_targets, reduction="none").unsqueeze(1)
 
@@ -102,19 +97,38 @@ class XMatching():
         z_mask = (data.tags != 2).float().unsqueeze(1)
         z_loss = (z_ce_per_atom * z_mask).sum() / z_mask.sum().clamp_min(1.0)
 
-        lambda_z = float(getattr(self.hparams, "lambda_z", 1.0))
-        total_loss = x_loss + lambda_z * z_loss
+        lambda_z   = float(getattr(self.hparams, "lambda_z",   1.0))
+        lambda_ads = float(getattr(self.hparams, "lambda_ads", 1.0))
+        lambda_lat = float(getattr(self.hparams, "lambda_lat", 1.0))
+        lambda_M   = float(getattr(self.hparams, "lambda_M",   1.0))
+
+        # Adsorbate modality losses (COM + relative positions)
+        ads_com_loss  = (pred["u_ads_com"]     - data.u_ads_com).abs().mean()
+        ads_relp_loss = (pred["u_ads_rel_pos"] - data.u_ads_rel_pos).abs().mean()
+
+        # Lattice losses (lengths, angles, transformation matrix)
+        len_loss = (pred["u_len"] - data.u_len).abs().mean()
+        ang_loss = (pred["u_ang"] - data.u_ang).abs().mean()
+        M_loss   = (pred["u_M"]   - data.u_M).abs().mean()
+
+        total_loss = (
+              x_loss
+            + lambda_z   * z_loss
+            + lambda_ads * (ads_com_loss + ads_relp_loss)
+            + lambda_lat * (len_loss + ang_loss)
+            + lambda_M   * M_loss
+        )
 
         with torch.no_grad():
             z_max_L = (lambda_z * z_ce_per_atom * z_mask).max()
             max_L = torch.maximum(x_max_L, z_max_L)
-        
+
         return total_loss, max_L
 
     def path(
         self,
         input_graph: Data,
-        initial_dist: Literal["noisy", "fixed"] = "fixed",
+        time_dist: Literal["uniform", "beta"] = "beta",
     ) -> Data:
         """
         Generate interpolated training data along a path from initial to relaxed positions.
@@ -130,28 +144,27 @@ class XMatching():
             data = input_graph.clone()
 
             # define time 
-            t = torch.rand(len(torch.unique(data.batch)), 1, device=data.device, dtype=torch.float32) # B , 1 
+            if time_dist == "uniform":
+                t = torch.rand(len(torch.unique(data.batch)), 1, device=data.device, dtype=torch.float32) # B , 1   
+            elif time_dist == "beta":
+                beta = torch.distributions.Beta(beta_t, 1.0)
+                t = beta.sample((len(torch.unique(data.batch)), 1)).to(data.device) # B , 1 
             data.t = t 
 
             # ── Lattice and supercell (CatFlow data only) ────────────────────
-            catalyst_mask = (data.tags == 1)
-            adsorbate_mask = (data.tags == 2)
+            self.catalyst_mask = (data.tags == 1)
+            self.adsorbate_mask = (data.tags == 2)
             
             if hasattr(data, "prim_cell"):
                 data = self._build_lattice_path(data, t=t)
                 data = self._build_transformation_matrix_path(data, t=t)
-                data = self._build_ads_path(data, t=t, catalyst_mask = catalyst_mask, adsorbate_mask = adsorbate_mask)
-                data = self._build_atomic_num_path(data, t=t, catalyst_mask = catalyst_mask, adsorbate_mask = adsorbate_mask)
+                data = self._build_ads_path(data, t=t)
+                data = self._build_atomic_num_path(data, t=t)
 
             # ── Positions ────────────────────────────────────────────────────
-            data = self._build_positions_path(data, t=t, catalyst_mask = catalyst_mask, adsorbate_mask = adsorbate_mask)
-
-            if self.variant == "place":
-                return data
+            data = self._build_positions_path(data, t=t)
 
             return data
-
-        raise ValueError("Invalid model variant")
 
 
 
@@ -191,7 +204,7 @@ class XMatching():
         # scale only for endpoint
         t0_weight = self.hparams.t0_weight
         alpha_t_factor = torch.clamp(alpha_t_grad / (1 - alpha_t), 0.005, 1.5) if x_matching == "endpoint" \
-            else torch.clamp(1 / t, 1.0, t0_weight) #torch.tensor(1.0, device=t.device, dtype=torch.float32)
+            else torch.tensor(1.0, device=t.device, dtype=torch.float32)
 
         return alpha_t, alpha_t_grad, alpha_t_factor
             
@@ -353,7 +366,7 @@ class XMatching():
 
         return data
 
-    def _build_positions_path(self, data: Data, t: Tensor, catalyst_mask: Tensor, adsorbate_mask: Tensor, cosine_schd_freq: Tensor=1) -> Data:
+    def _build_positions_path(self, data: Data, t: Tensor, cosine_schd_freq: Tensor=1) -> Data:
         """
         Flow-match atomic positions for both 'place' and 'forge' variants.
 
@@ -389,7 +402,7 @@ class XMatching():
 
                 ads_cutoff = self.hparams.ads_cutoff
                 if ads_cutoff == 0:
-                    ads_neighborhood_mask = (adsorbate_mask)
+                    ads_neighborhood_mask = (self.adsorbate_mask)
                 elif ads_cutoff == float('inf'):
                     ads_neighborhood_mask = (data.fixed == 0)
                 else:
@@ -413,25 +426,25 @@ class XMatching():
                     set0=x0,
                     set1=x1,
                     cell=data.cell.float(),
-                    batch=data.batch[catalyst_mask],
+                    batch=data.batch[self.catalyst_mask],
                 )
 
                 u_x = pbc_aware_delta(
                     delta=x1 - x0,
                     cell=data.cell.float(),
-                    batch=data.batch[catalyst_mask],
+                    batch=data.batch[self.catalyst_mask],
                 )
 
                 # Sample per-graph interpolation time
                 t_x_per_graph = t # B, 1 
 
                 # broadcast to per atom
-                t_x = t_x_per_graph[data.batch[catalyst_mask]] # Nprim, 1
+                t_x = t_x_per_graph[data.batch[self.catalyst_mask]] # Nprim, 1
         
         else:
             raise ValueError("Unrecognized variant selected")
 
-        alpha_t_x, alpha_t_x_grad, self.alpha_t_x_loss_coeff = self._interpolant_schedule(
+        alpha_t_x, alpha_t_x_grad, alpha_t_x_loss_coeff = self._interpolant_schedule(
             t=t_x,
             schedule_type=self.schedule_type,
             x_matching=self.x_matching,
@@ -449,7 +462,7 @@ class XMatching():
 
         return data
 
-    def _build_ads_path(self, data: Data, t: Tensor, catalyst_mask: Tensor, adsorbate_mask: Tensor, cosine_schd_freq: Tensor=1) -> Data:
+    def _build_ads_path(self, data: Data, t: Tensor, cosine_schd_freq: Tensor=1) -> Data:
         """
         Flow-match adsorbate positions (forge variant only).
 
@@ -496,7 +509,7 @@ class XMatching():
         )
 
         t_RELP_per_graph = t # B, 1
-        t_RELP = t_RELP_per_graph[data.batch[adsorbate_mask]] # N_ads, 1
+        t_RELP = t_RELP_per_graph[data.batch[self.adsorbate_mask]] # N_ads, 1
         alpha_t_RELP, alpha_t_RELP_grad, alpha_t_RELP_loss_coeff = self._interpolant_schedule(
             t=t_RELP,
             schedule_type=self.schedule_type,
@@ -520,7 +533,7 @@ class XMatching():
 
         return data
 
-    def _build_atomic_num_path(self, data: Data, t: Tensor, catalyst_mask: Tensor, adsorbate_mask: Tensor, cosine_schd_freq: Tensor=1) -> Data:
+    def _build_atomic_num_path(self, data: Data, t: Tensor, cosine_schd_freq: Tensor=1) -> Data:
         """
         Simplex flow-matching for catalyst atom types (forge variant only).
 
@@ -561,7 +574,7 @@ class XMatching():
         
         # Sample per-graph interpolation time
         t_z_per_graph = t
-        t_z = t_z_per_graph[data.batch[catalyst_mask]] # Nprim, 1
+        t_z = t_z_per_graph[data.batch[self.catalyst_mask]] # Nprim, 1
 
         alpha_t_z, alpha_t_z_grad, alpha_t_z_loss_coeff = self._interpolant_schedule(
             t=t_z,
@@ -570,8 +583,8 @@ class XMatching():
             v=cosine_schd_freq, 
         )
 
-        corruption_prob_per_graph = torch.rand(t.size(), device=device) #B, 1
-        corruption_prob = corruption_prob_per_graph[data.batch[catalyst_mask]] # Nprim, 1
+        corruption_prob_per_graph = torch.rand(t.size(), device=device) # B, 1
+        corruption_prob = corruption_prob_per_graph[data.batch[self.catalyst_mask]] # Nprim, 1
         corrupt_mask = (corruption_prob > t_z).int() # Nprim, 1
 
         zt_hot = z0_hot * corrupt_mask + z1_hot * (1 - corrupt_mask)
@@ -585,11 +598,11 @@ class XMatching():
         atomic_numbers_hot_combined = torch.zeros(
             data.tags.size(0), num_classes, device=device, dtype=torch.float32
         )
-        atomic_numbers_hot_combined[catalyst_mask] = zt_hot
+        atomic_numbers_hot_combined[self.catalyst_mask] = zt_hot
 
-        z1_ads = data.atomic_numbers[adsorbate_mask].long() - 1  # N_ads
+        z1_ads = data.atomic_numbers[self.adsorbate_mask].long() - 1  # N_ads
         ads_hot = F.one_hot(z1_ads, num_classes=num_classes).float()  # N_ads, 90
-        atomic_numbers_hot_combined[adsorbate_mask] = ads_hot
+        atomic_numbers_hot_combined[self.adsorbate_mask] = ads_hot
 
         data.atomic_numbers_hot = atomic_numbers_hot_combined
 
