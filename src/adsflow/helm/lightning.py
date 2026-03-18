@@ -16,6 +16,7 @@ from adsflow.utils.x_matching import XMatching
 from adsflow.utils.evaluation import compute_eval_metrics
 from adsflow.utils.relaxation import relax_struc
 from adsflow.utils.atoms import write_strucs
+from adsflow.utils.tft.wrapper import PyGToTensorDict
 
 from typing import Optional, Literal, Union, Tuple
 
@@ -165,11 +166,58 @@ class LightFlowMatch(LightningModule, XMatching):
         data = self.path(input_graph=input_graph) 
 
         # Model predicts velocity field (or dict for forge with z_logits)
-        f = self(data)
-        loss, max_loss = self.criterion(
-            input_graph=data,
-            pred=f,  # Model prediction
-        )
+        if self.variant =="relax":
+            f = self(data)
+            loss, max_loss = self.criterion(
+                input_graph=data,
+                pred=f,  # Model prediction
+            )
+        elif self.variant == "forge":
+            wrapper = PyGToTensorDict()
+            x_prim, x_ads, t_prim, t_ads, f_prim, f_ads = wrapper.to_tensordict(data)
+
+            # Padding masks: to_dense_batch gives True=real, transformer expects True=padding
+            prim_padding_mask = ~x_prim.mask  # (B, M)
+            ads_padding_mask  = ~x_ads.mask   # (B, N)
+
+            # Single shared t per graph (B, 1) → (B,), broadcast to each modality
+            t = t_prim.data["t"].squeeze(-1)  # (B,)
+
+            pred_prim, pred_ads, aux_outputs = self(
+                x_prim=(
+                    x_prim.data["atomic_numbers_hot"],     # (B, M, 90)
+                    x_prim.data["frac_coords"],            # (B, M, 3)
+                    x_prim.data["lengths_scaled"],         # (B, 1, 3)
+                    x_prim.data["angles_radians"],         # (B, 1, 3)
+                    x_prim.data["transformation_matrix"],  # (B, 3, 3)
+                    x_prim.data["supercell_lattice"],      # (B, 3, 3)
+                ),
+                x_ads=(
+                    x_ads.data["atomic_numbers_hot"],      # (B, N, 90)
+                    x_ads.data["ads_com"],                 # (B, 1, 3)
+                    x_ads.data["ads_rel_pos"],             # (B, N, 3)
+                ),
+                t_prim=(t, t, t, t),   # (atom_types_t, frac_coords_t, lengths_t, angles_t)
+                t_ads=(t, t, t),       # (ads_atom_types_t, ads_com_t, ads_rel_pos_t)
+                feats={
+                    "dataset_idx": f_prim.data["dataset_idx"],
+                    "spacegroup":  f_prim.data["spacegroup"],
+                },
+                prim_padding_mask=prim_padding_mask,
+                ads_padding_mask=ads_padding_mask,
+            )
+            # Node-level: unpack dense (B, M/N, D) → sparse (N, D) via real-token mask
+            # Graph-level: squeeze the token dim (B, 1, D) → (B, D)
+            pred = {
+                "u_x":           x_prim.to_sparse(pred_prim[1]),   # (N_prim, 3)
+                "z_logits":      x_prim.to_sparse(pred_prim[0]),   # (N_prim, 90)
+                "u_ads_com":     pred_ads[0].squeeze(1),           # (B, 3)
+                "u_ads_rel_pos": x_ads.to_sparse(pred_ads[1]),     # (N_ads, 3)
+                "u_len":         pred_prim[2].squeeze(1),          # (B, 3)
+                "u_ang":         pred_prim[3].squeeze(1),          # (B, 3)
+                "u_M":           pred_prim[4],                     # (B, 3, 3)
+            }
+            loss, max_loss = self.criterion(input_graph=data, pred=pred)
 
         # DEBUG: collect diagnostic tensors
         if self._write_f_u: 
@@ -226,8 +274,6 @@ class LightFlowMatch(LightningModule, XMatching):
 
         return loss
         
-
-
     def validation_step(self, data: Data, batch_idx):
         """
         Single validation step (one batch).

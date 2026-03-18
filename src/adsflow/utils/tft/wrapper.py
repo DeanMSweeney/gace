@@ -16,8 +16,18 @@ class TensorDictBatch:
     """Container for dense transformer input and sparse<->dense bookkeeping."""
 
     data: TensorDict
-    mask: Tensor
+    mask: Tensor        # (B, max_nodes) bool — True = real token
     batch_index: Tensor
+
+    def to_sparse(self, dense: Tensor) -> Tensor:
+        """Convert a dense padded tensor back to sparse using the real-token mask.
+
+        Args:
+            dense: (B, max_nodes, D) — padded tensor from transformer output
+        Returns:
+            sparse: (N, D) — real tokens only, preserving original atom ordering
+        """
+        return dense[self.mask]
 
 
 class PyGToTensorDict:
@@ -104,26 +114,16 @@ class PyGToTensorDict:
             is_adsorbate=True,
         )
 
-        # ── build time dicts ─────────────────────────────────────────────────
-        t_prim = self._build_time_dict(
-            data=data,
-            atom_mask=prim_mask,
-            atom_batch=prim_batch,
-            dense_mask=x_prim.mask,
-            batch_size=batch_size,
-            max_num_nodes=max_prim_nodes,
-            device=device,
+        # ── build time dicts — all components share the same per-graph t ─────
+        t_prim = TensorDictBatch(
+            data=TensorDict({"t": data.t}, batch_size=[batch_size], device=device),
+            mask=x_prim.mask,
+            batch_index=prim_batch,
         )
-
-        t_ads = self._build_time_dict(
-            data=data,
-            atom_mask=ads_mask,
-            atom_batch=ads_batch,
-            dense_mask=x_ads.mask,
-            batch_size=batch_size,
-            max_num_nodes=max_ads_nodes,
-            device=device,
-            is_adsorbate=True,
+        t_ads = TensorDictBatch(
+            data=TensorDict({"t": data.t}, batch_size=[batch_size], device=device),
+            mask=x_ads.mask,
+            batch_index=ads_batch,
         )
 
         # ── build feats dicts ────────────────────────────────────────────────
@@ -205,44 +205,6 @@ class PyGToTensorDict:
                 sd["supercell_lattice"] = data.supercell_lattice  # (B, 3, 3) = S @ L
 
         return TensorDictBatch(data=sd, mask=mask, batch_index=atom_batch)
-
-    def _build_time_dict(
-        self,
-        data: Data,
-        atom_mask: Tensor,
-        atom_batch: Tensor,
-        dense_mask: Tensor,
-        batch_size: int,
-        max_num_nodes: int,
-        device: torch.device,
-        is_adsorbate: bool = False,
-    ) -> TensorDictBatch:
-        """Build a dense time TensorDict for one group of atoms."""
-        td = TensorDict({}, batch_size=[batch_size], device=device)
-
-        # Node-level times
-        for key in ["t_x", "t_h"]:
-            if hasattr(data, key):
-                td[key], _ = to_dense_batch(
-                    getattr(data, key)[atom_mask],
-                    atom_batch,
-                    max_num_nodes=max_num_nodes,
-                )
-
-        if is_adsorbate:
-            # Graph-level ads com time
-            if hasattr(data, "t_ads_com"):
-                td["t_ads_com"] = data.t_ads_com.unsqueeze(1)  # (B, 1)
-                td["t_ads_rel_pos"] = data.t_ads_rel_pos.unsqueeze(1)  # (B, 1)
-            else:
-                raise ValueError("Data must have 't_ads_com' and 't_ads_rel_pos' attributes")
-        else:
-            # Graph-level lattice times (prim only)
-            for key in ["t_len", "t_ang", "t_transformation_matrix"]:
-                if hasattr(data, key):
-                    td[key] = getattr(data, key).unsqueeze(1)  # (B, 1, …)
-
-        return TensorDictBatch(data=td, mask=dense_mask, batch_index=atom_batch)
 
     def _build_feats_dict(
         self,

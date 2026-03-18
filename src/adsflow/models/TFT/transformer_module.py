@@ -209,12 +209,7 @@ class TransformerModule(nn.Module):
             nn.Linear(hidden_dim, 9, bias=False),
         )
 
-        # ── Ads output heads ─────────────────────────────────────────────────
-        self.out_ads_atom_types = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.SiLU(inplace=False),
-            nn.Linear(hidden_dim, atom_dim),
-        )
+        # ── Ads output heads (atom types are conditioning — not predicted) ────
         self.out_ads_com = nn.Sequential(
             nn.LayerNorm(hidden_dim),
             nn.Linear(hidden_dim, spatial_dim, bias=False),
@@ -253,8 +248,7 @@ class TransformerModule(nn.Module):
             self.angles_radians_cross_attention = decoder_layer()
             self.transformation_matrix_cross_attention = decoder_layer()
 
-            # Ads cross-attention
-            self.ads_atom_types_cross_attention = decoder_layer()
+            # Ads cross-attention (atom types are conditioning — no cross-attn head)
             self.ads_com_cross_attention = decoder_layer()
             self.ads_rel_pos_cross_attention = decoder_layer()
 
@@ -344,7 +338,7 @@ class TransformerModule(nn.Module):
         self,
         x_prim: (
             Tuple[
-                Int["b m v"],  # type: ignore - atom_types
+                Float["b m v"],  # type: ignore - atom_types (soft one-hot simplex)
                 Float["b m 3"],  # type: ignore - frac_coords
                 Float["b 1 3"],  # type: ignore - lengths_scaled
                 Float["b 1 3"],  # type: ignore - angles_radians
@@ -355,7 +349,7 @@ class TransformerModule(nn.Module):
         ),
         x_ads: (
             Tuple[
-                Int["b n v"],  # type: ignore - ads_atom_types
+                Float["b n v"],  # type: ignore - ads_atom_types (soft one-hot simplex, conditioning)
                 Float["b 1 3"],  # type: ignore - ads_com (COM)
                 Float["b n 3"],  # type: ignore - ads_rel_pos
             ]
@@ -388,11 +382,11 @@ class TransformerModule(nn.Module):
             Float["b m 3"],  # type: ignore - frac_coords
             Float["b 1 3"],  # type: ignore - lengths_scaled
             Float["b 1 3"],  # type: ignore - angles_radians
-            Float["b 1 3"],  # type: ignore - transformation_matrix
+            Float["b 3 3"],  # type: ignore - transformation_matrix
         ],
         Tuple[
-            Float["b n v"],  # type: ignore - ads_atom_types
-            Float["b n 3"],  # type: ignore - ads_pos
+            Float["b 1 3"],  # type: ignore - ads_com
+            Float["b n 3"],  # type: ignore - ads_rel_pos
         ],
         Tuple[
             Float["b 1 p"],  # type: ignore - global_property
@@ -610,16 +604,10 @@ class TransformerModule(nn.Module):
             out_lengths_scaled = self.out_lengths_scaled(h_lengths_scaled.mean(-2, keepdim=True))
             out_angles_radians = self.out_angles_radians(h_angles_radians.mean(-2, keepdim=True))
             out_transformation_matrix = self.out_transformation_matrix(
-                h_transformation_matrix.mean(-2, keepdim=True)
-            )
+                h_transformation_matrix.mean(-2)
+            ).reshape(batch_size, 3, 3)  # (B, 9) → (B, 3, 3)
 
-            # Ads cross-attention (query = ads output, memory = full sequence)
-            h_ads_atom = self.ads_atom_types_cross_attention(
-                h_out_ads, h_in,
-                tgt_key_padding_mask=ads_padding_mask,
-                memory_key_padding_mask=padding_mask,
-                **attention_kwargs,
-            )
+            # Ads cross-attention (atom types are conditioning — no head for them)
             h_ads_com = self.ads_com_cross_attention(
                 h_out_ads, h_in,
                 tgt_key_padding_mask=ads_padding_mask,
@@ -633,7 +621,6 @@ class TransformerModule(nn.Module):
                 **attention_kwargs,
             )
 
-            out_ads_atom_types = self.out_ads_atom_types(h_ads_atom)
             # Pool over ads tokens for the global com prediction
             ads_com_pooled = (h_ads_com * ads_real_mask.unsqueeze(-1)).sum(1, keepdim=True) / (
                 ads_real_mask.sum(1, keepdim=True).unsqueeze(-1) + 1e-8
@@ -647,10 +634,9 @@ class TransformerModule(nn.Module):
             out_lengths_scaled = self.out_lengths_scaled(h_out_prim.mean(-2, keepdim=True))
             out_angles_radians = self.out_angles_radians(h_out_prim.mean(-2, keepdim=True))
             out_transformation_matrix = self.out_transformation_matrix(
-                h_out_prim.mean(-2, keepdim=True)
-            )
+                h_out_prim.mean(-2)
+            ).reshape(batch_size, 3, 3)  # (B, 9) → (B, 3, 3)
 
-            out_ads_atom_types = self.out_ads_atom_types(h_out_ads)
             # Pool over ads tokens for the global com prediction
             ads_com_pooled = (h_out_ads * ads_real_mask.unsqueeze(-1)).sum(1, keepdim=True) / (
                 ads_real_mask.sum(1, keepdim=True).unsqueeze(-1) + 1e-8
@@ -736,8 +722,7 @@ class TransformerModule(nn.Module):
             out_transformation_matrix * global_mask,          # (B, 1, 3)
         )
         pred_ads = (
-            out_ads_atom_types * ads_real_mask.unsqueeze(-1),  # (B, N, V)
-            out_ads_com * global_mask,                      # (B, 1, 3)
+            out_ads_com * global_mask,                         # (B, 1, 3)
             out_ads_rel_pos * ads_real_mask.unsqueeze(-1),     # (B, N, 3)
         )
         pred_aux_outputs = (
@@ -753,7 +738,7 @@ class TransformerModule(nn.Module):
         self,
         x_prim: (
             Tuple[
-                Int["b m v"],  # type: ignore - atom_types
+                Float["b m v"],  # type: ignore - atom_types (soft one-hot simplex)
                 Float["b m 3"],  # type: ignore - frac_coords
                 Float["b 1 3"],  # type: ignore - lengths_scaled
                 Float["b 1 3"],  # type: ignore - angles_radians
@@ -764,7 +749,7 @@ class TransformerModule(nn.Module):
         ),
         x_ads: (
             Tuple[
-                Int["b n v"],  # type: ignore - ads_atom_types
+                Float["b n v"],  # type: ignore - ads_atom_types (soft one-hot simplex, conditioning)
                 Float["b 1 3"],  # type: ignore - ads_com (COM)
                 Float["b n 3"],  # type: ignore - ads_rel_pos
             ]
