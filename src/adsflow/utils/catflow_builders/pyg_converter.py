@@ -82,40 +82,18 @@ def catflow_dict_to_pyg_data(d: dict) -> Data:
 
     prim_natoms = len(slab)  # scalar int
 
-    # ── Fractional coordinates ───────────────────────────────────────────────
-    # Compute fractional coordinates: solve cell.T @ frac = pos for frac
-    # Broadcast prim_cell from (1, 3, 3) to (N_slab, 3, 3)
-    cell_broadcasted = prim_cell.expand(prim_natoms, -1, -1)  # (N_slab, 3, 3)
-    frac_coords = torch.linalg.solve(
-        cell_broadcasted.transpose(1, 2), prim_pos.unsqueeze(-1)
-    ).squeeze(-1)  # (N_slab, 3)
+    # ── Precomputed fields (from data_processor.py) ──────────────────────────
+    frac_coords = torch.from_numpy(
+        np.array(d["frac_coords"], dtype=np.float32)
+    )  # (N_slab, 3)
 
-    # ── Lattice parameters (lengths and angles) ──────────────────────────────
-    # Extract lattice vectors from cell matrix
-    # prim_cell is (1, 3, 3) where each row is a lattice vector
-    cell_matrix = prim_cell.squeeze(0)  # (3, 3)
-    a_vec = cell_matrix[0, :]  # (3,)
-    b_vec = cell_matrix[1, :]  # (3,)
-    c_vec = cell_matrix[2, :]  # (3,)
+    lengths_scaled = torch.from_numpy(
+        np.array(d["lengths_scaled"], dtype=np.float32)
+    )  # (3,)
 
-    # Compute edge lengths
-    a = torch.linalg.norm(a_vec)  # scalar
-    b = torch.linalg.norm(b_vec)  # scalar
-    c = torch.linalg.norm(c_vec)  # scalar
-    lengths = torch.stack([a, b, c])  # (3,)
-
-    # Compute interaxial angles (in radians)
-    # alpha = angle between b and c
-    # beta  = angle between a and c
-    # gamma = angle between a and b
-    cos_alpha = torch.dot(b_vec, c_vec) / (b * c)
-    cos_beta = torch.dot(a_vec, c_vec) / (a * c)
-    cos_gamma = torch.dot(a_vec, b_vec) / (a * b)
-
-    alpha = torch.acos(torch.clamp(cos_alpha, -1.0, 1.0))  # scalar, radians
-    beta = torch.acos(torch.clamp(cos_beta, -1.0, 1.0))    # scalar, radians
-    gamma = torch.acos(torch.clamp(cos_gamma, -1.0, 1.0))  # scalar, radians
-    angles_radians = torch.stack([alpha, beta, gamma])  # (3,)
+    angles_radians = torch.from_numpy(
+        np.array(d["angles_radians"], dtype=np.float32)
+    )  # (3,)
 
     # ── Adsorbate fields (ads_*) ─────────────────────────────────────────────
     ads_pos = torch.from_numpy(
@@ -148,7 +126,7 @@ def catflow_dict_to_pyg_data(d: dict) -> Data:
     # ── Combined pos + tags (OC20-style) ────────────────────────────────────
     # Concatenate: primitive slab atoms first, adsorbate atoms second.
     # Tags: 1 = slab atom, 2 = adsorbate atom  (matches OC20 convention)
-    pos_combined = torch.cat([prim_pos, ads_pos], dim=0)            # (N_slab + N_ads, 3)
+    pos_all = torch.cat([prim_pos, ads_pos], dim=0)            # (N_slab + N_ads, 3)
     atomic_numbers = torch.cat(
         [prim_atomic_numbers, ads_atomic_numbers], dim=0
     )                                                               # (N_slab + N_ads,)
@@ -159,27 +137,26 @@ def catflow_dict_to_pyg_data(d: dict) -> Data:
 
     return Data(
         # Explicitly set num_nodes so PyG batching uses the combined count
-        num_nodes=len(pos_combined),
+        num_nodes=len(pos_all),
         # Combined (primary fields used by EquiformerV2 / x_matching)
-        pos_combined=pos_combined,
-        atomic_numbers=atomic_numbers,
+        pos_all=pos_all,
+        atomic_numbers_all=atomic_numbers,
         tags=tags,
-        # Slab (kept separate for CatFlow-specific flow matching)
+        # Primitive cell 
         prim_pos=prim_pos,
-        prim_cell=prim_cell,
-        prim_atomic_numbers=prim_atomic_numbers,
+        cell=prim_cell,
+        atomic_numbers=prim_atomic_numbers,
         prim_natoms=prim_natoms,
-        frac_coords=frac_coords,
-        lengths_scaled=lengths,
+        pos=frac_coords,
+        lengths_scaled=lengths_scaled,
         angles_radians=angles_radians,
         # Adsorbate
         ads_pos=ads_pos,
         ads_atomic_numbers=ads_atomic_numbers,
-        # Reference / metadata
         ref_ads_pos=ref_ads_pos,
         ref_energy=ref_energy,
         bind_ads_atom=bind_ads_atom,
-        # Geometry metadata
+        # Full slab geometry 
         supercell_matrix=supercell_matrix,
         n_slab=n_slab,
         n_vac=n_vac,

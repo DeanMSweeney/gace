@@ -17,23 +17,31 @@ class XMatching():
     def criterion(
         self,
         input_graph,
-        pred: Union[Tensor, dict],  # N, 3 positions or dict with {"u_x", "z_logits"}
+        pred: Union[Tensor, dict],  # N, 3 positions or dict with {"u_x", "z_logits", ...}
+    ):
+        """Dispatch to the variant-specific loss."""
+        if self.variant == "place":
+            return self._criterion_relax(input_graph, pred)
+        elif self.variant == "forge":
+            return self._criterion_forge(input_graph, pred)
+        else:
+            raise ValueError(f"Unknown variant: {self.variant}")
+
+    def _criterion_relax(
+        self,
+        input_graph,
+        pred: Union[Tensor, dict],
     ):
         """
-        Compute the loss between predicted and target atomic positions.
+        Loss for the relax variant: atomic positions only.
 
-        Supports:
-        - Masking for frozen atoms (only compute loss on movable atoms)
-        - Optional adsorbate weighting (upweight adsorbate atoms vs catalyst)
-        - PBC-aware distance computation for endpoint matching
-        - Time-dependent loss weighting for cosine interpolation schedules
+        - Supervises only the adsorbate neighbourhood (controlled by ads_cutoff).
+        - Adsorbate atoms are upweighted by tao relative to catalyst neighbours.
+        - Supports both flow (velocity) and endpoint (position) matching modes.
         """
-        # Compute mask (no gradient needed for mask creation)
         data = input_graph
-        pred_x = pred["u_x"] if isinstance(pred, dict) else pred
-        pred_z = pred.get("z_logits", None) if isinstance(pred, dict) else None
+        pred_x = pred.float()
 
-        pred_x = pred_x.float()
         if self.x_matching == "endpoint":
             target_x = data.pos_relaxed.float()
         else:
@@ -41,75 +49,95 @@ class XMatching():
                 raise ValueError("Flow criterion requires `data.u_x` to be set in path().")
             target_x = data.u_x.float()
 
-        # Compute position difference based on matching mode (needs gradients!)
         if self.x_matching == "endpoint":
-            # Compute PBC-aware loss between predicted and target positions
-            # (handles periodic boundary conditions for crystalline structures)
             diff = pbc_aware_delta(
                 cell=data.cell.float(),
                 delta=(pred_x - target_x),
                 batch=data.batch,
             )
-
         elif self.x_matching == "flow":
-            # Simple Euclidean difference (for flow-based methods
             diff = pred_x - target_x
-
         else:
             raise ValueError("Invalid x_matching routine")
 
         with torch.no_grad():
-            # Apply time-dependent weighting for endpoint interpolation schedules.
-            # During forge training, alpha_t_x_factor is set in path().
             alpha_t_x_factor = getattr(self, "alpha_t_x_factor", 1.0)
 
-            # Spatial mask (precomputed in path(), stored on data)
+            # Neighbourhood mask: adsorbate + optional cutoff shell of catalyst atoms
             if hasattr(data, "ads_neighborhood_mask"):
                 mask = data.ads_neighborhood_mask.float().unsqueeze(1)
             else:
                 mask = (data.fixed == 0).float().unsqueeze(1)
 
-            # Adsorbate weighting within the selected atoms
+            # Upweight adsorbate atoms by tao
             tao = self.hparams.tao
             adsorbates = (data.tags == 2).float().unsqueeze(1)  # N, 1
             mask_factor = mask * (1 + adsorbates * (tao - 1))
 
-        # Compute mean squared error per atom (averaged over xyz dimensions)
-        L_per_atom = diff.abs().mean(dim=1, keepdim=True)  # N, 1
-        
-        # Apply all weighting factors: frozen atom mask, adsorbate weight, time weight.
-        modified_L_per_atom = L_per_atom * mask_factor * alpha_t_x_factor  # N, 1
-        # Average over all free (non-frozen) atoms
+        L_per_atom = diff.abs().mean(dim=1, keepdim=True)           # N, 1
+        modified_L_per_atom = L_per_atom * mask_factor * alpha_t_x_factor
         x_loss = modified_L_per_atom.sum() / mask.sum().clamp_min(1e-8)
-        
+
         with torch.no_grad():
-            # Track maximum loss atom for stability monitoring
             x_max_L = modified_L_per_atom.max()
 
-        # Forge adds atomic-number endpoint loss.
-        if self.variant == "relax":
-            return x_loss, x_max_L
+        return x_loss, x_max_L
 
-        z_targets = data.atomic_numbers_true.long()
-        z_ce_per_atom = F.cross_entropy(pred_z.float(), z_targets, reduction="none").unsqueeze(1)
+    def _criterion_forge(
+        self,
+        input_graph,
+        pred: dict,
+    ):
+        """
+        Loss for the forge variant: positions + atom types + lattice + adsorbate.
 
-        # Adsorbate types are conditioned/fixed in forge; supervise catalyst types.
-        z_mask = (data.tags != 2).float().unsqueeze(1)
-        z_loss = (z_ce_per_atom * z_mask).sum() / z_mask.sum().clamp_min(1.0)
+        Components
+        ----------
+        x_loss      : MAE on catalyst fractional coordinates (endpoint)
+        z_loss      : cross-entropy on catalyst atomic numbers (adsorbate types are conditioned)
+        ads_com_loss: MAE on adsorbate centre-of-mass position
+        ads_relp_loss: MAE on adsorbate relative positions
+        len_loss    : MAE on primitive-cell lengths
+        ang_loss    : MAE on primitive-cell angles
+        M_loss      : MAE on supercell transformation matrix
+
+        total = x + λ_z·z + λ_ads·(ads_com + ads_relp) + λ_lat·(len + ang) + λ_M·M
+        """
+        data = input_graph
+
+        # ── Position loss (endpoint) w/ minimum image convention ─────────────────────────────────────────
+        x_pred = pred["pos"].float()
+        x_target = data.pos_target.float() # fractiona coordiantes of primitive cell
+        x_diff = x_pred - x_target
+        n0 = torch.round(x_diff)
+        x_diff = x_diff - n0
+        x_loss = x_diff.abs().mean()  # scalar
+        with torch.no_grad():
+            x_max_L = x_diff.abs().mean(dim=1).max()  # per-atom max for monitoring
+        # ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+        # ── Atom-type loss (catalyst only — adsorbate types are conditioned) ─────────────────────────────
+        z_pred = pred["z"].float()
+        z_target = data.atomic_numbers_target.long().squeeze(1) # N
+        z_ce_per_atom = F.cross_entropy(z_pred, z_target, reduction="none").unsqueeze(1) # N, 1
+        z_loss = (z_ce_per_atom).sum() / len(z_ce_per_atom)
+        # ────────────────────────────────────────────────────────────────────────────────────────────────
+
+        # ── Lattice losses (endpoint) ───────────────────────────────────────────────────────────────────
+        len_loss = (pred["len"] - data.lengths_scaled_target).abs().mean()
+        ang_loss = (pred["ang"] - data.angles_radians_target).abs().mean()
+        M_loss   = (pred["M"]   - data.transformation_matrix_target).abs().mean()
+        # ────────────────────────────────────────────────────────────────────────────────────────────────
+
+        # ── Adsorbate losses (endpoint) ─────────────────────────────────────────────────────────────────
+        ads_com_loss  = (pred["ads_com"]     - data.ads_com_target).abs().mean()
+        ads_relp_loss = (pred["ads_rel_pos"] - data.ads_rel_pos_target).abs().mean()
+        # ────────────────────────────────────────────────────────────────────────────────────────────────
 
         lambda_z   = float(getattr(self.hparams, "lambda_z",   1.0))
         lambda_ads = float(getattr(self.hparams, "lambda_ads", 1.0))
         lambda_lat = float(getattr(self.hparams, "lambda_lat", 1.0))
         lambda_M   = float(getattr(self.hparams, "lambda_M",   1.0))
-
-        # Adsorbate modality losses (COM + relative positions)
-        ads_com_loss  = (pred["u_ads_com"]     - data.u_ads_com).abs().mean()
-        ads_relp_loss = (pred["u_ads_rel_pos"] - data.u_ads_rel_pos).abs().mean()
-
-        # Lattice losses (lengths, angles, transformation matrix)
-        len_loss = (pred["u_len"] - data.u_len).abs().mean()
-        ang_loss = (pred["u_ang"] - data.u_ang).abs().mean()
-        M_loss   = (pred["u_M"]   - data.u_M).abs().mean()
 
         total_loss = (
               x_loss
@@ -120,7 +148,7 @@ class XMatching():
         )
 
         with torch.no_grad():
-            z_max_L = (lambda_z * z_ce_per_atom * z_mask).max()
+            z_max_L = (lambda_z * z_ce_per_atom).max()
             max_L = torch.maximum(x_max_L, z_max_L)
 
         return total_loss, max_L
@@ -129,6 +157,7 @@ class XMatching():
         self,
         input_graph: Data,
         time_dist: Literal["uniform", "beta"] = "beta",
+        beta_t: float = 2.0,
     ) -> Data:
         """
         Generate interpolated training data along a path from initial to relaxed positions.
@@ -155,11 +184,11 @@ class XMatching():
             self.catalyst_mask = (data.tags == 1)
             self.adsorbate_mask = (data.tags == 2)
             
-            if hasattr(data, "prim_cell"):
+            if self.variant == "forge":
                 data = self._build_lattice_path(data, t=t)
                 data = self._build_transformation_matrix_path(data, t=t)
                 data = self._build_ads_path(data, t=t)
-                data = self._build_atomic_num_path(data, t=t)
+                data = self._build_atom_type_path(data, t=t)
 
             # ── Positions ────────────────────────────────────────────────────
             data = self._build_positions_path(data, t=t)
@@ -203,7 +232,7 @@ class XMatching():
 
         # scale only for endpoint
         t0_weight = self.hparams.t0_weight
-        alpha_t_factor = torch.clamp(alpha_t_grad / (1 - alpha_t), 0.005, 1.5) if x_matching == "endpoint" \
+        alpha_t_factor = torch.clamp(alpha_t_grad / (1 - alpha_t) ** 2,  min=None, max=100) if x_matching == "endpoint" \
             else torch.tensor(1.0, device=t.device, dtype=torch.float32)
 
         return alpha_t, alpha_t_grad, alpha_t_factor
@@ -351,15 +380,16 @@ class XMatching():
         # supercell = M_t @ prim_cell_t
 
         # First, build primitive cell from lattice parameters
-        prim_cell_t = lattice_params_to_matrix(
+        C_t = lattice_params_to_matrix(
             lengths=data.lengths_scaled,  # (B, 3)
             angles=data.angles_radians,   # (B, 3)
         )  # (B, 3, 3)
 
         # Then apply transformation matrix to get supercell lattice
         # Supercell lattice: L_super = M @ L_prim
-        data.supercell_lattice = torch.bmm(M_t, prim_cell_t)  # (B, 3, 3)
-        data.cell = prim_cell_t  # Store primitive cell as well
+        data.supercell_lattice = torch.bmm(M_t, C_t)  # (B, 3, 3)
+        data.cell_target = C_t
+        data.cell = C_t  # Store primitive cell as well 
 
         if self.x_matching == "flow":
             data.u_M = u_M * alpha_t_M_grad.unsqueeze(-1)
@@ -386,7 +416,7 @@ class XMatching():
             data.t          ← per-atom interpolation time
             data.u_x        ← target velocity (rescaled by schedule gradient)
         """
-        if self.variant == "relax":
+        if self.variant == "place":
             if hasattr(data, "pos_relaxed"):
                 x1 = data.pos_relaxed.float() # N, 3
                 x0 = data.pos.float() # N, 3
@@ -417,29 +447,27 @@ class XMatching():
                 t_x = t_x_per_graph[data.batch] # N, 1
 
         elif self.variant == "forge":
-            if hasattr(data, "pos_prim"):
-                x1 = data.pos_prim.float() # combined primtive cell + adsorbat
-                x0 = torch.randn_like(x1, dtype=torch.float32)
+            x1 = data.pos.float() # combined primtive cell 
+            x0 = torch.randn_like(x1, dtype=torch.float32)
 
-                # Hungarian alignment applied to catalyst atoms 
-                x0 = hungarian(
-                    set0=x0,
-                    set1=x1,
-                    cell=data.cell.float(),
-                    batch=data.batch[self.catalyst_mask],
-                )
+            # Hungarian alignment applied to catalyst atoms 
+            x0 = hungarian(
+                set0=x0,
+                set1=x1,
+                cell=data.cell.float(),
+                batch=data.batch[self.catalyst_mask],
+                pbc_aware=True,
+            ) # will detect if fractional coordinates or cartesian 
 
-                u_x = pbc_aware_delta(
-                    delta=x1 - x0,
-                    cell=data.cell.float(),
-                    batch=data.batch[self.catalyst_mask],
-                )
+            u_x = x1 - x0 
+            u_x_n0 = torch.round(u_x)
+            u_x = u_x - u_x_n0
 
-                # Sample per-graph interpolation time
-                t_x_per_graph = t # B, 1 
+            # Sample per-graph interpolation time
+            t_x_per_graph = t # B, 1 
 
-                # broadcast to per atom
-                t_x = t_x_per_graph[data.batch[self.catalyst_mask]] # Nprim, 1
+            # broadcast to per atom
+            t_x = t_x_per_graph[data.batch[self.catalyst_mask]] # Nprim, 1
         
         else:
             raise ValueError("Unrecognized variant selected")
@@ -454,8 +482,8 @@ class XMatching():
         # interpolation 
         xt  = x0 + alpha_t_x * u_x       # rescaled velocity
 
-        data.frac_coords     = xt   
-        data.frac_coords_target = x1
+        data.pos   = xt   
+        data.pos_target = x1
 
         if self.x_matching == "flow":
             data.u_x = u_x * alpha_t_x_grad
@@ -526,14 +554,18 @@ class XMatching():
 
         data.ads_com = adsCOM_t
         data.ads_rel_pos = adsRELP_t
+        data.ads_com_target = adsCOM1
+        data.ads_rel_pos_target = adsRELP1
 
         if self.x_matching == "flow":
-            data.u_ads_com = alpha_t_COM_grad * u_COM 
+            data.u_ads_com = alpha_t_COM_grad * u_COM
             data.u_ads_rel_pos = alpha_t_RELP_grad * u_RELP
+        
+        # See atom type path for adsorbate atom types 
 
         return data
 
-    def _build_atomic_num_path(self, data: Data, t: Tensor, cosine_schd_freq: Tensor=1) -> Data:
+    def _build_atom_type_path(self, data: Data, t: Tensor, cosine_schd_freq: Tensor=1) -> Data:
         """
         Simplex flow-matching for catalyst atom types (forge variant only).
 
@@ -554,7 +586,7 @@ class XMatching():
 
         # shift atomic numbers to start from 0, not 1 
         # z1 only pertains to the primitive cell 
-        z1 = data.prim_atomic_numbers.long() - 1 # N, 1
+        z1 = data.atomic_numbers.long() - 1 # N, 1
 
         # Prior: random atomic number indices (much more efficient than one-hot)
         num_classes = 90
@@ -583,28 +615,19 @@ class XMatching():
             v=cosine_schd_freq, 
         )
 
+        # Use corruption probbability to randomly mask certain atoms 
+        # Becomes less likely as t -> 1 (true sample)
         corruption_prob_per_graph = torch.rand(t.size(), device=device) # B, 1
         corruption_prob = corruption_prob_per_graph[data.batch[self.catalyst_mask]] # Nprim, 1
         corrupt_mask = (corruption_prob > t_z).int() # Nprim, 1
-
         zt_hot = z0_hot * corrupt_mask + z1_hot * (1 - corrupt_mask)
 
         data.atomic_numbers_target = z1
-        data.atomic_numbers_hot_target = z1_hot
+        data.atomic_numbers_hot = zt_hot
 
-        # Allocate combined (N_total, num_classes) tensor:
-        # prim atoms get the noisy simplex zt_hot; ads atoms get their true one-hot
-        # (adsorbate types are conditioned — never noisy)
-        atomic_numbers_hot_combined = torch.zeros(
-            data.tags.size(0), num_classes, device=device, dtype=torch.float32
-        )
-        atomic_numbers_hot_combined[self.catalyst_mask] = zt_hot
-
-        z1_ads = data.atomic_numbers[self.adsorbate_mask].long() - 1  # N_ads
-        ads_hot = F.one_hot(z1_ads, num_classes=num_classes).float()  # N_ads, 90
-        atomic_numbers_hot_combined[self.adsorbate_mask] = ads_hot
-
-        data.atomic_numbers_hot = atomic_numbers_hot_combined
+        # Condition on adsorbate atom types 
+        z1_ads = data.atomic_numbers.long() - 1  # N_ads
+        data.ads_atomic_numbers_hot = z1_ads
 
         return data
 

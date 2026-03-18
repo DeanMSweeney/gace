@@ -168,14 +168,6 @@ class PyGToTensorDict:
         """
         sd = TensorDict({}, batch_size=[batch_size], device=device)
 
-
-        # Node-level: atomic_numbers_hot
-        sd["atomic_numbers_hot"], mask = to_dense_batch(
-            data.atomic_numbers_hot[atom_mask],
-            atom_batch,
-            max_num_nodes=max_num_nodes,
-        )
-
         if is_adsorbate:
             # Graph-level: adsorbate com of mass
             sd["ads_com"] = data.ads_com.unsqueeze(1)  # (B, 3) → (B, 1, 3)
@@ -186,23 +178,36 @@ class PyGToTensorDict:
                 atom_batch,
                 max_num_nodes=max_num_nodes,
             )
+
+            sd["ads_atomic_numbers"], mask = to_dense_batch(
+                data.ads_atomic_numbers,
+                atom_batch,
+                max_num_nodes=max_num_nodes,
+            )
         else:
-            # Node-level: fractional coordinates
+            # Node-level: positions (already prim-only after _build_positions_path)
             sd["frac_coords"], _ = to_dense_batch(
-                data.frac_coords[atom_mask],
+                data.pos,
                 atom_batch,
                 max_num_nodes=max_num_nodes,
             )
 
-            # Graph-level lattice parameters (prim only)
-            if hasattr(data, "lengths_scaled"):
-                sd["lengths_scaled"] = data.lengths_scaled.unsqueeze(1)  # (B, 1, 3)
-            if hasattr(data, "angles_radians"):
-                sd["angles_radians"] = data.angles_radians.unsqueeze(1)  # (B, 1, 3)
-            if hasattr(data, "transformation_matrix"):
-                sd["transformation_matrix"] = data.transformation_matrix  # (B, 3, 3)
-            if hasattr(data, "supercell_lattice"):
-                sd["supercell_lattice"] = data.supercell_lattice  # (B, 3, 3) = S @ L
+            # Node-level: atomic_numbers_hot
+            sd["atomic_numbers_hot"], mask = to_dense_batch(
+                data.atomic_numbers_hot,
+                atom_batch,
+                max_num_nodes=max_num_nodes,
+            )
+
+        # Graph-level lattice parameters (prim only)
+        if hasattr(data, "lengths_scaled"):
+            sd["lengths_scaled"] = data.lengths_scaled.unsqueeze(1)  # (B, 1, 3)
+        if hasattr(data, "angles_radians"):
+            sd["angles_radians"] = data.angles_radians.unsqueeze(1)  # (B, 1, 3)
+        if hasattr(data, "transformation_matrix"):
+            sd["transformation_matrix"] = data.transformation_matrix  # (B, 3, 3)
+        if hasattr(data, "supercell_lattice"):
+            sd["supercell_lattice"] = data.supercell_lattice  # (B, 3, 3) = S @ L
 
         return TensorDictBatch(data=sd, mask=mask, batch_index=atom_batch)
 

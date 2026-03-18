@@ -67,7 +67,7 @@ class LightFlowMatch(LightningModule, XMatching):
     def __init__(
             self,
             model,
-            variant: str="relax",
+            variant: str="place",
             mode: str="debug",
             rtol: float = 1e-7,
             atol: float = 1e-9,
@@ -166,12 +166,26 @@ class LightFlowMatch(LightningModule, XMatching):
         data = self.path(input_graph=input_graph) 
 
         # Model predicts velocity field (or dict for forge with z_logits)
-        if self.variant =="relax":
+        if self.variant =="place":
             f = self(data)
             loss, max_loss = self.criterion(
                 input_graph=data,
                 pred=f,  # Model prediction
             )
+            # DEBUG: collect diagnostic tensors
+            if self._write_f_u:
+                f_x = f["u_x"] if isinstance(f, dict) else f
+                target_x = data.pos_relaxed if self.x_matching == "endpoint" else data.u_x
+                velocity_predictions = {
+                    't': data.t.detach().cpu(),
+                    'f': f_x.detach().cpu(),
+                    'u': target_x.detach().cpu(),
+                    'batch': data.batch.detach().cpu(),
+                    'tags': data.tags.detach().cpu(),
+                }
+            else:
+                velocity_predictions = None
+
         elif self.variant == "forge":
             wrapper = PyGToTensorDict()
             x_prim, x_ads, t_prim, t_ads, f_prim, f_ads = wrapper.to_tensordict(data)
@@ -193,12 +207,12 @@ class LightFlowMatch(LightningModule, XMatching):
                     x_prim.data["supercell_lattice"],      # (B, 3, 3)
                 ),
                 x_ads=(
-                    x_ads.data["atomic_numbers_hot"],      # (B, N, 90)
+                    x_ads.data["ads_atomic_numbers"],      # (B, N, 90)
                     x_ads.data["ads_com"],                 # (B, 1, 3)
                     x_ads.data["ads_rel_pos"],             # (B, N, 3)
                 ),
                 t_prim=(t, t, t, t),   # (atom_types_t, frac_coords_t, lengths_t, angles_t)
-                t_ads=(t, t, t),       # (ads_atom_types_t, ads_com_t, ads_rel_pos_t)
+                t_ads=(t, t),       # (ads_com_t, ads_rel_pos_t)
                 feats={
                     "dataset_idx": f_prim.data["dataset_idx"],
                     "spacegroup":  f_prim.data["spacegroup"],
@@ -209,28 +223,15 @@ class LightFlowMatch(LightningModule, XMatching):
             # Node-level: unpack dense (B, M/N, D) → sparse (N, D) via real-token mask
             # Graph-level: squeeze the token dim (B, 1, D) → (B, D)
             pred = {
-                "u_x":           x_prim.to_sparse(pred_prim[1]),   # (N_prim, 3)
-                "z_logits":      x_prim.to_sparse(pred_prim[0]),   # (N_prim, 90)
-                "u_ads_com":     pred_ads[0].squeeze(1),           # (B, 3)
-                "u_ads_rel_pos": x_ads.to_sparse(pred_ads[1]),     # (N_ads, 3)
-                "u_len":         pred_prim[2].squeeze(1),          # (B, 3)
-                "u_ang":         pred_prim[3].squeeze(1),          # (B, 3)
-                "u_M":           pred_prim[4],                     # (B, 3, 3)
+                "pos":           x_prim.to_sparse(pred_prim[1]),   # (N_prim, 3)
+                "z":             x_prim.to_sparse(pred_prim[0]),   # (N_prim, 90)
+                "len":           pred_prim[2].squeeze(1),          # (B, 3)
+                "ang":           pred_prim[3].squeeze(1),          # (B, 3)
+                "M":             pred_prim[4],                     # (B, 3, 3)
+                "ads_com":       pred_ads[0].squeeze(1),           # (B, 3)
+                "ads_rel_pos":   x_ads.to_sparse(pred_ads[1]),     # (N_ads, 3)
             }
             loss, max_loss = self.criterion(input_graph=data, pred=pred)
-
-        # DEBUG: collect diagnostic tensors
-        if self._write_f_u: 
-            f_x = f["u_x"] if isinstance(f, dict) else f
-            target_x = data.pos_relaxed if self.x_matching == "endpoint" else data.u_x
-            velocity_predictions = {
-                't': data.t.detach().cpu(),              # (N, 1) interpolation time
-                'f': f_x.detach().cpu(),                  # (N, 3) predicted velocity
-                'u': target_x.detach().cpu(),             # (N, 3) target field/endpoint
-                'batch': data.batch.detach().cpu(),        # (N,)   graph index
-                'tags': data.tags.detach().cpu(),           # (N,)   atom tags
-            }
-        else:
             velocity_predictions = None
 
         return loss, max_loss, velocity_predictions
