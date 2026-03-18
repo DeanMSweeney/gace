@@ -420,7 +420,7 @@ class TransformerModule(nn.Module):
 
         # adsorbate data at time t
         ads_atom_types, ads_com, ads_rel_pos = x_ads
-        ads_atom_types_t, ads_com_t, ads_rel_pos_t = t_ads
+        ads_com_t, ads_rel_pos_t = t_ads
 
         device = prim_padding_mask.device
         batch_size, prim_seq_len = prim_padding_mask.shape
@@ -451,7 +451,7 @@ class TransformerModule(nn.Module):
         ).unsqueeze(1)  # (B, 1, C)
 
         # ── Ads embeddings ───────────────────────────────────────────────────
-        embed_ads_atom_types = self.ads_atom_type(ads_atom_types.argmax(dim=-1))  # (B, N, C)
+        embed_ads_atom_types = self.ads_atom_type(ads_atom_types)  # (B, N, C)
         embed_ads_com = self.ads_com_embed(ads_com)                       # (B, 1, C) — global
         embed_ads_rel_pos = self.ads_rel_pos_embed(ads_rel_pos)                    # (B, N, C)
 
@@ -469,7 +469,7 @@ class TransformerModule(nn.Module):
             dim=-1,
         )
         ads_modals_t = torch.cat(
-            [t_.unsqueeze(-1) for t_ in [ads_atom_types_t, ads_com_t, ads_rel_pos_t]],
+            [t_.unsqueeze(-1) for t_ in [ads_com_t, ads_rel_pos_t]],
             dim=-1,
         )
         all_modals_t = torch.cat([prim_modals_t, ads_modals_t], dim=-1)  # (B, num_modals)

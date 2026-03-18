@@ -153,23 +153,28 @@ def hungarian(
 
     # Apply PBC to get minimum image distances
     if pbc_aware:
-        if cell is None:
-            raise ValueError("cell must be provided for PBC-aware alignment.")
-        if batch is None:
-            batch = torch.zeros(N, dtype=torch.long, device=set0.device)
+        # Check if fractional/cartesian coordinates are used
+        if set0.max().item() > 1:
+            if cell is None:
+                raise ValueError("cell must be provided for PBC-aware alignment.")
+            if batch is None:
+                batch = torch.zeros(N, dtype=torch.long, device=set0.device)
+            else:
+                batch = batch.long().to(set0.device)
+                if batch.size(0) != N:
+                    raise ValueError("batch length must match set0/set1 length.")
+            # Expand batch indices for all N*N pairwise distances
+            # Each row i uses cell from batch[i]
+            batch_expanded = batch.unsqueeze(1).expand(-1, N).reshape(-1)  # (N*N,)
+            C = pbc_aware_delta(
+                delta=C.reshape(-1, 3),  # (N*N, 3)
+                cell=cell,
+                batch=batch_expanded,
+            ).reshape(N, N, 3) # (N, N, 3)
         else:
-            batch = batch.long().to(set0.device)
-            if batch.size(0) != N:
-                raise ValueError("batch length must match set0/set1 length.")
-
-        # Expand batch indices for all N*N pairwise distances
-        # Each row i uses cell from batch[i]
-        batch_expanded = batch.unsqueeze(1).expand(-1, N).reshape(-1)  # (N*N,)
-        C = pbc_aware_delta(
-            delta=C.reshape(-1, 3),  # (N*N, 3)
-            cell=cell,
-            batch=batch_expanded,
-        ).reshape(N, N, 3) # (N, N, 3)
+            # Naive minimum image convention
+            Cn0 = torch.round(C)
+            C = C - Cn0
   
     # Compute L2 distance matrix (cost matrix for Hungarian algorithm)
     C_l2 = torch.linalg.norm(C, dim=-1)  # (N, N)
