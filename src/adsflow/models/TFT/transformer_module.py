@@ -3,6 +3,8 @@
 from functools import partial
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
+from fairchem.core.models.scn.smearing import GaussianSmearing
+
 import torch
 import torch.nn as nn
 from torch import Tensor
@@ -88,6 +90,8 @@ class TransformerModule(nn.Module):
         sum_pool_energy: bool = False,
         separate_energy_force_transformers: bool = True,
         mask_material_coords: bool = True,
+        num_rbf: int = 20,
+        rbf_max: float = 5.0,
         custom_weight_init: Optional[
             Literal["none", "xavier", "kaiming", "orthogonal", "uniform", "eye", "normal"]
         ] = None,
@@ -105,7 +109,7 @@ class TransformerModule(nn.Module):
         self.input_dim = spatial_dim + atom_dim
         self.time_dim = 1
         self.prim_cond_dim = 8  # atom_types, frac_coords, lengths, angles, T_matrix, supercell_lattice, posenc, conditions
-        self.ads_cond_dim = 5   # ads_atom_types, ads_com, ads_rel_pos, posenc, conditions
+        self.ads_cond_dim = 6   # ads_atom_types, ads_com, ads_rel_pos, ads_pairwise_dist, posenc, conditions
         self.comb_input_dim = self.input_dim + self.time_dim
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
@@ -138,6 +142,8 @@ class TransformerModule(nn.Module):
         self.ads_atom_type = nn.Embedding(atom_dim, hidden_dim)
         self.ads_com_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)   # COM (B, 1, 3) → (B, 1, C)
         self.ads_rel_pos_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)  # rel pos (B, N, 3) → (B, N, C)
+        self.ads_pairwise_rbf = GaussianSmearing(0.0, rbf_max, num_rbf, 2.0)
+        self.ads_pairwise_dist_embed = nn.Linear(num_rbf, hidden_dim, bias=False)  # (B, N, num_rbf) → (B, N, C)
 
         if self.add_sinusoid_posenc:
             self.positional_encoding = SinusoidEncoding(
@@ -149,6 +155,7 @@ class TransformerModule(nn.Module):
             self.combine_input_ads = nn.Linear(self.ads_cond_dim * hidden_dim, hidden_dim)
 
         self.time_encoding = TimeFourierEncoding(posenc_dim=hidden_dim, max_len=200)
+        self.ads_binding_energy_embed = nn.Linear(1, hidden_dim)
 
         if activation == "SiLU":
             activation = nn.SiLU(inplace=False)
@@ -419,7 +426,7 @@ class TransformerModule(nn.Module):
 
 
         # adsorbate data at time t
-        ads_atom_types, ads_com, ads_rel_pos = x_ads
+        ads_atom_types, ads_com, ads_rel_pos, ads_pairwise_dist = x_ads
         ads_com_t, ads_rel_pos_t = t_ads
 
         device = prim_padding_mask.device
@@ -453,7 +460,12 @@ class TransformerModule(nn.Module):
         # ── Ads embeddings ───────────────────────────────────────────────────
         embed_ads_atom_types = self.ads_atom_type(ads_atom_types)  # (B, N, C)
         embed_ads_com = self.ads_com_embed(ads_com)                       # (B, 1, C) — global
-        embed_ads_rel_pos = self.ads_rel_pos_embed(ads_rel_pos)                    # (B, N, C)
+        embed_ads_rel_pos = self.ads_rel_pos_embed(ads_rel_pos)           # (B, N, C)
+        # ads_pairwise_dist: (B, N, K_neighbors) raw distances → Gaussian smearing → sum over neighbors → project
+        smeared = self.ads_pairwise_rbf(ads_pairwise_dist.reshape(-1, 1))    # (B*N*K_neighbors, num_rbf)
+        smeared = smeared.reshape(*ads_pairwise_dist.shape, -1)              # (B, N, K_neighbors, num_rbf)
+        smeared = smeared.sum(-2)                                            # (B, N, num_rbf) — pool over neighbors
+        embed_ads_pairwise_dist = self.ads_pairwise_dist_embed(smeared)      # (B, N, C)
 
         # ── Positional encoding (over combined seq) ──────────────────────────
         if self.add_sinusoid_posenc:
@@ -479,9 +491,12 @@ class TransformerModule(nn.Module):
             .mean(-2)
         )  # (B, C)
 
-        embed_dataset = self.dataset_embedder(dataset_idx, self.training)      # (B, C)
-        embed_spacegroup = self.spacegroup_embedder(spacegroup, self.training)  # (B, C)
-        embed_conditions = (embed_time + embed_dataset + embed_spacegroup).unsqueeze(-2)  # (B, 1, C)
+        embed_dataset = self.dataset_embedder(dataset_idx, self.training)                          # (B, C)
+        embed_spacegroup = self.spacegroup_embedder(spacegroup, self.training)                    # (B, C)
+        embed_binding_energy = self.ads_binding_energy_embed(
+            feats["ads_binding_energy"].unsqueeze(-1)
+        )                                                                                         # (B, C)
+        embed_conditions = (embed_time + embed_dataset + embed_spacegroup + embed_binding_energy).unsqueeze(-2)  # (B, 1, C)
 
         # ── Build h_in for prim sequence ─────────────────────────────────────
         if self.concat_combine_input:
@@ -522,20 +537,22 @@ class TransformerModule(nn.Module):
             embed_conditions_ads = embed_conditions.expand(-1, ads_seq_len, -1)
 
             h_in_ads = torch.cat([
-                embed_ads_atom_types,   # (B, N, C)
-                embed_ads_com_bc,    # (B, N, C)
-                embed_ads_rel_pos,      # (B, N, C)
-                embed_posenc_ads,       # (B, N, C)
-                embed_conditions_ads,   # (B, N, C)
-            ], dim=-1)  # (B, N, 5*C)
+                embed_ads_atom_types,       # (B, N, C)
+                embed_ads_com_bc,           # (B, N, C)
+                embed_ads_rel_pos,          # (B, N, C)
+                embed_ads_pairwise_dist,    # (B, N, C)
+                embed_posenc_ads,           # (B, N, C)
+                embed_conditions_ads,       # (B, N, C)
+            ], dim=-1)  # (B, N, 6*C)
             h_in_ads = self.combine_input_ads(h_in_ads)  # (B, N, C)
         else:
             h_in_ads = (
-                embed_ads_atom_types  # (B, N, C)
-                + embed_ads_com    # (B, 1, C) → broadcasts
-                + embed_ads_rel_pos   # (B, N, C)
-                + embed_posenc_ads    # (B, N, C)
-                + embed_conditions    # (B, 1, C) → broadcasts
+                embed_ads_atom_types        # (B, N, C)
+                + embed_ads_com             # (B, 1, C) → broadcasts
+                + embed_ads_rel_pos         # (B, N, C)
+                + embed_ads_pairwise_dist   # (B, N, C)
+                + embed_posenc_ads          # (B, N, C)
+                + embed_conditions          # (B, 1, C) → broadcasts
             )
         h_in_ads = h_in_ads * ads_real_mask.unsqueeze(-1)  # (B, N, C)
 

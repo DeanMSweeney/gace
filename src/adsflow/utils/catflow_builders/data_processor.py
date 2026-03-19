@@ -68,6 +68,39 @@ def cell_to_lengths_and_angles(prim_cell: Tensor) -> Tuple[Tensor, Tensor]:
     return lengths, angles_radians
 
 
+# ── Adsorbate pairwise distance helper ───────────────────────────────────────
+
+MAX_ADS_NEIGHBORS = 15  # fixed neighbor dimension for padding — covers all adsorbates in the dataset
+
+
+def compute_ads_pairwise_distances(ads_pos: Tensor) -> Tensor:
+    """Compute pairwise Euclidean distances between all adsorbate atoms,
+    including each atom with itself (diagonal = 0), padded to MAX_ADS_NEIGHBORS.
+
+    Padding slots are filled with -1, which sits outside GaussianSmearing's
+    [0, d_max] range and produces a near-zero response — distinguishable from
+    real distances. The fixed neighbor dimension (MAX_ADS_NEIGHBORS) ensures
+    all samples have the same feature width for PyG batching and to_dense_batch.
+
+    Args:
+        ads_pos: (N_ads, 3) Cartesian positions in Angstrom.
+
+    Returns:
+        dist: (N_ads, MAX_ADS_NEIGHBORS) float32 — real distances in [:N_ads],
+              -1 sentinel padding in [N_ads:].
+    """
+    diff = ads_pos.unsqueeze(1) - ads_pos.unsqueeze(0)       # (N_ads, N_ads, 3)
+    dist = torch.linalg.norm(diff, dim=-1)                    # (N_ads, N_ads)
+
+    N_ads = dist.shape[0]
+    pad_width = MAX_ADS_NEIGHBORS - N_ads
+    if pad_width > 0:
+        padding = torch.full((N_ads, pad_width), -1.0)        # (N_ads, pad_width)
+        dist = torch.cat([dist, padding], dim=1)               # (N_ads, MAX_ADS_NEIGHBORS)
+
+    return dist  # (N_ads, MAX_ADS_NEIGHBORS)
+
+
 # ── Fractional coordinate helper ─────────────────────────────────────────────
 
 def cartesian_to_fractional(prim_pos: Tensor, prim_cell: Tensor) -> Tensor:
@@ -149,9 +182,16 @@ def preprocess_lmdb(src: str | Path, dst: str | Path) -> None:
                 lengths, angles_radians = cell_to_lengths_and_angles(prim_cell)
                 frac_coords = cartesian_to_fractional(prim_pos, prim_cell)
 
-                d["lengths_scaled"]  = lengths.numpy()       # (3,)  float32
-                d["angles_radians"]  = angles_radians.numpy() # (3,)  float32
+                d["lengths_scaled"]  = lengths.numpy()        # (3,)   float32
+                d["angles_radians"]  = angles_radians.numpy() # (3,)   float32
                 d["frac_coords"]     = frac_coords.numpy()    # (N, 3) float32
+
+            if "ref_ads_pos" in d:
+                ref_ads_pos = torch.from_numpy(
+                    np.array(d["ref_ads_pos"], dtype=np.float32)
+                )  # (N_ads, 3)
+                ads_pairwise_dist = compute_ads_pairwise_distances(ref_ads_pos)
+                d["ads_pairwise_dist"] = ads_pairwise_dist.numpy()  # (N_ads, MAX_ADS_NEIGHBORS) float32
 
             dst_txn.put(key, pickle.dumps(d, protocol=4))
 
