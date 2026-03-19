@@ -128,6 +128,7 @@ class PyGToTensorDict:
 
         # ── build feats dicts ────────────────────────────────────────────────
         f_prim = self._build_feats_dict(
+            data=data,
             mask=x_prim.mask,
             batch_index=prim_batch,
             structure_dict=x_prim.data,
@@ -136,6 +137,7 @@ class PyGToTensorDict:
         )
 
         f_ads = self._build_feats_dict(
+            data=data,
             mask=x_ads.mask,
             batch_index=ads_batch,
             structure_dict=x_ads.data,
@@ -169,7 +171,8 @@ class PyGToTensorDict:
         sd = TensorDict({}, batch_size=[batch_size], device=device)
 
         if is_adsorbate:
-            # Graph-level: adsorbate com of mass
+            # Graph-level: reference adsorbate postions and adsorbate com of mass
+            sd["ref_ads_pos"] = data.ref_ads_pos.unsqueeze(1)  # (B, 3) → (B, 1, 3)
             sd["ads_com"] = data.ads_com.unsqueeze(1)  # (B, 3) → (B, 1, 3)
 
             # Node-level: positions relative to COM
@@ -181,6 +184,12 @@ class PyGToTensorDict:
 
             sd["ads_atomic_numbers"], mask = to_dense_batch(
                 data.ads_atomic_numbers,
+                atom_batch,
+                max_num_nodes=max_num_nodes,
+            )
+
+            sd["ads_pairwise_dist"], _ = to_dense_batch(
+                data.ads_pairwise_dist,
                 atom_batch,
                 max_num_nodes=max_num_nodes,
             )
@@ -213,6 +222,7 @@ class PyGToTensorDict:
 
     def _build_feats_dict(
         self,
+        data: Data,
         mask: Tensor,
         batch_index: Tensor,
         structure_dict: TensorDict,
@@ -228,5 +238,6 @@ class PyGToTensorDict:
         fd["spacegroup"] = torch.full(
             (batch_size,), self.default_spacegroup, device=device, dtype=torch.long,
         )
+        fd["ads_binding_energy"] = data.ads_binding_energy.float()  # (B,)
 
         return TensorDictBatch(data=fd, mask=mask, batch_index=batch_index)

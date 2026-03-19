@@ -157,7 +157,7 @@ class XMatching():
         self,
         input_graph: Data,
         time_dist: Literal["uniform", "beta"] = "beta",
-        beta_t: float = 2.0,
+        beta_t: float = 1.8,
     ) -> Data:
         """
         Generate interpolated training data along a path from initial to relaxed positions.

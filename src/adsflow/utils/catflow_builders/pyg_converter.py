@@ -30,8 +30,9 @@ Emitted Data fields
     frac_coords         : (N_slab, 3)  float32 fractional coordinates
     lengths             : (3,)         float32 lattice edge lengths (a, b, c)
     angles_radians      : (3,)         float32 interaxial angles in radians (alpha, beta, gamma)
-    ads_pos             : (N_ads, 3)  float32 Cartesian positions
-    ads_atomic_numbers  : (N_ads,)    int64
+    ads_pos             : (N_ads, 3)             float32 Cartesian positions
+    ads_atomic_numbers  : (N_ads,)               int64
+    ads_pairwise_dist   : (N_ads, MAX_ADS_NEIGHBORS) float32 pairwise distances, -1 padded
     ref_energy          : scalar float
     ref_ads_pos         : (N_ads, 3)  float32 fractional reference positions
     bind_ads_atom       : scalar int
@@ -104,6 +105,10 @@ def catflow_dict_to_pyg_data(d: dict) -> Data:
         np.array(d["ads_atomic_numbers"], dtype=np.int64)
     )  # (N_ads,)
 
+    ads_pairwise_dist = torch.from_numpy(
+        np.array(d["ads_pairwise_dist"], dtype=np.float32)
+    )  # (N_ads, MAX_ADS_NEIGHBORS)
+
     # ── Reference / metadata ─────────────────────────────────────────────────
     ref_ads_pos = torch.from_numpy(
         np.array(d["ref_ads_pos"], dtype=np.float32)
@@ -153,8 +158,9 @@ def catflow_dict_to_pyg_data(d: dict) -> Data:
         # Adsorbate
         ads_pos=ads_pos,
         ads_atomic_numbers=ads_atomic_numbers,
+        ads_pairwise_dist=ads_pairwise_dist,
         ref_ads_pos=ref_ads_pos,
-        ref_energy=ref_energy,
+        ads_binding_energy=ref_energy,
         bind_ads_atom=bind_ads_atom,
         # Full slab geometry 
         supercell_matrix=supercell_matrix,
