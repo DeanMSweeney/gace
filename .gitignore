@@ -44,3 +44,4 @@ plots/
 *_files/
 mlff_checkpoint_cache/ 
 catflow/
+.claude/CLAUDE.md
