@@ -160,4 +160,13 @@ def process_sample(raw: bytes) -> bytes:
         ads_pairwise_dist = compute_ads_pairwise_distances(ref_ads_pos)
         d["ads_pairwise_dist"] = ads_pairwise_dist.numpy()  # (N_ads, MAX_ADS_NEIGHBORS) float32
 
+    if "ads_pos" in d:
+        ads_pos = torch.from_numpy(
+            np.array(d["ads_pos"], dtype=np.float32)
+        )  # (N_ads, 3) Cartesian positions
+        ads_com     = ads_pos.mean(dim=0)       # (3,)       geometric center
+        ads_rel_pos = ads_pos - ads_com         # (N_ads, 3) relative to COM
+        d["ads_com"]     = ads_com.numpy()      # (3,)       float32
+        d["ads_rel_pos"] = ads_rel_pos.numpy()  # (N_ads, 3) float32
+
     return pickle.dumps(d, protocol=4)

@@ -618,8 +618,8 @@ class XMatching():
         data.atomic_numbers_hot = zt_hot
 
         # Condition on adsorbate atom types 
-        z1_ads = data.atomic_numbers.long() - 1  # N_ads
-        data.ads_atomic_numbers_hot = z1_ads
+        z1_ads = data.ads_atomic_numbers.long() - 1  # N_ads, shift 1-90 → 0-89
+        data.ads_atomic_numbers = z1_ads
 
         return data
 
