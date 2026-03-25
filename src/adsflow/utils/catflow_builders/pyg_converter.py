@@ -36,7 +36,7 @@ Emitted Data fields
     ref_energy          : scalar float
     ref_ads_pos         : (N_ads, 3)  float32 fractional reference positions
     bind_ads_atom       : scalar int
-    supercell_matrix    : (3, 3)      int64
+    transformation_matrix : (3, 3)    int64
     n_slab              : scalar int
     n_vac               : scalar int
     sid                 : int
@@ -47,8 +47,6 @@ from __future__ import annotations
 import numpy as np
 import torch
 from torch_geometric.data import Data
-from adsflow.utils.utils import adsorbate_center_of_mass
-
 
 def catflow_dict_to_pyg_data(d: dict) -> Data:
     """
@@ -109,6 +107,14 @@ def catflow_dict_to_pyg_data(d: dict) -> Data:
         np.array(d["ads_pairwise_dist"], dtype=np.float32)
     )  # (N_ads, MAX_ADS_NEIGHBORS)
 
+    ads_com = torch.from_numpy(
+        np.array(d["ads_com"], dtype=np.float32)
+    )  # (3,)
+
+    ads_rel_pos = torch.from_numpy(
+        np.array(d["ads_rel_pos"], dtype=np.float32)
+    )  # (N_ads, 3)
+
     # ── Reference / metadata ─────────────────────────────────────────────────
     ref_ads_pos = torch.from_numpy(
         np.array(d["ref_ads_pos"], dtype=np.float32)
@@ -159,11 +165,13 @@ def catflow_dict_to_pyg_data(d: dict) -> Data:
         ads_pos=ads_pos,
         ads_atomic_numbers=ads_atomic_numbers,
         ads_pairwise_dist=ads_pairwise_dist,
+        ads_com=ads_com,
+        ads_rel_pos=ads_rel_pos,
         ref_ads_pos=ref_ads_pos,
         ads_binding_energy=ref_energy,
         bind_ads_atom=bind_ads_atom,
         # Full slab geometry 
-        supercell_matrix=supercell_matrix,
+        transformation_matrix=supercell_matrix,
         n_slab=n_slab,
         n_vac=n_vac,
         sid=sid,
