@@ -49,7 +49,6 @@ from typing import Optional, Literal, Union, Tuple
 
 # AdsFlow modules
 from adsflow.helm.lightning import LightFlowMatch
-from adsflow.models.gemnet.gemnet_flow import GemNetFlow
 from adsflow.utils.lmdb_loader import LazyLmdbDataset
 from adsflow.helm.config import Config
 
@@ -103,7 +102,7 @@ def main(cfg: Config) -> None:
     declare(f">>> Training and model configurations:\n {OmegaConf.to_yaml(cfg)}")
 
     # === Callbacks Configuration ===
-    # ModelCheckpoint: Save top-3 models based on validation loss
+    # ModelCheckpoint: Save tp-3 models based on validation loss
     callbacks = [(ModelCheckpoint(
         dirpath=cfg.ckpt_dir,
         filename=f"{cfg.run_name}-{{epoch:02d}}",

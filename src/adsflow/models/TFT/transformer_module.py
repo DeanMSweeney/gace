@@ -74,8 +74,6 @@ class TransformerModule(nn.Module):
         aux_layer: int,
         hidden_dim: int,
         num_properties: int,
-        dataset_embedder: nn.Module,
-        spacegroup_embedder: nn.Module,
         activation: Literal["SiLU", "ReLU", "SwiGLU"] = "SiLU",
         implementation: Literal["transformer", "modern_transformer"] = "modern_transformer",
         context_length: int = 2048,
@@ -126,9 +124,6 @@ class TransformerModule(nn.Module):
         self.separate_energy_force_transformers = separate_energy_force_transformers
         self.mask_material_coords = mask_material_coords
         self.custom_weight_init = custom_weight_init
-
-        self.dataset_embedder = dataset_embedder
-        self.spacegroup_embedder = spacegroup_embedder
 
         # Embeddings for each the primitive cell
         self.atom_type_embed = nn.Embedding(atom_dim, hidden_dim)
@@ -434,9 +429,6 @@ class TransformerModule(nn.Module):
         _, ads_seq_len = ads_padding_mask.shape
         total_seq_len = prim_seq_len + ads_seq_len
 
-        dataset_idx = feats["dataset_idx"]
-        spacegroup = feats["spacegroup"]
-
         # ── Prim real-token mask ─────────────────────────────────────────────
         prim_real_mask = 1 - prim_padding_mask.int()  # (B, M)
         ads_real_mask = 1 - ads_padding_mask.int()     # (B, N)
@@ -491,12 +483,10 @@ class TransformerModule(nn.Module):
             .mean(-2)
         )  # (B, C)
 
-        embed_dataset = self.dataset_embedder(dataset_idx, self.training)                          # (B, C)
-        embed_spacegroup = self.spacegroup_embedder(spacegroup, self.training)                    # (B, C)
         embed_binding_energy = self.ads_binding_energy_embed(
             feats["ads_binding_energy"].unsqueeze(-1)
         )                                                                                         # (B, C)
-        embed_conditions = (embed_time + embed_dataset + embed_spacegroup + embed_binding_energy).unsqueeze(-2)  # (B, 1, C)
+        embed_conditions = (embed_time + embed_binding_energy).unsqueeze(-2)  # (B, 1, C)
 
         # ── Build h_in for prim sequence ─────────────────────────────────────
         if self.concat_combine_input:
