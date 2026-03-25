@@ -326,10 +326,6 @@ class XMatching():
         x1  = data.supercell_matrix  (true integer supercell matrix)
         xt  = x0 + alpha_t * (x1 - x0)   (schedule-interpolated)
         u_M = alpha_t_grad * (x1 - x0)   (rescaled target velocity)
-
-        Cosine regularisation `cosine_reg_M` encourages integer predictions:
-            reg = mean(1 - cos(2π * M_pred))   (minimised at integers)
-        Add lambda_M * data.cosine_reg_M to the total loss in criterion().
         """
         device = data.transformation_matrix.device
         dtype  = torch.float32
@@ -369,10 +365,6 @@ class XMatching():
 
         data.transformation_matrix = M_t
         data.transformation_matrix_target = M1
-
-        # Cosine regularisation template (evaluated on model output in criterion)
-        cosine_reg_M = (1.0 - torch.cos(2 * torch.pi * M1)).mean()
-        data.cosine_reg_M  = cosine_reg_M
 
         # Build supercell lattice from primitive cell and transformation matrix
         # prim_cell_t: (B, 3, 3) from lattice parameters

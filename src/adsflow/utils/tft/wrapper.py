@@ -41,12 +41,8 @@ class PyGToTensorDict:
     def __init__(
         self,
         num_atom_types: int = 100,
-        default_dataset_idx: int = 1,
-        default_spacegroup: int = 0,
     ) -> None:
         self.num_atom_types = num_atom_types
-        self.default_dataset_idx = default_dataset_idx
-        self.default_spacegroup = default_spacegroup
 
     # ── public entry point ───────────────────────────────────────────────────
 
@@ -232,12 +228,6 @@ class PyGToTensorDict:
         """Build a dense feats TensorDict for one group of atoms."""
         fd = TensorDict({}, batch_size=[batch_size], device=device)
 
-        fd["dataset_idx"] = torch.full(
-            (batch_size,), self.default_dataset_idx, device=device, dtype=torch.long,
-        )
-        fd["spacegroup"] = torch.full(
-            (batch_size,), self.default_spacegroup, device=device, dtype=torch.long,
-        )
         fd["ads_binding_energy"] = data.ads_binding_energy.float()  # (B,)
 
         return TensorDictBatch(data=fd, mask=mask, batch_index=batch_index)

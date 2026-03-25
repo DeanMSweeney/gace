@@ -215,8 +215,6 @@ class LightFlowMatch(LightningModule, XMatching):
                 t_prim=(t, t, t, t),   # (atom_types_t, frac_coords_t, lengths_t, angles_t)
                 t_ads=(t, t),       # (ads_com_t, ads_rel_pos_t)
                 feats={
-                    "dataset_idx":        f_prim.data["dataset_idx"],
-                    "spacegroup":         f_prim.data["spacegroup"],
                     "ads_binding_energy": f_prim.data["ads_binding_energy"],
                 },
                 prim_padding_mask=prim_padding_mask,
