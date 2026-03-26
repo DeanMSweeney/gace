@@ -1,0 +1,40 @@
+_target_: adsflow.models.TFT.transformer_module.TransformerModule
+
+# ── Dimensions ────────────────────────────────────────────────────────────────
+spatial_dim: 3          # xyz
+atom_dim: 90            # one-hot atom-type vocab (elements 1-90)
+hidden_dim: 512         # transformer hidden size — matches zatom 80M
+num_properties: 1       # binding energy (aux heads are disabled, see below)
+
+# ── Transformer depth / width ─────────────────────────────────────────────────
+num_layers: 16
+num_heads: 8            # must divide hidden_dim evenly
+context_length: 512     # max total tokens (prim + ads) per sample
+
+# ── Auxiliary task layers (disabled) ─────────────────────────────────────────
+# Set to 0 to disable the aux property / MLIP heads entirely.
+num_aux_layers: 0
+num_aux_mlip_layers: 0
+aux_hidden_dim: 512
+aux_mlip_hidden_dim: 512
+aux_layer: 15           # 0-indexed; set to num_layers - 1
+
+# ── Adsorbate pairwise-distance RBF ──────────────────────────────────────────
+num_rbf: 20
+rbf_max: 5.0            # Å; distances beyond this are treated as padding
+
+# ── Architecture options ──────────────────────────────────────────────────────
+activation: SiLU                        # SiLU | ReLU | SwiGLU
+implementation: modern_transformer      # transformer | modern_transformer
+rope_base: null                         # set an int (e.g. 10000) to enable RoPE
+qk_layernorm: true
+use_sdpa: true
+jvp_attn: false
+cross_attention: true                   # modality-specific cross-attn output heads
+add_sinusoid_posenc: true
+concat_combine_input: false             # sum (false) vs concat+project (true) input
+is_conservative: false
+sum_pool_energy: false
+separate_energy_force_transformers: true
+mask_material_coords: true
+custom_weight_init: null

@@ -167,8 +167,7 @@ class PyGToTensorDict:
         sd = TensorDict({}, batch_size=[batch_size], device=device)
 
         if is_adsorbate:
-            # Graph-level: reference adsorbate postions and adsorbate com of mass
-            sd["ref_ads_pos"] = data.ref_ads_pos.unsqueeze(1)  # (B, 3) → (B, 1, 3)
+            # Graph-level: adsorbate centre of mass
             sd["ads_com"] = data.ads_com.unsqueeze(1)  # (B, 3) → (B, 1, 3)
 
             # Node-level: positions relative to COM
@@ -176,26 +175,26 @@ class PyGToTensorDict:
                 data.ads_rel_pos,
                 atom_batch,
                 max_num_nodes=max_num_nodes,
-            )
+            ) # B, N_ads, 3
 
             sd["ads_atomic_numbers"], mask = to_dense_batch(
                 data.ads_atomic_numbers,
                 atom_batch,
                 max_num_nodes=max_num_nodes,
-            )
+            ) # B, N_ads, 1
 
             sd["ads_pairwise_dist"], _ = to_dense_batch(
                 data.ads_pairwise_dist,
                 atom_batch,
                 max_num_nodes=max_num_nodes,
-            )
+            ) # B, N_ads, 15
         else:
             # Node-level: positions (already prim-only after _build_positions_path)
-            sd["frac_coords"], _ = to_dense_batch(
+            sd["frac_coords"], _  = to_dense_batch(
                 data.pos,
                 atom_batch,
                 max_num_nodes=max_num_nodes,
-            )
+            ) # B, N, 3
 
             # Node-level: atomic_numbers_hot
             sd["atomic_numbers_hot"], mask = to_dense_batch(

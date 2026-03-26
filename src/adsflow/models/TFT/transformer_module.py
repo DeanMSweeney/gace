@@ -351,9 +351,10 @@ class TransformerModule(nn.Module):
         ),
         x_ads: (
             Tuple[
-                Float["b n v"],  # type: ignore - ads_atom_types (soft one-hot simplex, conditioning)
+                Int["b n"],      # type: ignore - ads_atom_types (integer indices, conditioning)
                 Float["b 1 3"],  # type: ignore - ads_com (COM)
                 Float["b n 3"],  # type: ignore - ads_rel_pos
+                Float["b n k"],  # type: ignore - ads_pairwise_dist (K neighbours)
             ]
             | List[torch.Tensor]
         ),
@@ -368,7 +369,6 @@ class TransformerModule(nn.Module):
         ),
         t_ads: (
             Tuple[
-                Float[" b"],  # type: ignore - ads_atom_types_t
                 Float[" b"],  # type: ignore - ads_com_t
                 Float[" b"],  # type: ignore - ads_rel_pos_t
             ]
@@ -756,9 +756,10 @@ class TransformerModule(nn.Module):
         ),
         x_ads: (
             Tuple[
-                Float["b n v"],  # type: ignore - ads_atom_types (soft one-hot simplex, conditioning)
+                Int["b n"],      # type: ignore - ads_atom_types (integer indices, conditioning)
                 Float["b 1 3"],  # type: ignore - ads_com (COM)
                 Float["b n 3"],  # type: ignore - ads_rel_pos
+                Float["b n k"],  # type: ignore - ads_pairwise_dist (K neighbours)
             ]
             | List[torch.Tensor]
         ),
@@ -773,7 +774,6 @@ class TransformerModule(nn.Module):
         ),
         t_ads: (
             Tuple[
-                Float[" b"],  # type: ignore - ads_atom_types_t
                 Float[" b"],  # type: ignore - ads_com_t
                 Float[" b"],  # type: ignore - ads_rel_pos_t
             ]
