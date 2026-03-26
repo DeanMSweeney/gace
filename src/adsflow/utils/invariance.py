@@ -180,7 +180,7 @@ def hungarian(
     C_l2 = torch.linalg.norm(C, dim=-1)  # (N, N)
 
     # Solve linear assignment problem using Hungarian algorithm
-    row_ind, col_ind = assignment_to_indices(cost=C_l2)
+    row_ind, col_ind = assignment_to_indices(C_l2)
 
     # Reorder set0 into set1 ordering: aligned[col] = source[row]
     set0_aligned = torch.empty_like(set0)
