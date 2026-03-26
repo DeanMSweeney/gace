@@ -235,7 +235,7 @@ class Config:
 
     # ==================== Model Run Mode ====================
 
-    variant: Literal["place", "forge"] = "place"
+    variant: Literal["place", "forge"] = "forge"
     """
     Flow matching variant:
     - "relax": learn x0 → x1 (initial to relaxed structure)
