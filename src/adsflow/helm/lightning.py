@@ -258,7 +258,7 @@ class LightFlowMatch(LightningModule, XMatching):
             on_step=True,  # Log every step
             on_epoch=True,  # Also compute epoch average
             prog_bar=True,  # Show in progress bar
-            batch_size=len(data.natoms),  # For proper averaging
+            batch_size=data.num_graphs,  # For proper averaging
             sync_dist=True,  # Synchronize across GPUs
         )
 
@@ -269,7 +269,7 @@ class LightFlowMatch(LightningModule, XMatching):
             on_step=True,
             on_epoch=True,
             prog_bar=True,
-            batch_size=len(data.natoms),
+            batch_size=data.num_graphs,
             sync_dist=True,
         )
 
@@ -290,8 +290,9 @@ class LightFlowMatch(LightningModule, XMatching):
             loss: Validation loss for this batch
         """
         # Initialize energy difference if Fmax exists (for compatibility)
-        data.Fmax = torch.ones_like(data.y_relaxed) * 0.03 
-        data.dE = torch.zeros_like(data.Fmax)
+        if self.variant == "place": 
+            data.Fmax = torch.ones_like(data.y_relaxed) * 0.03 
+            data.dE = torch.zeros_like(data.Fmax)
         loss, max_loss, _ = self._transport_loss(data)
 
         # Log validation metrics (no on_step to avoid clutter)
@@ -299,7 +300,7 @@ class LightFlowMatch(LightningModule, XMatching):
             "val/loss",
             loss.detach(),
             prog_bar=True,
-            batch_size=len(data.natoms),
+            batch_size=data.num_graphs,
             sync_dist=True,
         )
 
@@ -307,7 +308,7 @@ class LightFlowMatch(LightningModule, XMatching):
             "val/max_loss",
             max_loss.detach(),
             prog_bar=True,
-            batch_size=len(data.natoms),
+            batch_size=data.num_graphs,
             sync_dist=True,
         )
 
@@ -331,8 +332,9 @@ class LightFlowMatch(LightningModule, XMatching):
             loss: Test loss for this batch
         """
         # Compute training-style loss for comparison
-        data.dE = torch.ones_like(data.y_relaxed) * 0.05
-        data.Fmax = torch.ones_like(data.y_relaxed) * 0.10
+        if self.variant == "place":
+            data.dE = torch.ones_like(data.y_relaxed) * 0.05
+            data.Fmax = torch.ones_like(data.y_relaxed) * 0.10
         
         # DEBUG: collect velocity velocity_predictions for parquet output
         if self._write_f_u:
@@ -379,7 +381,7 @@ class LightFlowMatch(LightningModule, XMatching):
             # Log all evaluation metrics
             if eval_metrics:
                 for name, value in eval_metrics.items():
-                    self.log(f"test/{name}", value, prog_bar=True, batch_size=len(data.natoms), sync_dist=True)
+                    self.log(f"test/{name}", value, prog_bar=True, batch_size=data.num_graphs, sync_dist=True)
         
         return   
 
