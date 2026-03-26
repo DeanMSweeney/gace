@@ -255,27 +255,18 @@ class XMatching():
         """
 
         # sample edge lenghts and interaxial angles from true and noisy distribution
-        len1 = data.lengths_scaled.float() # B, 3
-        ang1 = data.angles_radians.float() # B, 3
+        # PyG concatenates (3,) graph-level attrs along dim-0 → (B*3,); reshape to (B, 3)
+        B = len(torch.unique(data.batch))
+        len1 = data.lengths_scaled.float().view(B, 3)  # (B, 3)
+        ang1 = data.angles_radians.float().view(B, 3)  # (B, 3)
 
         len0 = torch.randn_like(len1) # B, 3
         ang0 = torch.randn_like(ang1) # B, 3
 
-        # Hungarian alignment for lattice lengths and angles (permutation invariance)
-        # Note: lengths and angles are per-graph (B, 3), so batch indices are just range(B)
-        # These are scalar values, not spatial positions, so pbc_aware=False
-
-        len0 = hungarian(
-            set0=len0,
-            set1=len1,
-            pbc_aware=False,
-        )
-
-        ang0 = hungarian(
-            set0=ang0,
-            set1=ang1,
-            pbc_aware=False,
-        )
+        # Hungarian alignment is intentionally skipped for lattice lengths/angles.
+        # These are graph-level scalars, not atom sets — there is no atom-permutation
+        # symmetry to resolve. The data processor uses a consistent ordering convention
+        # so no within-graph (a,b,c) reordering is needed.
 
         t_len_per_graph = t # B, 1
         t_len = t_len_per_graph
