@@ -4,7 +4,7 @@ import hydra
 from lightning_utilities.core.rank_zero import rank_zero_only
 from omegaconf import OmegaConf
 
-from zatom.utils import pylogger
+from adsflow.utils.tft import pylogger
 
 log = pylogger.RankedLogger(__name__, rank_zero_only=True)
 

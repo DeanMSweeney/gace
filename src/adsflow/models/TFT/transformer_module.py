@@ -9,18 +9,18 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from .architectures.transformer.common import SwiGLU
-from .architectures.transformer.positional_encoder import (
+from .architectures.common import SwiGLU
+from .architectures.positional_encoder import (
     SinusoidEncoding,
     TimeFourierEncoding,
 )
-from .architectures.transformer.transformer import (
+from .architectures.transformer import (
     ModernTransformer,
     ModernTransformerDecoderBlock,
     Transformer,
 )
-from zatom.utils.pylogger import RankedLogger
-from zatom.utils.typing_utils import Bool, Float, Int, typecheck
+from adsflow.utils.tft.pylogger import RankedLogger
+from adsflow.utils.tft.typing_utils import Bool, Float, Int, typecheck
 
 log = RankedLogger(__name__, rank_zero_only=True)
 

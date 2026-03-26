@@ -3,7 +3,7 @@ from typing import List
 import torch
 from torch import Tensor
 
-from zatom.utils.typing_utils import typecheck
+from adsflow.utils.tft.typing_utils import typecheck
 
 
 @typecheck

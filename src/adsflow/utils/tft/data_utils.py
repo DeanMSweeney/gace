@@ -15,8 +15,8 @@ from mendeleev import element
 from torch_geometric.data import Dataset
 from tqdm import tqdm
 
-from zatom.utils import pylogger
-from zatom.utils.typing_utils import typecheck
+from adsflow.utils.tft import pylogger
+from adsflow.utils.tft.typing_utils import typecheck
 
 log = pylogger.RankedLogger(__name__, rank_zero_only=True)
 

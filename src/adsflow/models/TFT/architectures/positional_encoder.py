@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from zatom.utils.typing_utils import Float, Int, typecheck
+from adsflow.utils.tft.typing_utils import Float, Int, typecheck
 
 
 class PositionalEncoding(ABC, nn.Module):

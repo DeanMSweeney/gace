@@ -5,7 +5,7 @@ from environs import Env
 from jaxtyping import Bool, Float, Int, Shaped, jaxtyped
 from torch import Tensor
 
-from zatom.utils.utils import identity, package_available
+from adsflow.utils.tft.utils import identity, package_available
 
 # Environment
 

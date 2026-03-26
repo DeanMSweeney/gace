@@ -7,9 +7,9 @@ import torch.nn.functional as F
 from tensordict import TensorDict
 from torch import Tensor, nn
 
-from zatom.flow.path import FlowPath
-from zatom.utils.metric_utils import split_losses_by_time
-from zatom.utils.typing_utils import typecheck
+from adsflow.utils.tft.path import FlowPath
+from adsflow.utils.tft.metric_utils import split_losses_by_time
+from adsflow.utils.tft.typing_utils import typecheck
 
 
 class InterDistancesLoss(nn.Module):
