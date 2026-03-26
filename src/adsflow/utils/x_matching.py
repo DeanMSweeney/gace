@@ -21,13 +21,13 @@ class XMatching():
     ):
         """Dispatch to the variant-specific loss."""
         if self.variant == "place":
-            return self._criterion_relax(input_graph, pred)
+            return self._criterion_place(input_graph, pred)
         elif self.variant == "forge":
             return self._criterion_forge(input_graph, pred)
         else:
             raise ValueError(f"Unknown variant: {self.variant}")
 
-    def _criterion_relax(
+    def _criterion_place(
         self,
         input_graph,
         pred: Union[Tensor, dict],
@@ -134,12 +134,12 @@ class XMatching():
         ads_relp_loss = (pred["ads_rel_pos"] - data.ads_rel_pos_target).abs().mean()
         # ────────────────────────────────────────────────────────────────────────────────────────────────
 
-        lambda_z   = float(getattr(self.hparams, "lambda_z",   1.0))
+        lambda_z   = float(getattr(self.hparams, "lambda_z",   0.10))
         lambda_ads = float(getattr(self.hparams, "lambda_ads", 1.0))
         lambda_lat = float(getattr(self.hparams, "lambda_lat", 1.0))
         lambda_M   = float(getattr(self.hparams, "lambda_M",   1.0))
-
-        total_loss = (
+        
+        total_loss = self.time_weight * (
               x_loss
             + lambda_z   * z_loss
             + lambda_ads * (ads_com_loss + ads_relp_loss)
@@ -194,7 +194,6 @@ class XMatching():
             data = self._build_positions_path(data, t=t)
 
             return data
-
 
 
     def _interpolant_schedule(
@@ -359,6 +358,8 @@ class XMatching():
             x_matching=self.x_matching,
             v=cosine_schd_freq, 
         )
+
+        self.time_weight = alpha_t_M_loss_coeff # store one per graph loss coefficient 
 
         u_M = M1 - M0
         M_t = M0 + alpha_t_M.unsqueeze(-1) * u_M
