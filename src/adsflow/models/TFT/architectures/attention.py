@@ -6,8 +6,6 @@ from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from jvp_flash_attention.jvp_attention import JVPAttn
-
 from .positional_encoder import (
     RotaryPositionalEmbeddings,
 )
@@ -225,6 +223,7 @@ class ModernAttention(nn.Module):
             # Use PyTorch's optimized scaled dot-product attention (SDPA)
             output = F.scaled_dot_product_attention(q, k, v, attn_mask=final_mask)
         elif self.jvp_attn:
+            from jvp_flash_attention.jvp_attention import JVPAttn  # requires torch>=2.8.0
             output = JVPAttn.fwd_dual(q, k, v, attn_mask=final_mask)
         else:
             # Use manual implementation for comparison or environments where SDPA is not available
