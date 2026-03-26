@@ -255,10 +255,9 @@ class XMatching():
         """
 
         # sample edge lenghts and interaxial angles from true and noisy distribution
-        # PyG concatenates (3,) graph-level attrs along dim-0 → (B*3,); reshape to (B, 3)
-        B = len(torch.unique(data.batch))
-        len1 = data.lengths_scaled.float().view(B, 3)  # (B, 3)
-        ang1 = data.angles_radians.float().view(B, 3)  # (B, 3)
+        # pyg_converter stores these as (1, 3) per graph → batches to (B, 3)
+        len1 = data.lengths_scaled.float()  # (B, 3)
+        ang1 = data.angles_radians.float()  # (B, 3)
 
         len0 = torch.randn_like(len1) # B, 3
         ang0 = torch.randn_like(ang1) # B, 3
@@ -320,25 +319,17 @@ class XMatching():
         device = data.transformation_matrix.device
         dtype  = torch.float32
 
-        M1 = data.transformation_matrix.float() # B, 3, 3
+        # pyg_converter stores as (1, 3, 3) per graph → batches to (B, 3, 3)
+        M1 = data.transformation_matrix.float()  # (B, 3, 3)
+        B = M1.size(0)
 
-        identity = torch.eye(3, device=device, dtype=dtype).expand_as(M1) # B, 3, 3
+        # torch.eye gives (3, 3); unsqueeze + expand to (B, 3, 3)
+        identity = torch.eye(3, device=device, dtype=dtype).unsqueeze(0).expand(B, -1, -1)
         M0 = identity + 0.1 * torch.randn_like(M1)
 
-        # Hungarian alignment for transformation matrix (permutation invariance)
-        # Reshape (B, 3, 3) -> (B*3, 3) for Hungarian, then reshape back
-        # Matrix elements are not spatial positions, so pbc_aware=False
-        batch_size = M1.size(0)
-        M0_flat = M0.view(batch_size * 3, 3)
-        M1_flat = M1.view(batch_size * 3, 3)
-
-        M0_flat = hungarian(
-            set0=M0_flat,
-            set1=M1_flat,
-            pbc_aware=False,
-        )
-
-        M0 = M0_flat.view(batch_size, 3, 3)
+        # Hungarian is intentionally skipped for the transformation matrix.
+        # Permuting rows of M across graphs is semantically incorrect; within-graph
+        # row permutation symmetry is minor and not required for flow matching.
 
         t_M_per_graph = t # B, 1
         t_M = t_M_per_graph
@@ -488,20 +479,15 @@ class XMatching():
             data.pos        ← same as above (replaces clean labels)
         """
 
-        adsCOM1 = data.ads_com # B, 3
-        adsRELP1 = data.ads_rel_pos # Nads, 3
+        # pyg_converter stores ads_com as (1, 3) per graph → batches to (B, 3)
+        adsCOM1 = data.ads_com.float()       # (B, 3)
+        adsRELP1 = data.ads_rel_pos.float()  # (N_ads_total, 3)
 
-        adsCOM0 = torch.randn_like(adsCOM1, dtype=torch.float32) # B, 3
-        adsRELP0 = torch.randn_like(adsRELP1, dtype=torch.float32) # Nads, 3]
+        adsCOM0 = torch.randn_like(adsCOM1)   # (B, 3)
+        adsRELP0 = torch.randn_like(adsRELP1) # (N_ads_total, 3)
 
-        # Hungarian alignment for adsorbate center of mass (permutation invariance)
-        # Note: COM is per-graph (B, 3), so batch indices are just range(B)
-        # Adsorbate COM is in supercell space (not primitive cell), so use simple Euclidean distance
-        adsCOM0 = hungarian(
-            set0=adsCOM0,
-            set1=adsCOM1,
-            pbc_aware=False,
-        )
+        # Hungarian is intentionally skipped for COM: one position per graph (N=1),
+        # so no permutation to solve. Permuting COM across graphs is semantically incorrect.
 
         # Hungarian alignment for adsorbate relative positions (permutation invariance)
         # Relative positions are not in absolute space, so pbc_aware=False

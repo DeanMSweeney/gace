@@ -28,15 +28,16 @@ Emitted Data fields
     prim_atomic_numbers : (N_slab,)   int64
     prim_natoms         : scalar int
     frac_coords         : (N_slab, 3)  float32 fractional coordinates
-    lengths             : (3,)         float32 lattice edge lengths (a, b, c)
-    angles_radians      : (3,)         float32 interaxial angles in radians (alpha, beta, gamma)
+    lengths_scaled      : (1, 3)       float32 lattice edge lengths (a, b, c) — batches to (B, 3)
+    angles_radians      : (1, 3)       float32 interaxial angles in radians — batches to (B, 3)
     ads_pos             : (N_ads, 3)             float32 Cartesian positions
     ads_atomic_numbers  : (N_ads,)               int64
     ads_pairwise_dist   : (N_ads, MAX_ADS_NEIGHBORS) float32 pairwise distances, -1 padded
+    ads_com             : (1, 3)       float32 adsorbate centre of mass — batches to (B, 3)
     ref_energy          : scalar float
     ref_ads_pos         : (N_ads, 3)  float32 fractional reference positions
     bind_ads_atom       : scalar int
-    transformation_matrix : (3, 3)    int64
+    transformation_matrix : (1, 3, 3) int64 — batches to (B, 3, 3)
     n_slab              : scalar int
     n_vac               : scalar int
     sid                 : int
@@ -88,11 +89,11 @@ def catflow_dict_to_pyg_data(d: dict) -> Data:
 
     lengths_scaled = torch.from_numpy(
         np.array(d["lengths_scaled"], dtype=np.float32)
-    )  # (3,)
+    ).unsqueeze(0)  # (1, 3) → batches to (B, 3)
 
     angles_radians = torch.from_numpy(
         np.array(d["angles_radians"], dtype=np.float32)
-    )  # (3,)
+    ).unsqueeze(0)  # (1, 3) → batches to (B, 3)
 
     # ── Adsorbate fields (ads_*) ─────────────────────────────────────────────
     ads_pos = torch.from_numpy(
@@ -109,7 +110,7 @@ def catflow_dict_to_pyg_data(d: dict) -> Data:
 
     ads_com = torch.from_numpy(
         np.array(d["ads_com"], dtype=np.float32)
-    )  # (3,)
+    ).unsqueeze(0)  # (1, 3) → batches to (B, 3)
 
     ads_rel_pos = torch.from_numpy(
         np.array(d["ads_rel_pos"], dtype=np.float32)
@@ -129,7 +130,7 @@ def catflow_dict_to_pyg_data(d: dict) -> Data:
     # ── Slab geometry metadata ────────────────────────────────────────────────
     supercell_matrix = torch.from_numpy(
         np.array(d["supercell_matrix"], dtype=np.int64)
-    )  # (3, 3)
+    ).unsqueeze(0)  # (1, 3, 3) → batches to (B, 3, 3)
 
     n_slab = int(d["n_slab"])
     n_vac  = int(d["n_vac"])
