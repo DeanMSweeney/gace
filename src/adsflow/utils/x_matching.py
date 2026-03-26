@@ -563,11 +563,12 @@ class XMatching():
         z0 = torch.randint(low=0, high=num_classes, size=(z1.size(0), 1), device=device)  # N, 1
 
         # Hungarian alignment over catalyst for permutation invariance
+        # Cast to float for hungarian (linalg.norm requires float), then back to long
         z0 = hungarian(
-            set0=z0,
-            set1=z1,
+            set0=z0.float(),
+            set1=z1.float(),
             pbc_aware=False,
-        ).long()  # N, 1
+        ).round().long()  # N, 1
 
         # Convert to one-hot after alignment
         # F.one_hot expects (N,) input, so squeeze the (N, 1) tensors
