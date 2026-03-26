@@ -174,10 +174,10 @@ class XMatching():
 
             # define time 
             if time_dist == "uniform":
-                t = torch.rand(len(torch.unique(data.batch)), 1, device=data.device, dtype=torch.float32) # B , 1   
+                t = torch.rand(len(torch.unique(data.batch)), 1, device=data.pos.device, dtype=torch.float32) # B , 1
             elif time_dist == "beta":
                 beta = torch.distributions.Beta(beta_t, 1.0)
-                t = beta.sample((len(torch.unique(data.batch)), 1)).to(data.device) # B , 1 
+                t = beta.sample((len(torch.unique(data.batch)), 1)).to(data.pos.device) # B , 1
             data.t = t 
 
             # ── Lattice and supercell (CatFlow data only) ────────────────────
