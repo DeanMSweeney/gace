@@ -11,7 +11,7 @@ from jvp_flash_attention.jvp_attention import JVPAttn
 from .positional_encoder import (
     RotaryPositionalEmbeddings,
 )
-from zatom.utils.typing_utils import typecheck
+from adsflow.utils.tft.typing_utils import typecheck
 
 
 class Attention(nn.Module):

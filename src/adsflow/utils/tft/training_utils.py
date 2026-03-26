@@ -6,8 +6,8 @@ import torch
 from scipy.spatial.transform import Rotation
 from torch.nn.attention import SDPBackend
 
-from zatom.utils.pylogger import RankedLogger
-from zatom.utils.typing_utils import Bool, Float, Int, typecheck
+from adsflow.utils.tft.pylogger import RankedLogger
+from adsflow.utils.tft.typing_utils import Bool, Float, Int, typecheck
 
 log = RankedLogger(__name__, rank_zero_only=False)
 

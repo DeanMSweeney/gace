@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from zatom.utils.typing_utils import typecheck
+from adsflow.utils.tft.typing_utils import typecheck
 
 
 class FeedForward(nn.Module):

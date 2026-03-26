@@ -11,7 +11,7 @@ from .attention import (
 )
 from .common import SwiGLUFeedForward
 from .transition import Transition
-from zatom.utils.typing_utils import typecheck
+from adsflow.utils.tft.typing_utils import typecheck
 
 
 class TransformerBlock(nn.Module):

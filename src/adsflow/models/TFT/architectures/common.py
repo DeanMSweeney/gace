@@ -4,7 +4,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
-from zatom.utils.typing_utils import typecheck
+from adsflow.utils.tft.typing_utils import typecheck
 
 
 class SwiGLU(nn.Module):

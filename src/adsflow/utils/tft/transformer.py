@@ -5,13 +5,13 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 
-from zatom.models.architectures.transformer.attention import (
+from adsflow.models.TFT.architectures.attention import (
     AttentionBlock,
     ModernAttention,
 )
-from zatom.models.architectures.transformer.common import SwiGLUFeedForward
-from zatom.models.architectures.transformer.transition import Transition
-from zatom.utils.typing_utils import typecheck
+from adsflow.models.TFT.architectures.common import SwiGLUFeedForward
+from adsflow.models.TFT.architectures.transition import Transition
+from adsflow.utils.tft.typing_utils import typecheck
 
 
 class TransformerBlock(nn.Module):
