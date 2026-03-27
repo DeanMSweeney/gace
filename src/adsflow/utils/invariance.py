@@ -178,7 +178,7 @@ def hungarian(
   
     # Compute L2 distance matrix (cost matrix for Hungarian algorithm)
     C_l2 = torch.linalg.norm(C, dim=-1)  # (N, N)
-    print(Cl_2.size())
+    print(C_l2.size())
 
     # Solve linear assignment problem using Hungarian algorithm
     row_ind, col_ind = assignment_to_indices(C_l2)
