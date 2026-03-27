@@ -571,7 +571,6 @@ class XMatching():
         # Convert to one-hot after alignment
         # F.one_hot expects (N,) input, so squeeze the (N, 1) tensors
         z0_hot = F.one_hot(z0.squeeze(1), num_classes=num_classes)      # N, num_classes
-        print(z0.size(), z1.size())
         z1_hot = F.one_hot(z1.squeeze(1), num_classes=num_classes)      # N, num_classes
         
         # Sample per-graph interpolation time
