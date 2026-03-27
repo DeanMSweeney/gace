@@ -426,6 +426,7 @@ class XMatching():
             x0 = torch.randn_like(x1, dtype=torch.float32)
 
             # Hungarian alignment applied to catalyst atoms 
+            """
             x0 = hungarian(
                 set0=x0,
                 set1=x1,
@@ -433,6 +434,7 @@ class XMatching():
                 batch=data.batch[self.catalyst_mask],
                 pbc_aware=True,
             ) # will detect if fractional coordinates or cartesian 
+            """
 
             u_x = x1 - x0 
             u_x_n0 = torch.round(u_x)
@@ -491,11 +493,13 @@ class XMatching():
 
         # Hungarian alignment for adsorbate relative positions (permutation invariance)
         # Relative positions are not in absolute space, so pbc_aware=False
+        """
         adsRELP0 = hungarian(
             set0=adsRELP0,
             set1=adsRELP1,
             pbc_aware=False,
         )
+        """
 
         t_COM_per_graph = t
         t_COM = t_COM_per_graph # B, 1
