@@ -130,16 +130,16 @@ class LightFlowMatch(LightningModule, XMatching):
         self.bad_iter, self.good_ter, self.iter = 0, 0, 0
        # ==============================================================================
        
-    def forward(self, data):
+    def forward(self, data=None, **kwargs):
         """
         Forward pass through the model.
 
-        Args:
-            data: Batch of atomic structures with positions, atomic numbers, etc.
-
-        Returns:
-            Predicted velocity field u(x, t) for flow matching
+        For the 'place' variant, accepts a single PyG Data object.
+        For the 'forge' variant, accepts keyword arguments (x_prim, x_ads, etc.)
+        that are passed directly to the transformer model.
         """
+        if kwargs:
+            return self.model(**kwargs)
         return self.model(data)
 
     def _transport_loss(self, input_graph: Data) -> torch.Tensor:
