@@ -556,7 +556,7 @@ class XMatching():
 
         # shift atomic numbers to start from 0, not 1 
         # z1 only pertains to the primitive cell 
-        z1 = data.atomic_numbers.long() - 1 # N, 1
+        z1 = (data.atomic_numbers.long() - 1).unsqueeze(1) # N, 1
 
         # Prior: random atomic number indices (much more efficient than one-hot)
         num_classes = 118
