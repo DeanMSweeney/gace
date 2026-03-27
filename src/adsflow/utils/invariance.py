@@ -178,10 +178,10 @@ def hungarian(
   
     # Compute L2 distance matrix (cost matrix for Hungarian algorithm)
     C_l2 = torch.linalg.norm(C, dim=-1)  # (N, N)
-    print(C_l2.size())
 
     # Solve linear assignment problem using Hungarian algorithm
-    row_ind, col_ind = assignment_to_indices(C_l2)
+    sol = linear_assignment(C_l2)
+    row_ind, col_ind = assignment_to_indices(sol)
 
     # Reorder set0 into set1 ordering: aligned[col] = source[row]
     set0_aligned = torch.empty_like(set0)
