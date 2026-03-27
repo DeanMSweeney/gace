@@ -12,7 +12,7 @@ from torch import Tensor
 from torch_geometric.data import Data
 from typing import Optional, Literal, Union, Tuple
 import itertools
-from torch_linear_assignment import assignment_to_indices
+from torch_linear_assignment import linear_assignment, assignment_to_indices
 
 
 def pbc_aware_delta(
