@@ -12,7 +12,7 @@ from torch import Tensor
 from torch_geometric.data import Data
 from typing import Optional, Literal, Union, Tuple
 import itertools
-from torch_linear_assignment import linear_assignment, assignment_to_indices
+from torch_linear_assignment import batch_linear_assignment, assignment_to_indices
 
 
 def pbc_aware_delta(
@@ -180,8 +180,8 @@ def hungarian(
     C_l2 = torch.linalg.norm(C, dim=-1)  # (N, N)
 
     # Solve linear assignment problem using Hungarian algorithm
-    sol = linear_assignment(C_l2)
-    row_ind, col_ind = assignment_to_indices(sol)
+    assignment = batch_linear_assignment(C_l2)
+    row_ind, col_ind = assignment_to_indices(assignment)
 
     # Reorder set0 into set1 ordering: aligned[col] = source[row]
     set0_aligned = torch.empty_like(set0)
