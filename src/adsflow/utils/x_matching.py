@@ -133,7 +133,7 @@ class XMatching():
         ads_com_loss  = (pred["ads_com"]     - data.ads_com_target).abs().mean()
 
         print(pred["ads_com"])
-        )
+        
         ads_relp_loss = (pred["ads_rel_pos"] - data.ads_rel_pos_target).abs().mean()
         # ────────────────────────────────────────────────────────────────────────────────────────────────
 
