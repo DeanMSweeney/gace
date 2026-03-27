@@ -108,7 +108,6 @@ class XMatching():
         # ── Position loss (endpoint) w/ minimum image convention ─────────────────────────────────────────
         x_pred = pred["pos"].float()
         x_target = data.pos_target.float() # fractiona coordiantes of primitive cell
-        print(x_pred)
         x_diff = x_pred - x_target
         n0 = torch.round(x_diff)
         x_diff = x_diff - n0
@@ -119,7 +118,6 @@ class XMatching():
 
         # ── Atom-type loss (catalyst only — adsorbate types are conditioned) ─────────────────────────────
         z_pred = pred["z"].float()
-        print(z_pred)
         z_target = data.atomic_numbers_target.long().squeeze(1) # N
         z_ce_per_atom = F.cross_entropy(z_pred, z_target, reduction="none").unsqueeze(1) # N, 1
         z_loss = (z_ce_per_atom).sum() / len(z_ce_per_atom)
