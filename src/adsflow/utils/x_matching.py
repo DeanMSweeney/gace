@@ -559,16 +559,14 @@ class XMatching():
         z1 = data.atomic_numbers.long() - 1 # N, 1
 
         # Prior: random atomic number indices (much more efficient than one-hot)
-        num_classes = 90
+        num_classes = 118
         z0 = torch.randint(low=0, high=num_classes, size=(z1.size(0), 1), device=device)  # N, 1
 
-        # Hungarian alignment over catalyst for permutation invariance
-        # Cast to float for hungarian (linalg.norm requires float), then back to long
-        z0 = hungarian(
-            set0=z0.float(),
-            set1=z1.float(),
-            pbc_aware=False,
-        ).round().long()  # N, 1
+        # Hungarian alignment is intentionally skipped for atom types.
+        # The corruption-mask scheme (zt = z0 * corrupt + z1 * (1-corrupt)) means
+        # the model sees either the true type or a random one — the specific random
+        # value in z0 doesn't affect training. Additionally, global cross-graph
+        # atom matching is semantically incorrect.
 
         # Convert to one-hot after alignment
         # F.one_hot expects (N,) input, so squeeze the (N, 1) tensors
