@@ -231,7 +231,7 @@ class XMatching():
 
         # scale only for endpoint
         t0_weight = self.hparams.t0_weight
-        alpha_t_factor = torch.clamp(alpha_t_grad / (1 - alpha_t) ** 2,  min=None, max=100) if x_matching == "endpoint" \
+        alpha_t_factor = torch.clamp(alpha_t_grad / (1 - alpha_t) ** 2,  min=None, max=1) if x_matching == "endpoint" \
             else torch.tensor(1.0, device=t.device, dtype=torch.float32)
 
         return alpha_t, alpha_t_grad, alpha_t_factor
