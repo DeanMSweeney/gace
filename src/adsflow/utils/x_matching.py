@@ -131,7 +131,6 @@ class XMatching():
 
         # ── Adsorbate losses (endpoint) ─────────────────────────────────────────────────────────────────
         ads_com_loss  = (pred["ads_com"]     - data.ads_com_target).abs().mean()
-        
         ads_relp_loss = (pred["ads_rel_pos"] - data.ads_rel_pos_target).abs().mean()
         # ────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -366,6 +365,8 @@ class XMatching():
         # Then apply transformation matrix to get supercell lattice
         # Supercell lattice: L_super = M @ L_prim
         data.supercell_lattice = torch.bmm(M_t, C_t)  # (B, 3, 3)
+
+        print("supercell lattice", data.supercell_lattice)
         data.cell_target = C_t
         data.cell = C_t  # Store primitive cell as well 
 
