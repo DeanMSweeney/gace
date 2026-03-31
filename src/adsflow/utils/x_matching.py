@@ -359,9 +359,6 @@ class XMatching():
             lengths=data.lengths_scaled,  # (B, 3)
             angles=data.angles_radians,   # (B, 3)
         )  # (B, 3, 3
-        print("lengths", data.lengths_scaled)
-        print("angles", data.angles_radians)
-        print("primitive cell", C_t)
 
         # Then apply transformation matrix to get supercell lattice
         # Supercell lattice: L_super = M @ L_prim
