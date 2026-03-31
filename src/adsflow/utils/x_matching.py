@@ -361,12 +361,11 @@ class XMatching():
         C_t = lattice_params_to_matrix(
             lengths=data.lengths_scaled,  # (B, 3)
             angles=data.angles_radians,   # (B, 3)
-        )  # (B, 3, 3)
+        )  # (B, 3, 3
         print("primitive cell", C_t)
         # Then apply transformation matrix to get supercell lattice
         # Supercell lattice: L_super = M @ L_prim
         data.supercell_lattice = torch.bmm(M_t, C_t)  # (B, 3, 3)
-        print("supercell lattice", data.supercell_lattice)
         data.cell_target = C_t
         data.cell = C_t  # Store primitive cell as well 
 
