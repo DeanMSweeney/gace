@@ -185,9 +185,7 @@ def lattice_params_to_matrix(
     cy = c * (torch.cos(alpha) - torch.cos(beta) * torch.cos(gamma)) / torch.sin(gamma)
     cz = torch.sqrt(c**2 - cx**2 - cy**2)
 
-    print("cx", cx)
-    print("cy", cy)
-    print("cz", cz)
+    print("c^2 - cx^2 - cy^2", c**2 - cx**2 - cy**2)
 
     # Stack into matrix (B, 3, 3)
     cell = torch.stack([
