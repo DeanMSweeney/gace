@@ -176,16 +176,15 @@ def lattice_params_to_matrix(
     by = b * torch.sin(gamma)
     bz = torch.zeros_like(b)
 
-    print("bx", bx)
-    print("by", by)
-    print("bz", bz)
 
     # Third lattice vector
+    """
+    This code currently need to be reavualted because is the generated lengths and angles are non physical, 
+    it can break this code
+    """
     cx = c * torch.cos(beta)
     cy = c * (torch.cos(alpha) - torch.cos(beta) * torch.cos(gamma)) / torch.sin(gamma)
     cz = torch.sqrt(c**2 - cx**2 - cy**2)
-
-    print("c^2 - cx^2 - cy^2", c**2 - cx**2 - cy**2)
 
     # Stack into matrix (B, 3, 3)
     cell = torch.stack([
