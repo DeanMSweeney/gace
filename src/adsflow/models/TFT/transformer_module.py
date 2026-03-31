@@ -416,14 +416,6 @@ class TransformerModule(nn.Module):
             ``(pred_prim, pred_ads, pred_aux)``
         """
 
-        # Add this at the top of forward(), before any embedding
-        for i, (k, v) in enumerate(feats.items()):
-            print(f"feats[{k}] NaN: {torch.isnan(v).any()}")
-        for i, comp in enumerate(x_prim):
-            print(f"x_prim[{i}] NaN: {torch.isnan(comp).any()}")
-        for i, comp in enumerate(x_ads):
-            print(f"x_ads[{i}] NaN: {torch.isnan(comp).any()}")
-            
         # primitive cell data at time t 
         atom_types, frac_coords, lengths_scaled, angles_radians, transformation_matrix, supercell_lattice = x_prim
         atom_types_t, frac_coords_t, lengths_scaled_t, angles_radians_t = t_prim
