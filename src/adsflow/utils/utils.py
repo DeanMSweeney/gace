@@ -163,35 +163,27 @@ def lattice_params_to_matrix(
     else:
         squeeze_output = False
 
-    a, b, c = lengths[:, 0], lengths[:, 1], lengths[:, 2]
-    alpha, beta, gamma = angles[:, 0], angles[:, 1], angles[:, 2]
+    cos_a, cos_b, cos_g = torch.cos(angles[:, 0]), torch.cos(angles[:, 1]), torch.cos(angles[:, 2])
+    sin_a, sin_b        = torch.sin(angles[:, 0]), torch.sin(angles[:, 1])
 
-    # First lattice vector along x-axis
-    ax = a
-    ay = torch.zeros_like(a)
-    az = torch.zeros_like(a)
+    # gamma_star: intermediate angle (pymatgen convention, numerically stable)
+    val = (cos_a * cos_b - cos_g) / (sin_a * sin_b)
+    val = torch.clamp(val, -1.0, 1.0)
+    gamma_star = torch.arccos(val)
 
-    # Second lattice vector in xy-plane
-    bx = b * torch.cos(gamma)
-    by = b * torch.sin(gamma)
-    bz = torch.zeros_like(b)
-
-
-    # Third lattice vector
-    """
-    This code currently need to be reavualted because is the generated lengths and angles are non physical, 
-    it can break this code
-    """
-    cx = c * torch.cos(beta)
-    cy = c * (torch.cos(alpha) - torch.cos(beta) * torch.cos(gamma)) / torch.sin(gamma)
-    cz = torch.sqrt(c**2 - cx**2 - cy**2)
+    # c along z, a in xz-plane, b general
+    a_vec = torch.stack([lengths[:, 0] * sin_b,
+                         torch.zeros(lengths.shape[0], device=lengths.device, dtype=lengths.dtype),
+                         lengths[:, 0] * cos_b], dim=1)
+    b_vec = torch.stack([-lengths[:, 1] * sin_a * torch.cos(gamma_star),
+                          lengths[:, 1] * sin_a * torch.sin(gamma_star),
+                          lengths[:, 1] * cos_a], dim=1)
+    c_vec = torch.stack([torch.zeros(lengths.shape[0], device=lengths.device, dtype=lengths.dtype),
+                         torch.zeros(lengths.shape[0], device=lengths.device, dtype=lengths.dtype),
+                         lengths[:, 2]], dim=1)
 
     # Stack into matrix (B, 3, 3)
-    cell = torch.stack([
-        torch.stack([ax, ay, az], dim=-1),
-        torch.stack([bx, by, bz], dim=-1),
-        torch.stack([cx, cy, cz], dim=-1),
-    ], dim=1)
+    cell = torch.stack([a_vec, b_vec, c_vec], dim=1)
 
     if squeeze_output:
         cell = cell.squeeze(0)
