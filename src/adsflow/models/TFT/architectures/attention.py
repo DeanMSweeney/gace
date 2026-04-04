@@ -168,14 +168,16 @@ class ModernAttention(nn.Module):
             Output tensor of shape [batch_size, seq_len, dim]
         """
         batch_size, seq_len, _ = x.shape
+        kv_source = memory if memory is not None else x
+        mem_len = kv_source.shape[1]
 
         q = self.q_proj(x)
-        k = self.k_proj(memory if memory is not None else x)
-        v = self.v_proj(memory if memory is not None else x)
+        k = self.k_proj(kv_source)
+        v = self.v_proj(kv_source)
 
         q = q.reshape(batch_size, seq_len, self.n_heads, self.head_dim)
-        k = k.reshape(batch_size, seq_len, self.n_heads, self.head_dim)
-        v = v.reshape(batch_size, seq_len, self.n_heads, self.head_dim)
+        k = k.reshape(batch_size, mem_len, self.n_heads, self.head_dim)
+        v = v.reshape(batch_size, mem_len, self.n_heads, self.head_dim)
 
         if self.use_qk_norm:
             q = self.q_norm(q)
@@ -185,8 +187,8 @@ class ModernAttention(nn.Module):
         if self.rotary_emb is not None:
             assert pos_ids is not None, "pos_ids must be provided when using RoPE."
             # NOTE: RoPE expects its inputs to be of shape (B, Seq_Len, H, Head_Dim)
-            q = self.rotary_emb(q, input_pos=pos_ids)
-            k = self.rotary_emb(k, input_pos=pos_ids)
+            q = self.rotary_emb(q, input_pos=pos_ids[:, :seq_len])
+            k = self.rotary_emb(k, input_pos=pos_ids[:, :mem_len])
 
         # Transpose for attention calculation: (B, H, Seq_Len, Head_Dim)
         q = q.transpose(-2, -3)
