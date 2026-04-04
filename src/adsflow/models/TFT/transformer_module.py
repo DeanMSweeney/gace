@@ -131,7 +131,7 @@ class TransformerModule(nn.Module):
         self.lengths_scaled_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
         self.angles_radians_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
         self.transformation_matrix_embed = nn.Linear(9, hidden_dim, bias=False) # matrix is 3 x 3 = 9 total values
-        #self.supercell_lattice_embed = nn.Linear(9, hidden_dim, bias=False)      # S @ L, also 3 x 3 = 9
+        self.supercell_lattice_embed = nn.Linear(9, hidden_dim, bias=False)      # S @ L, also 3 x 3 = 9
 
         # Embeddings for the adsorbate 
         self.ads_atom_type = nn.Embedding(atom_dim, hidden_dim)
@@ -446,11 +446,9 @@ class TransformerModule(nn.Module):
             transformation_matrix.reshape(batch_size, 9)
         ).unsqueeze(1)  # (B, 1, C)
         # supercell_lattice: S @ L, same approach
-        """
         embed_supercell_lattice = self.supercell_lattice_embed(
             supercell_lattice.reshape(batch_size, 9)
         ).unsqueeze(1)  # (B, 1, C)
-        """
 
         # ── Ads embeddings ───────────────────────────────────────────────────
         embed_ads_atom_types = self.ads_atom_type(ads_atom_types)  # (B, N, C)
@@ -497,7 +495,7 @@ class TransformerModule(nn.Module):
             embed_lengths_scaled_bc = embed_lengths_scaled.expand(-1, prim_seq_len, -1)
             embed_angles_radians_bc = embed_angles_radians.expand(-1, prim_seq_len, -1)
             embed_transformation_matrix_bc = embed_transformation_matrix.expand(-1, prim_seq_len, -1)
-            #embed_supercell_lattice_bc = embed_supercell_lattice.expand(-1, prim_seq_len, -1)
+            embed_supercell_lattice_bc = embed_supercell_lattice.expand(-1, prim_seq_len, -1)
             embed_conditions_prim = embed_conditions.expand(-1, prim_seq_len, -1)
 
             h_in_prim = torch.cat([
@@ -506,7 +504,7 @@ class TransformerModule(nn.Module):
                 embed_lengths_scaled_bc,        # (B, M, C)
                 embed_angles_radians_bc,        # (B, M, C)
                 embed_transformation_matrix_bc, # (B, M, C)
-                #embed_supercell_lattice_bc,     # (B, M, C)
+                embed_supercell_lattice_bc,     # (B, M, C)
                 embed_posenc_prim,              # (B, M, C)
                 embed_conditions_prim,          # (B, M, C)
             ], dim=-1)  # (B, M, 8*C)
@@ -518,7 +516,7 @@ class TransformerModule(nn.Module):
                 + embed_lengths_scaled       # (B, 1, C) → broadcasts
                 + embed_angles_radians       # (B, 1, C) → broadcasts
                 + embed_transformation_matrix # (B, 1, C) → broadcasts
-                #+ embed_supercell_lattice    # (B, 1, C) → broadcasts
+                + embed_supercell_lattice    # (B, 1, C) → broadcasts
                 + embed_posenc_prim          # (B, M, C)
                 + embed_conditions           # (B, 1, C) → broadcasts
             )
@@ -597,13 +595,15 @@ class TransformerModule(nn.Module):
                 **attention_kwargs,
             )
             h_angles_radians = self.angles_radians_cross_attention(
-                h_out_prim, h_in,
+                h_out_prim, 
+                h_in,
                 tgt_key_padding_mask=prim_padding_mask,
                 memory_key_padding_mask=padding_mask,
                 **attention_kwargs,
             )
             h_transformation_matrix = self.transformation_matrix_cross_attention(
-                h_out_prim, h_in,
+                h_out_prim, 
+                h_in,
                 tgt_key_padding_mask=prim_padding_mask,
                 memory_key_padding_mask=padding_mask,
                 **attention_kwargs,
@@ -619,13 +619,15 @@ class TransformerModule(nn.Module):
 
             # Ads cross-attention (atom types are conditioning — no head for them)
             h_ads_com = self.ads_com_cross_attention(
-                h_out_ads, h_in,
+                h_out_ads, 
+                h_in,
                 tgt_key_padding_mask=ads_padding_mask,
                 memory_key_padding_mask=padding_mask,
                 **attention_kwargs,
             )
             h_ads_rel_pos = self.ads_rel_pos_cross_attention(
-                h_out_ads, h_in,
+                h_out_ads, 
+                h_in,
                 tgt_key_padding_mask=ads_padding_mask,
                 memory_key_padding_mask=padding_mask,
                 **attention_kwargs,
