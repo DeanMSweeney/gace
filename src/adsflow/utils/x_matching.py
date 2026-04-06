@@ -7,7 +7,8 @@ from torchdiffeq import odeint
 from typing import Optional, Literal, Union, Tuple
 
 from adsflow.utils.invariance import pbc_aware_delta, hungarian
-from adsflow.utils.utils import adsorbate_neighborhood_mask, lattice_params_to_matrix
+from adsflow.utils.utils import adsorbate_neighborhood_mask
+from adsflow.utils.builder import lattice_params_to_matrix
 
 class XMatching():
     """
@@ -363,7 +364,6 @@ class XMatching():
         # Then apply transformation matrix to get supercell lattice
         # Supercell lattice: L_super = M @ L_prim
         data.supercell_lattice = torch.bmm(M_t, C_t)  # (B, 3, 3)
-        data.cell_target = C_t
         data.cell = C_t  # Store primitive cell as well 
 
         if self.x_matching == "flow":

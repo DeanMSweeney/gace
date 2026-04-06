@@ -17,6 +17,8 @@ from adsflow.utils.evaluation import compute_eval_metrics
 from adsflow.utils.relaxation import relax_struc
 from adsflow.utils.atoms import write_strucs
 from adsflow.utils.tft.wrapper import PyGToTensorDict
+from adsflow.utils.builder import build_slab_adsorbate, lattice_params_to_matrix
+import ase.io
 
 from typing import Optional, Literal, Union, Tuple
 
@@ -351,37 +353,78 @@ class LightFlowMatch(LightningModule, XMatching):
                 opt_graph = data 
                 opt_graph.pos_generated = opt_graph.pos   
             
-            opt_graph = relax_struc(
-                opt_graph,
-                run_mlff=self.run_mlff,
-                config_vasp=self.config_vasp,
-                mlff_checkpoint=self.mlff_checkpoint,
-                accelerator=self.accelerator,
-                seed=self.seed,
-                gen_POS=self.gen_POS,
-                in_POS=self.in_POS,
-                rlxd_POS=self.rlxd_POS,
-            )
+            if self.variant == "forge":
+                # Split sparse atoms by tag
+                prim_mask  = (data.tags == 1)
+                ads_mask   = (data.tags == 2)
+                prim_batch = data.batch[prim_mask]
+                ads_batch  = data.batch[ads_mask]
 
-            write_strucs(
-                data=opt_graph,
-                gen_POS=self.gen_POS,
-                in_POS=self.in_POS,
-                rlxd_POS=self.rlxd_POS,
-            )
+                for b in range(data.num_graphs):
+                    # Per-sample lattice parameters
+                    lengths = data.lengths_scaled_target[b]           # (3,)
+                    angles  = data.angles_radians_target[b]           # (3,)
+                    M       = data.transformation_matrix_target[b]    # (3, 3)
 
-            eval_metrics = compute_eval_metrics(data=opt_graph, threshold=self.threshold)
+                    # Fractional → Cartesian for primitive slab atoms
+                    cell     = lattice_params_to_matrix(lengths.unsqueeze(0), angles.unsqueeze(0)).squeeze(0)
+                    frac     = data.pos_target[prim_batch == b]       # (N_prim, 3)
+                    prim_pos = frac @ cell                     # (N_prim, 3) Cartesian
 
-            if self.write_eval_metrics:
-                if not hasattr(self, "eval_metrics"):
-                    self.eval_metrics = {k: [] for k in eval_metrics.keys()}
-                for k, v in eval_metrics.items():
-                    self.eval_metrics[k].append(v) # only append updated batch values
+                    # Reconstruct adsorbate absolute positions from COM + relative positions
+                    ads_rel = data.ads_rel_pos_target[ads_batch == b]             # (N_ads, 3)
+                    ads_pos = data.ads_com_target[b].unsqueeze(0) + ads_rel       # (N_ads, 3)
 
-            # Log all evaluation metrics
-            if eval_metrics:
-                for name, value in eval_metrics.items():
-                    self.log(f"test/{name}", value, prog_bar=True, batch_size=data.num_graphs, sync_dist=True)
+                    atoms = build_slab_adsorbate(
+                        prim_pos=prim_pos,
+                        lattice_params=torch.cat([lengths, angles]),       # (6,) radians
+                        transformation_matrix=M,
+                        ads_pos=ads_pos,
+                        prim_atomic_numbers=data.atomic_numbers[prim_batch == b],
+                        ads_atomic_numbers=data.ads_atomic_numbers[ads_batch == b],
+                        vacuum=15.0,
+                    )
+
+                    if self.gen_POS:
+                        os.makedirs(self.gen_POS, exist_ok=True)
+                        ase.io.write(
+                            os.path.join(self.gen_POS, f'{batch_idx}_{b}.vasp'),
+                            atoms,
+                            format='vasp',
+                        )
+
+            else:
+                opt_graph = relax_struc(
+                    opt_graph,
+                    run_mlff=self.run_mlff,
+                    config_vasp=self.config_vasp,
+                    mlff_checkpoint=self.mlff_checkpoint,
+                    accelerator=self.accelerator,
+                    seed=self.seed,
+                    gen_POS=self.gen_POS,
+                    in_POS=self.in_POS,
+                    rlxd_POS=self.rlxd_POS,
+                )
+
+                write_strucs(
+                    data=opt_graph,
+                    gen_POS=self.gen_POS,
+                    in_POS=self.in_POS,
+                    rlxd_POS=self.rlxd_POS,
+                )
+
+                eval_metrics = compute_eval_metrics(data=opt_graph, threshold=self.threshold)
+
+                if self.write_eval_metrics:
+                    if not hasattr(self, "eval_metrics"):
+                        self.eval_metrics = {k: [] for k in eval_metrics.keys()}
+                    for k, v in eval_metrics.items():
+                        self.eval_metrics[k].append(v) # only append updated batch values
+
+                # Log all evaluation metrics
+                if eval_metrics:
+                    for name, value in eval_metrics.items():
+                        self.log(f"test/{name}", value, prog_bar=True, batch_size=data.num_graphs, sync_dist=True)
         
         return   
 
