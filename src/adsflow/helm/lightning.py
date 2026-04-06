@@ -381,8 +381,8 @@ class LightFlowMatch(LightningModule, XMatching):
                         lattice_params=torch.cat([lengths, angles]),       # (6,) radians
                         transformation_matrix=M,
                         ads_pos=ads_pos,
-                        prim_atomic_numbers=data.atomic_numbers[prim_batch == b],
-                        ads_atomic_numbers=data.ads_atomic_numbers[ads_batch == b],
+                        prim_atomic_numbers=data.atomic_numbers_target[prim_batch == b] + 1,
+                        ads_atomic_numbers=data.ads_atomic_numbers[ads_batch == b] + 1,
                         vacuum=15.0,
                     )
 
