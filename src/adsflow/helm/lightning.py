@@ -354,6 +354,7 @@ class LightFlowMatch(LightningModule, XMatching):
                 opt_graph.pos_generated = opt_graph.pos   
             
             if self.variant == "forge":
+                loss, max_loss, _ = self._transport_loss(data)
                 # Split sparse atoms by tag
                 prim_mask  = (data.tags == 1)
                 ads_mask   = (data.tags == 2)
