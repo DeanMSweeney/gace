@@ -392,7 +392,7 @@ class LightFlowMatch(LightningModule, XMatching):
                             atoms,
                             format='vasp',
                         )
-
+            """
             else:
                 opt_graph = relax_struc(
                     opt_graph,
@@ -425,6 +425,7 @@ class LightFlowMatch(LightningModule, XMatching):
                 if eval_metrics:
                     for name, value in eval_metrics.items():
                         self.log(f"test/{name}", value, prog_bar=True, batch_size=data.num_graphs, sync_dist=True)
+            """
         
         return   
 
