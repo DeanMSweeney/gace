@@ -386,6 +386,8 @@ class LightFlowMatch(LightningModule, XMatching):
                         vacuum=15.0,
                     )
 
+                    print(data.ads_atomic_numbers)
+
                     if self.gen_POS:
                         os.makedirs(self.gen_POS, exist_ok=True)
                         ase.io.write(
