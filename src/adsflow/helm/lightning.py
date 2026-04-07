@@ -366,6 +366,7 @@ class LightFlowMatch(LightningModule, XMatching):
                     lengths = data.lengths_scaled_target[b]           # (3,)
                     angles  = data.angles_radians_target[b]           # (3,)
                     M       = data.transformation_matrix_target[b]    # (3, 3)
+                    print(data.sid[b])
 
                     # Fractional → Cartesian for primitive slab atoms
                     cell     = lattice_params_to_matrix(lengths.unsqueeze(0), angles.unsqueeze(0)).squeeze(0)
@@ -383,10 +384,8 @@ class LightFlowMatch(LightningModule, XMatching):
                         ads_pos=ads_pos,
                         prim_atomic_numbers=data.atomic_numbers_target[prim_batch == b] + 1,
                         ads_atomic_numbers=data.ads_atomic_numbers[ads_batch == b] + 1,
-                        vacuum=15.0,
+                        vacuum=15.0
                     )
-
-                    print(data.ads_atomic_numbers)
 
                     if self.gen_POS:
                         os.makedirs(self.gen_POS, exist_ok=True)
