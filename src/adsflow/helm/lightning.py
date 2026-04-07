@@ -378,12 +378,13 @@ class LightFlowMatch(LightningModule, XMatching):
 
                     atoms = build_slab_adsorbate(
                         prim_pos=prim_pos,
-                        lattice_params=torch.cat([lengths, angles]),       # (6,) radians
+                        lattice_params=torch.cat([lengths, angles]),       # (6,) radians]
                         transformation_matrix=M,
                         ads_pos=ads_pos,
                         prim_atomic_numbers=data.atomic_numbers_target[prim_batch == b] + 1,
                         ads_atomic_numbers=data.ads_atomic_numbers[ads_batch == b] + 1,
                         vacuum=15.0,
+                        cell=data.cell[b]
                     )
 
                     print(data.ads_atomic_numbers)
