@@ -116,6 +116,7 @@ def build_slab_adsorbate(
     ads_pos,
     ads_atomic_numbers,
     vacuum: float = 15.0,
+    cell: Optional[np.ndarray] = None,
     prim_slab_atom_mask=None,
     ads_atom_mask=None,
 ) -> Atoms:
@@ -173,7 +174,7 @@ def build_slab_adsorbate(
         for z in prim_atomic_numbers
     ]
     prim_struct = Structure(
-        lattice=Lattice.from_parameters(a, b, c, alpha, beta, gamma),
+        lattice=cell, #Lattice.from_parameters(a, b, c, alpha, beta, gamma),
         species=species,
         coords=prim_pos,
         coords_are_cartesian=True,
