@@ -174,7 +174,7 @@ def build_slab_adsorbate(
         for z in prim_atomic_numbers
     ]
     prim_struct = Structure(
-        lattice=cell, #Lattice.from_parameters(a, b, c, alpha, beta, gamma),
+        lattice=_to_numpy(cell), #Lattice.from_parameters(a, b, c, alpha, beta, gamma),
         species=species,
         coords=prim_pos,
         coords_are_cartesian=True,
