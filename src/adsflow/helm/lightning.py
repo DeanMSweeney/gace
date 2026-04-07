@@ -384,7 +384,6 @@ class LightFlowMatch(LightningModule, XMatching):
                         prim_atomic_numbers=data.atomic_numbers_target[prim_batch == b] + 1,
                         ads_atomic_numbers=data.ads_atomic_numbers[ads_batch == b] + 1,
                         vacuum=15.0,
-                        cell=data.cell[b]
                     )
 
                     print(data.ads_atomic_numbers)
