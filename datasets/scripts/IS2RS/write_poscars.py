@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).parents[3] / "src"))
 import lmdb
 from adsflow.utils.atoms import write_strucs
 
-LMDB_PATH = "/workspace/datasets/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data_refined.lmdb"
+LMDB_PATH = "/datasets/oc20//full/is2res_train_val_test_lmdbs/data/is2re/all/train/data_refined.lmdb"
 OUT_DIR = Path(__file__).parent / "poscars"
 OUT_DIR.mkdir(exist_ok=True)
 
