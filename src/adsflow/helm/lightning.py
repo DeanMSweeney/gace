@@ -335,7 +335,6 @@ class LightFlowMatch(LightningModule, XMatching):
             data.dE = torch.ones_like(data.y_relaxed) * 0.05
             data.Fmax = torch.ones_like(data.y_relaxed) * 0.10
         
-
         if self.num_integration_steps > 1:
             # Iterative self-refinement: re-apply model to its own output
             t = torch.linspace(0., 1, self.num_integration_steps, device=data.pos.device, dtype=data.pos.dtype)

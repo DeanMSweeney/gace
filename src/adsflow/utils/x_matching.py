@@ -694,10 +694,8 @@ class XMatching():
         data.angles_generated          = data.angles_radians
         data.transformation_matrix     = data.transformation_matrix.round().long()
         data.M_generated               = data.transformation_matrix
-        data.ads_com_generated         = com_0
-        data.ads_rel_pos_generated     = relp_0
-
-        print(data.M_generated)
+        data.ads_com_generated         = data.ads_com
+        data.ads_rel_pos_generated     = data.ads_rel_pos
 
 
         return data
