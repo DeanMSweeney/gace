@@ -696,6 +696,9 @@ class XMatching():
         data.ads_com_generated         = data.ads_com
         data.ads_rel_pos_generated     = data.ads_rel_pos
 
+        print(data.M_generated)
+
+
         return data
 
     def sample(
