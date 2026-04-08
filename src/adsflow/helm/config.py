@@ -292,7 +292,7 @@ class Config:
     E.g., 0.20 = count atoms within 0.2 Angstroms of target position
     """
 
-    num_integration_steps: int = 1
+    num_integration_steps: int = 10
     """Number of integration steps for ODE solver (for inference)
     - 1: single-step integration (default, current behavior)
     - >1: multi-step integration for higher accuracy
