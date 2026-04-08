@@ -648,8 +648,9 @@ class XMatching():
             identity + 0.1 * torch.randn(B, 3, 3, device=device)
         ).float()                                                           # (B, 3, 3)
         data.ads_com     = torch.randn_like(data.ads_com)                  # (B, 3)
+        com_0 = data.ads_com
         data.ads_rel_pos = torch.randn_like(data.ads_rel_pos)              # (N_ads, 3)
-
+        relp_0 = data.ads_rel_pos
         # Discrete: uniform random atom type
         N_prim = int(self.catalyst_mask.sum().item())
         z0_idx = torch.randint(0, 118, (N_prim,), device=device)
@@ -693,8 +694,8 @@ class XMatching():
         data.angles_generated          = data.angles_radians
         data.transformation_matrix     = data.transformation_matrix.round().long()
         data.M_generated               = data.transformation_matrix
-        data.ads_com_generated         = data.ads_com
-        data.ads_rel_pos_generated     = data.ads_rel_pos
+        data.ads_com_generated         = com_0
+        data.ads_rel_pos_generated     = relp_0
 
         print(data.M_generated)
 
