@@ -17,7 +17,7 @@ from adsflow.utils.evaluation import compute_eval_metrics
 from adsflow.utils.relaxation import relax_struc
 from adsflow.utils.atoms import write_strucs
 from adsflow.utils.tft.wrapper import PyGToTensorDict
-from adsflow.utils.builder import build_slab_adsorbate, lattice_params_to_matrix
+from adsflow.utils.builder import build_slab_adsorbate, lattice_params_to_matrix, build_forge_batch
 import ase.io
 
 from typing import Optional, Literal, Union, Tuple
@@ -144,6 +144,61 @@ class LightFlowMatch(LightningModule, XMatching):
             return self.model(**kwargs)
         return self.model(data)
 
+    def _forge_forward(self, data: Data) -> dict:
+        """Run the forge model forward pass and return a flat prediction dict.
+
+        Converts the PyG batch to dense tensors, calls the transformer, and
+        unpacks outputs back to sparse form. Used both during training
+        (via _transport_loss) and sampling (via XMatching._sample_forge),
+        which can call this as `self._forge_forward(data)` because
+        LightFlowMatch inherits from XMatching.
+
+        Args:
+            data: PyG Data/Batch with all forge fields populated.
+
+        Returns:
+            Dict with keys: pos, z, len, ang, M, ads_com, ads_rel_pos.
+        """
+        wrapper = PyGToTensorDict()
+        x_prim, x_ads, t_prim, t_ads, f_prim, f_ads = wrapper.to_tensordict(data)
+
+        prim_padding_mask = ~x_prim.mask  # (B, M)
+        ads_padding_mask  = ~x_ads.mask   # (B, N)
+
+        t = t_prim.data["t"].squeeze(-1)  # (B,)
+
+        pred_prim, pred_ads, _ = self(
+            x_prim=(
+                x_prim.data["atomic_numbers_hot"],     # (B, M, 118)
+                x_prim.data["frac_coords"],            # (B, M, 3)
+                x_prim.data["lengths_scaled"],         # (B, 1, 3)
+                x_prim.data["angles_radians"],         # (B, 1, 3)
+                x_prim.data["transformation_matrix"],  # (B, 3, 3)
+                x_prim.data["supercell_lattice"],      # (B, 3, 3)
+            ),
+            x_ads=(
+                x_ads.data["ads_atomic_numbers"],      # (B, N, 1)
+                x_ads.data["ads_com"],                 # (B, 1, 3)
+                x_ads.data["ads_rel_pos"],             # (B, N, 3)
+                x_ads.data["ads_pairwise_dist"],       # (B, N, D)
+            ),
+            t_prim=(t, t, t, t),
+            t_ads=(t, t),
+            feats={"ads_binding_energy": f_prim.data["ads_binding_energy"]},
+            prim_padding_mask=prim_padding_mask,
+            ads_padding_mask=ads_padding_mask,
+        )
+
+        return {
+            "pos":         x_prim.to_sparse(pred_prim[1]),   # (N_prim, 3)
+            "z":           x_prim.to_sparse(pred_prim[0]),   # (N_prim, 118)
+            "len":         pred_prim[2].squeeze(1),          # (B, 3)
+            "ang":         pred_prim[3].squeeze(1),          # (B, 3)
+            "M":           pred_prim[4],                     # (B, 3, 3)
+            "ads_com":     pred_ads[0].squeeze(1),           # (B, 3)
+            "ads_rel_pos": x_ads.to_sparse(pred_ads[1]),     # (N_ads, 3)
+        }
+
     def _transport_loss(self, input_graph: Data) -> torch.Tensor:
         """
         Compute the flow matching loss for a batch of structures.
@@ -174,69 +229,11 @@ class LightFlowMatch(LightningModule, XMatching):
                 input_graph=data,
                 pred=f,  # Model prediction
             )
-            # DEBUG: collect diagnostic tensors
-            if self._write_f_u:
-                f_x = f["u_x"] if isinstance(f, dict) else f
-                target_x = data.pos_relaxed if self.x_matching == "endpoint" else data.u_x
-                velocity_predictions = {
-                    't': data.t.detach().cpu(),
-                    'f': f_x.detach().cpu(),
-                    'u': target_x.detach().cpu(),
-                    'batch': data.batch.detach().cpu(),
-                    'tags': data.tags.detach().cpu(),
-                }
-            else:
-                velocity_predictions = None
-
         elif self.variant == "forge":
-            wrapper = PyGToTensorDict()
-            x_prim, x_ads, t_prim, t_ads, f_prim, f_ads = wrapper.to_tensordict(data)
-
-            # Padding masks: to_dense_batch gives True=real, transformer expects True=padding
-            prim_padding_mask = ~x_prim.mask  # (B, M)
-            ads_padding_mask  = ~x_ads.mask   # (B, N)
-
-            # Single shared t per graph (B, 1) → (B,), broadcast to each modality
-            t = t_prim.data["t"].squeeze(-1)  # (B,)
-
-            pred_prim, pred_ads, aux_outputs = self(
-                x_prim=(
-                    x_prim.data["atomic_numbers_hot"],     # (B, M, 90)
-                    x_prim.data["frac_coords"],            # (B, M, 3)
-                    x_prim.data["lengths_scaled"],         # (B, 1, 3)
-                    x_prim.data["angles_radians"],         # (B, 1, 3)
-                    x_prim.data["transformation_matrix"],  # (B, 3, 3)
-                    x_prim.data["supercell_lattice"],      # (B, 3, 3)
-                ),
-                x_ads=(
-                    x_ads.data["ads_atomic_numbers"],      # (B, N, 90)
-                    x_ads.data["ads_com"],                 # (B, 1, 3)
-                    x_ads.data["ads_rel_pos"],             # (B, N, 3)
-                    x_ads.data["ads_pairwise_dist"],       # (B, N, D)
-                ),
-                t_prim=(t, t, t, t),   # (atom_types_t, frac_coords_t, lengths_t, angles_t)
-                t_ads=(t, t),       # (ads_com_t, ads_rel_pos_t)
-                feats={
-                    "ads_binding_energy": f_prim.data["ads_binding_energy"],
-                },
-                prim_padding_mask=prim_padding_mask,
-                ads_padding_mask=ads_padding_mask,
-            )
-            # Node-level: unpack dense (B, M/N, D) → sparse (N, D) via real-token mask
-            # Graph-level: squeeze the token dim (B, 1, D) → (B, D)
-            pred = {
-                "pos":           x_prim.to_sparse(pred_prim[1]),   # (N_prim, 3)
-                "z":             x_prim.to_sparse(pred_prim[0]),   # (N_prim, 90)
-                "len":           pred_prim[2].squeeze(1),          # (B, 3)
-                "ang":           pred_prim[3].squeeze(1),          # (B, 3)
-                "M":             pred_prim[4],                     # (B, 3, 3)
-                "ads_com":       pred_ads[0].squeeze(1),           # (B, 3)
-                "ads_rel_pos":   x_ads.to_sparse(pred_ads[1]),     # (N_ads, 3)
-            }
+            pred = self._forge_forward(data)
             loss, max_loss = self.criterion(input_graph=data, pred=pred)
-            velocity_predictions = None
 
-        return loss, max_loss, velocity_predictions
+        return loss, max_loss
     
     # ==================== Training and Validation Methods ====================
 
@@ -251,7 +248,7 @@ class LightFlowMatch(LightningModule, XMatching):
         Returns:
             loss: Loss value for backpropagation
         """
-        loss, max_loss, _ = self._transport_loss(data)
+        loss, max_loss = self._transport_loss(data)
 
         # Log average loss (weighted by batch size for multi-GPU training)
         self.log(
@@ -295,7 +292,7 @@ class LightFlowMatch(LightningModule, XMatching):
         if self.variant == "place": 
             data.Fmax = torch.ones_like(data.y_relaxed) * 0.03 
             data.dE = torch.zeros_like(data.Fmax)
-        loss, max_loss, _ = self._transport_loss(data)
+        loss, max_loss = self._transport_loss(data)
 
         # Log validation metrics (no on_step to avoid clutter)
         self.log(
@@ -338,96 +335,51 @@ class LightFlowMatch(LightningModule, XMatching):
             data.dE = torch.ones_like(data.y_relaxed) * 0.05
             data.Fmax = torch.ones_like(data.y_relaxed) * 0.10
         
-        # DEBUG: collect velocity velocity_predictions for parquet output
-        if self._write_f_u:
-            loss, max_loss, velocity_predictions = self._transport_loss(data)
-            if not hasattr(self, 'self._f_u'):
-                self.self._f_u = []
-            self.self._f_u.append(velocity_predictions)
+
+        if self.num_integration_steps > 1:
+            # Iterative self-refinement: re-apply model to its own output
+            t = torch.linspace(0., 1, self.num_integration_steps, device=data.pos.device, dtype=data.pos.dtype)
+            opt_graph = self.sample(input_graph=data, t=t, ode_method=self.ode_method)
         else:
-            if self.num_integration_steps > 1:
-                # Iterative self-refinement: re-apply model to its own output
-                t = torch.linspace(0., 1, self.num_integration_steps, device=data.pos.device, dtype=data.pos.dtype)
-                opt_graph = self.sample(input_graph=data, t=t, ode_method=self.ode_method)
-            else:
-                opt_graph = data 
-                opt_graph.pos_generated = opt_graph.pos   
-            
-            if self.variant == "forge":
-                data = self.path(input_graph=data) 
-                # Split sparse atoms by tag
-                prim_mask  = (data.tags == 1)
-                ads_mask   = (data.tags == 2)
-                prim_batch = data.batch[prim_mask]
-                ads_batch  = data.batch[ads_mask]
+            opt_graph = data 
+            opt_graph.pos_generated = opt_graph.pos   
+        
+        if self.variant == "forge":
+            build_forge_batch(opt_graph, write_dir=self.gen_POS, batch_idx=batch_idx)
+        """
+        else:
+            opt_graph = relax_struc(
+                opt_graph,
+                run_mlff=self.run_mlff,
+                config_vasp=self.config_vasp,
+                mlff_checkpoint=self.mlff_checkpoint,
+                accelerator=self.accelerator,
+                seed=self.seed,
+                gen_POS=self.gen_POS,
+                in_POS=self.in_POS,
+                rlxd_POS=self.rlxd_POS,
+            )
 
-                for b in range(data.num_graphs):
-                    # Per-sample lattice parameters
-                    lengths = data.lengths_scaled_target[b]           # (3,)
-                    angles  = data.angles_radians_target[b]           # (3,)
-                    M       = data.transformation_matrix_target[b]    # (3, 3)
-                    print(data.sid[b])
+            write_strucs(
+                data=opt_graph,
+                gen_POS=self.gen_POS,
+                in_POS=self.in_POS,
+                rlxd_POS=self.rlxd_POS,
+            )
 
-                    # Fractional → Cartesian for primitive slab atoms
-                    cell     = lattice_params_to_matrix(lengths.unsqueeze(0), angles.unsqueeze(0)).squeeze(0)
-                    frac     = data.pos_target[prim_batch == b]       # (N_prim, 3)
-                    prim_pos = frac @ cell                     # (N_prim, 3) Cartesian
+            eval_metrics = compute_eval_metrics(data=opt_graph, threshold=self.threshold)
 
-                    # Reconstruct adsorbate absolute positions from COM + relative positions
-                    ads_rel = data.ads_rel_pos_target[ads_batch == b]             # (N_ads, 3)
-                    ads_pos = data.ads_com_target[b].unsqueeze(0) + ads_rel       # (N_ads, 3)
+            if self.write_eval_metrics:
+                if not hasattr(self, "eval_metrics"):
+                    self.eval_metrics = {k: [] for k in eval_metrics.keys()}
+                for k, v in eval_metrics.items():
+                    self.eval_metrics[k].append(v) # only append updated batch values
 
-                    atoms = build_slab_adsorbate(
-                        prim_pos=prim_pos,
-                        lattice_params=torch.cat([lengths, angles]),       # (6,) radians]
-                        transformation_matrix=M,
-                        ads_pos=ads_pos,
-                        prim_atomic_numbers=data.atomic_numbers_target[prim_batch == b] + 1,
-                        ads_atomic_numbers=data.ads_atomic_numbers[ads_batch == b] + 1,
-                        vacuum=15.0
-                    )
-
-                    if self.gen_POS:
-                        os.makedirs(self.gen_POS, exist_ok=True)
-                        ase.io.write(
-                            os.path.join(self.gen_POS, f'{batch_idx}_{b}.vasp'),
-                            atoms,
-                            format='vasp',
-                        )
-            """
-            else:
-                opt_graph = relax_struc(
-                    opt_graph,
-                    run_mlff=self.run_mlff,
-                    config_vasp=self.config_vasp,
-                    mlff_checkpoint=self.mlff_checkpoint,
-                    accelerator=self.accelerator,
-                    seed=self.seed,
-                    gen_POS=self.gen_POS,
-                    in_POS=self.in_POS,
-                    rlxd_POS=self.rlxd_POS,
-                )
-
-                write_strucs(
-                    data=opt_graph,
-                    gen_POS=self.gen_POS,
-                    in_POS=self.in_POS,
-                    rlxd_POS=self.rlxd_POS,
-                )
-
-                eval_metrics = compute_eval_metrics(data=opt_graph, threshold=self.threshold)
-
-                if self.write_eval_metrics:
-                    if not hasattr(self, "eval_metrics"):
-                        self.eval_metrics = {k: [] for k in eval_metrics.keys()}
-                    for k, v in eval_metrics.items():
-                        self.eval_metrics[k].append(v) # only append updated batch values
-
-                # Log all evaluation metrics
-                if eval_metrics:
-                    for name, value in eval_metrics.items():
-                        self.log(f"test/{name}", value, prog_bar=True, batch_size=data.num_graphs, sync_dist=True)
-            """
+            # Log all evaluation metrics
+            if eval_metrics:
+                for name, value in eval_metrics.items():
+                    self.log(f"test/{name}", value, prog_bar=True, batch_size=data.num_graphs, sync_dist=True)
+        """
         
         return   
 
@@ -437,35 +389,7 @@ class LightFlowMatch(LightningModule, XMatching):
 
         Saves evaluation metrics to CSV and velocity velocity_predictions to parquet.
         """
-        # DEBUG: save velocity velocity_predictions to parquet
-        if self._write_f_u and hasattr(self, 'self._f_u'):
-            t = torch.cat([d['t'] for d in self.self._f_u], dim=0).squeeze(-1).numpy()
-            f = torch.cat([d['f'] for d in self.self._f_u], dim=0).numpy()
-            u = torch.cat([d['u'] for d in self.self._f_u], dim=0).numpy()
-            tags = torch.cat([d['tags'] for d in self.self._f_u], dim=0).numpy()
-
-            # Offset batch indices so they're globally unique across batches
-            offset = 0
-            batch_global = []
-            for d in self.self._f_u:
-                b = d['batch'].numpy()
-                batch_global.append(b + offset)
-                offset += b.max() + 1
-            batch = np.concatenate(batch_global)
-
-            df = pd.DataFrame({
-                't': t,
-                'f_x': f[:, 0], 'f_y': f[:, 1], 'f_z': f[:, 2],
-                'u_x': u[:, 0], 'u_y': u[:, 1], 'u_z': u[:, 2],
-                'batch': batch,
-                'tags': tags,
-            })
-
-            output_path = './velocity_predictions.parquet'
-            df.to_parquet(output_path, index=False)
-            if self.global_rank == 0:
-                print(f"\n[DEBUG] Saved velocity velocity_predictions to {output_path} ({len(df)} atoms)")
-
+     
         if self.write_eval_metrics and hasattr(self, "eval_metrics"):
             output_dir = './eval_metrics'
 
