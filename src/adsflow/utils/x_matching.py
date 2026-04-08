@@ -684,9 +684,7 @@ class XMatching():
             data.ads_rel_pos = euler_step(data.ads_rel_pos, pred["ads_rel_pos"], t_curr, dt)
 
             # Update discrete atom types (CTMC)
-            data.atomic_numbers_hot = ctmc_step(
-                data.atomic_numbers_hot, pred["z"], t_curr, dt
-            )
+            data.atomic_numbers_hot = ctmc_step(data.atomic_numbers_hot, pred["z"], t_curr, dt)
 
         # ── Store generated outputs ───────────────────────────────────────────
         data.pos_generated             = data.pos
