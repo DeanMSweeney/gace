@@ -640,6 +640,7 @@ class XMatching():
 
         # ── Initialise all generated modalities from prior (t = 0) ───────────
         # Continuous
+        print(data.pos.size())
         data.pos = torch.randn_like(data.pos)                              # (N_slab, 3)
         data.lengths_scaled = torch.randn(B, 3, device=device)            # (B, 3)
         data.angles_radians = torch.randn(B, 3, device=device)            # (B, 3)
