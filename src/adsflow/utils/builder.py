@@ -1,5 +1,7 @@
+import os
 import numpy as np
 from ase import Atoms
+import ase.io
 from pymatgen.core import Structure, Lattice
 from pymatgen.core.periodic_table import DummySpecie, Element
 from pymatgen.io.ase import AseAtomsAdaptor
@@ -205,3 +207,82 @@ def build_slab_adsorbate(
     ads.set_tags(np.full(len(ads), 2, dtype=int))
 
     return slab + ads
+
+
+def build_forge_batch(
+    opt_graph,
+    write_dir: Optional[str] = None,
+    batch_idx: Optional[int] = None,
+) -> list:
+    """
+    Build a full slab + adsorbate ASE Atoms object for every sample in a forge batch.
+
+    Reads `*_generated` fields from `opt_graph` (the ODE-sampled output), converts
+    fractional coordinates to Cartesian, reconstructs adsorbate positions from COM +
+    relative offsets, and calls `build_slab_adsorbate` for each sample.
+
+    Side-effects:
+        Attaches two attributes to `opt_graph`:
+        - `gen_pos_all`: list of (N_i, 3) numpy arrays — full Cartesian positions
+        - `gen_atomic_numbers_all`: list of (N_i,) numpy arrays — atomic numbers
+
+    Args:
+        opt_graph:   PyG Batch returned by `sample()`, carrying `*_generated` fields.
+        write_dir:   If given, write each structure as a VASP POSCAR to this directory.
+        batch_idx:   Batch index used to name POSCAR files (`{batch_idx}_{b}.vasp`).
+
+    Returns:
+        List of ASE Atoms objects, one per sample in the batch.
+    """
+    prim_mask  = (opt_graph.tags == 1)
+    ads_mask   = (opt_graph.tags == 2)
+    prim_batch = opt_graph.batch[prim_mask]
+    ads_batch  = opt_graph.batch[ads_mask]
+    # num_graphs is not set on forge-sampled batches; derive from batch index
+    num_graphs = int(opt_graph.batch.max().item()) + 1
+
+    atoms_list = []
+    gen_pos_all = []
+    gen_atomic_numbers_all = []
+
+    for b in range(num_graphs):
+        lengths = opt_graph.lengths_generated[b]   # (3,)
+        angles  = opt_graph.angles_generated[b]    # (3,)
+        M       = opt_graph.M_generated[b]         # (3, 3)
+
+        cell     = lattice_params_to_matrix(lengths.unsqueeze(0), angles.unsqueeze(0)).squeeze(0)
+        frac     = opt_graph.pos_generated[prim_batch == b]           # (N_prim, 3)
+        prim_pos = frac @ cell                                         # (N_prim, 3) Cartesian
+
+        ads_rel = opt_graph.ads_rel_pos_generated[ads_batch == b]     # (N_ads, 3)
+        ads_pos = opt_graph.ads_com_generated[b].unsqueeze(0) + ads_rel  # (N_ads, 3)
+
+        # atomic_numbers_generated is already 1-indexed (sampler stores argmax + 1)
+        # ads_atomic_numbers is 0-indexed (sampler shifts it down by 1 for internal use)
+        atoms = build_slab_adsorbate(
+            prim_pos=prim_pos,
+            lattice_params=torch.cat([lengths, angles]),               # (6,) radians
+            transformation_matrix=M,
+            ads_pos=ads_pos,
+            prim_atomic_numbers=opt_graph.atomic_numbers_generated[prim_batch == b],
+            ads_atomic_numbers=opt_graph.ads_atomic_numbers[ads_batch == b] + 1,
+            vacuum=15.0,
+        )
+
+        atoms_list.append(atoms)
+        gen_pos_all.append(atoms.get_positions())
+        gen_atomic_numbers_all.append(atoms.get_atomic_numbers())
+
+    opt_graph.gen_pos_all = gen_pos_all
+    opt_graph.gen_atomic_numbers_all = gen_atomic_numbers_all
+
+    if write_dir:
+        os.makedirs(write_dir, exist_ok=True)
+        for b, atoms in enumerate(atoms_list):
+            ase.io.write(
+                os.path.join(write_dir, f'{batch_idx}_{b}.vasp'),
+                atoms,
+                format='vasp',
+            )
+
+    return atoms_list

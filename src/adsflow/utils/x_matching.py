@@ -9,6 +9,7 @@ from typing import Optional, Literal, Union, Tuple
 from adsflow.utils.invariance import pbc_aware_delta, hungarian
 from adsflow.utils.utils import adsorbate_neighborhood_mask
 from adsflow.utils.builder import lattice_params_to_matrix
+from adsflow.utils.forge_sampler import euler_step, ctmc_step
 
 class XMatching():
     """
@@ -604,6 +605,101 @@ class XMatching():
 
         return data
 
+    def _sample_forge(
+            self,
+            input_graph: Data,
+            t: torch.Tensor,  # Time points, e.g. linspace(0, 1, n_steps)
+    ) -> Data:
+        """Generate structures for the forge variant via a custom Euler loop.
+
+        All six modalities are integrated simultaneously:
+        - Continuous (pos, lengths, angles, M, ads_com, ads_rel_pos): deterministic
+          endpoint-matching Euler steps.
+        - Discrete (atom types): stochastic CTMC steps using the model's predicted
+          endpoint distribution, following zatom's DiscreteInterpolant.step().
+
+        Args:
+            input_graph: PyG Data/Batch. Adsorbate conditioning fields
+                (ads_atomic_numbers, ads_pairwise_dist, ads_binding_energy) are
+                used as-is; all generated modalities are re-initialised from prior.
+            t: 1-D tensor of monotonically increasing time points in [0, 1].
+                The loop takes len(t)-1 Euler steps.
+
+        Returns:
+            data with *_generated fields set for each modality.
+        """
+        data = input_graph.clone()
+        device = data.pos.device
+
+        self.catalyst_mask = (data.tags == 1)
+        self.adsorbate_mask = (data.tags == 2)
+        B = int(data.batch.max().item()) + 1
+
+        # Shift ads conditioning to 0-indexed (matches _build_atom_type_path)
+        data.ads_atomic_numbers = data.ads_atomic_numbers.long() - 1
+
+        # ── Initialise all generated modalities from prior (t = 0) ───────────
+        # Continuous
+        data.pos = torch.randn_like(data.pos)                              # (N_slab, 3)
+        data.lengths_scaled = torch.randn(B, 3, device=device)            # (B, 3)
+        data.angles_radians = torch.randn(B, 3, device=device)            # (B, 3)
+        identity = torch.eye(3, device=device).unsqueeze(0).expand(B, -1, -1)
+        data.transformation_matrix = (
+            identity + 0.1 * torch.randn(B, 3, 3, device=device)
+        ).float()                                                           # (B, 3, 3)
+        data.ads_com     = torch.randn_like(data.ads_com)                  # (B, 3)
+        data.ads_rel_pos = torch.randn_like(data.ads_rel_pos)              # (N_ads, 3)
+
+        # Discrete: uniform random atom type
+        N_prim = int(self.catalyst_mask.sum().item())
+        z0_idx = torch.randint(0, 118, (N_prim,), device=device)
+        data.atomic_numbers_hot = F.one_hot(z0_idx, num_classes=118).float()  # (N_slab, 118)
+
+        # ── Euler integration loop ────────────────────────────────────────────
+        for i in range(len(t) - 1):
+            t_curr = t[i].item()
+            dt     = (t[i + 1] - t[i]).item()
+
+            # Rebuild derived lattice fields from current state
+            C_t = lattice_params_to_matrix(
+                lengths=data.lengths_scaled,
+                angles=data.angles_radians,
+            )  # (B, 3, 3)
+            data.cell             = C_t
+            data.supercell_lattice = torch.bmm(data.transformation_matrix, C_t)
+
+            # Per-graph time for the model
+            data.t = torch.full((B, 1), t_curr, device=device, dtype=torch.float32)
+
+            # Model forward
+            with torch.no_grad():
+                pred = self._forge_forward(data)
+
+            # Update continuous modalities
+            data.pos               = euler_step(data.pos,               pred["pos"],     t_curr, dt)
+            data.lengths_scaled    = euler_step(data.lengths_scaled,    pred["len"],     t_curr, dt)
+            data.angles_radians    = euler_step(data.angles_radians,    pred["ang"],     t_curr, dt)
+            data.transformation_matrix = euler_step(data.transformation_matrix, pred["M"], t_curr, dt)
+            data.ads_com     = euler_step(data.ads_com,     pred["ads_com"],     t_curr, dt)
+            data.ads_rel_pos = euler_step(data.ads_rel_pos, pred["ads_rel_pos"], t_curr, dt)
+
+            # Update discrete atom types (CTMC)
+            data.atomic_numbers_hot = ctmc_step(
+                data.atomic_numbers_hot, pred["z"], t_curr, dt
+            )
+
+        # ── Store generated outputs ───────────────────────────────────────────
+        data.pos_generated             = data.pos
+        data.atomic_numbers_generated  = data.atomic_numbers_hot.argmax(dim=-1) + 1  # 1-indexed
+        data.lengths_generated         = data.lengths_scaled
+        data.angles_generated          = data.angles_radians
+        data.transformation_matrix     = data.transformation_matrix.round().long()
+        data.M_generated               = data.transformation_matrix
+        data.ads_com_generated         = data.ads_com
+        data.ads_rel_pos_generated     = data.ads_rel_pos
+
+        return data
+
     def sample(
             self,
             input_graph: Data,
@@ -621,6 +717,9 @@ class XMatching():
         Returns:
             data: Data object with pos_generated attribute containing predicted relaxed positions
         """
+
+        if self.variant == "forge":
+            return self._sample_forge(input_graph, t)
 
         data = input_graph.clone()
         x0_ref = input_graph.pos.clone().float()  # fixed reference for displacement embedding
