@@ -273,6 +273,25 @@ def build_forge_batch(
         gen_pos_all.append(atoms.get_positions())
         gen_atomic_numbers_all.append(atoms.get_atomic_numbers())
 
+        # --- DEBUG: write primitive cell before supercell expansion ---
+        if write_dir:
+            cell_np = _to_numpy(cell)
+            prim_pos_np = _to_numpy(prim_pos)
+            prim_z_np = _to_numpy(opt_graph.atomic_numbers_generated[prim_batch == b])
+            prim_atoms = Atoms(
+                numbers=prim_z_np,
+                positions=prim_pos_np,
+                cell=cell_np,
+                pbc=True,
+            )
+            os.makedirs(write_dir, exist_ok=True)
+            ase.io.write(
+                os.path.join(write_dir, f'{batch_idx}_{b}_prim.vasp'),
+                prim_atoms,
+                format='vasp',
+            )
+        # --- END DEBUG ---
+
     opt_graph.gen_pos_all = gen_pos_all
     opt_graph.gen_atomic_numbers_all = gen_atomic_numbers_all
 
