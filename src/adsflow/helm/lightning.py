@@ -18,6 +18,7 @@ from adsflow.utils.relaxation import relax_struc
 from adsflow.utils.atoms import write_strucs
 from adsflow.utils.tft.wrapper import PyGToTensorDict
 from adsflow.utils.builder import build_slab_adsorbate, lattice_params_to_matrix, build_forge_batch
+from adsflow.utils.evaluator import evaluate_forge_batch
 import ase.io
 
 from typing import Optional, Literal, Union, Tuple
@@ -88,6 +89,7 @@ class LightFlowMatch(LightningModule, XMatching):
             mlff_checkpoint: Optional[str]=None,
             accelerator: str="gpu",
             seed: int=42,
+            n_prim_atoms: Optional[int]=3,
             **kwargs,
         ):
 
@@ -96,7 +98,7 @@ class LightFlowMatch(LightningModule, XMatching):
         self.save_hyperparameters(ignore=["model", "variant", "mode", "rtol", "atol", "ode_method", \
             "track_grad_norms", "in_POS", "gen_POS", "rlxd_POS", "config_vasp", "threshold", "x_matching", \
             "interpolant_schedule", "write_eval_metrics", "num_integration_steps", "run_mlff", "mlff_checkpoint", \
-            "accelerator", "seed"])
+            "accelerator", "seed", "n_prim_atoms"])
 
         # Model and training configuration
         self.model = model  # Neural network (e.g., Equiformer)
@@ -125,6 +127,7 @@ class LightFlowMatch(LightningModule, XMatching):
         self.run_mlff = run_mlff
         self.accelerator = accelerator
         self.seed = seed
+        self.n_prim_atoms = n_prim_atoms
         self.mlff_checkpoint = mlff_checkpoint
 
         # Diagnostic mode: detailed loss analysis for model development
@@ -338,13 +341,16 @@ class LightFlowMatch(LightningModule, XMatching):
         if self.num_integration_steps > 1:
             # Iterative self-refinement: re-apply model to its own output
             t = torch.linspace(0., 1, self.num_integration_steps, device=data.pos.device, dtype=data.pos.dtype)
-            opt_graph = self.sample(input_graph=data, t=t, ode_method=self.ode_method)
+            opt_graph = self.sample(input_graph=data, t=t, ode_method=self.ode_method, n_prim_atoms=self.n_prim_atoms)
         else:
             opt_graph = data 
             opt_graph.pos_generated = opt_graph.pos   
         
         if self.variant == "forge":
-            build_forge_batch(opt_graph, write_dir=self.gen_POS, batch_idx=batch_idx)
+            atoms_list = build_forge_batch(opt_graph, write_dir=self.gen_POS, batch_idx=batch_idx)
+            validity_metrics = evaluate_forge_batch(atoms_list)
+            for key, val in validity_metrics.items():
+                self.log(key, val, on_step=False, on_epoch=True, batch_size=len(atoms_list))
         """
         else:
             opt_graph = relax_struc(
