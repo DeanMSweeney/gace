@@ -53,6 +53,8 @@ def evaluate_forge_batch(atoms_list: list) -> dict:
         dict with mean validity rates: vol_ok, dist_ok, is_valid (all floats in [0, 1]).
     """
     results = [check_validity(atoms) for atoms in atoms_list]
+
+    print(float(np.mean([r["vol_ok"] for r in results])))
     return {
         "validity/vol_ok": float(np.mean([r["vol_ok"] for r in results])),
         "validity/dist_ok": float(np.mean([r["dist_ok"] for r in results])),
