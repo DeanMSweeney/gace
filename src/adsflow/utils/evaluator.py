@@ -20,6 +20,7 @@ def check_validity(atoms: Atoms) -> dict:
     # Volume check
     try:
         vol_ok = float(atoms.get_volume()) >= 0.1
+        print(atoms.get_volume())
     except Exception:
         vol_ok = False
 
@@ -27,6 +28,7 @@ def check_validity(atoms: Atoms) -> dict:
     try:
         if len(atoms) > 1:
             dists = atoms.get_all_distances(mic=True)
+            print(dists)
             min_dist = np.min(dists[np.nonzero(dists)])
             dist_ok = bool(min_dist >= 0.5)
         else:
