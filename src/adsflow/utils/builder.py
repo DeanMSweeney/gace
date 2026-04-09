@@ -246,51 +246,55 @@ def build_forge_batch(
     gen_atomic_numbers_all = []
 
     for b in range(num_graphs):
-        lengths = opt_graph.lengths_generated[b]   # (3,)
-        angles  = opt_graph.angles_generated[b]    # (3,)
-        M       = opt_graph.M_generated[b]         # (3, 3)
+        try:
+            lengths = opt_graph.lengths_generated[b]   # (3,)
+            angles  = opt_graph.angles_generated[b]    # (3,)
+            M       = opt_graph.M_generated[b]         # (3, 3)
 
-        cell     = lattice_params_to_matrix(lengths.unsqueeze(0), angles.unsqueeze(0)).squeeze(0)
-        frac     = opt_graph.pos_generated[prim_batch == b]           # (N_prim, 3)
-        prim_pos = frac @ cell                                         # (N_prim, 3) Cartesian
+            cell     = lattice_params_to_matrix(lengths.unsqueeze(0), angles.unsqueeze(0)).squeeze(0)
+            frac     = opt_graph.pos_generated[prim_batch == b]           # (N_prim, 3)
+            prim_pos = frac @ cell                                         # (N_prim, 3) Cartesian
 
-        ads_rel = opt_graph.ads_rel_pos_generated[ads_batch == b]     # (N_ads, 3)
-        ads_pos = opt_graph.ads_com_generated[b].unsqueeze(0) + ads_rel  # (N_ads, 3)
+            ads_rel = opt_graph.ads_rel_pos_generated[ads_batch == b]     # (N_ads, 3)
+            ads_pos = opt_graph.ads_com_generated[b].unsqueeze(0) + ads_rel  # (N_ads, 3)
 
-        # atomic_numbers_generated is already 1-indexed (sampler stores argmax + 1)
-        # ads_atomic_numbers is 0-indexed (sampler shifts it down by 1 for internal use)
-        atoms = build_slab_adsorbate(
-            prim_pos=prim_pos,
-            lattice_params=torch.cat([lengths, angles]),               # (6,) radians
-            transformation_matrix=M,
-            ads_pos=ads_pos,
-            prim_atomic_numbers=opt_graph.atomic_numbers_generated[prim_batch == b],
-            ads_atomic_numbers=opt_graph.ads_atomic_numbers[ads_batch == b] + 1,
-            vacuum=15.0,
-        )
-
-        atoms_list.append(atoms)
-        gen_pos_all.append(atoms.get_positions())
-        gen_atomic_numbers_all.append(atoms.get_atomic_numbers())
-
-        # --- DEBUG: write primitive cell before supercell expansion ---
-        if write_dir:
-            cell_np = _to_numpy(cell)
-            prim_pos_np = _to_numpy(prim_pos)
-            prim_z_np = _to_numpy(opt_graph.atomic_numbers_generated[prim_batch == b])
-            prim_atoms = Atoms(
-                numbers=prim_z_np,
-                positions=prim_pos_np,
-                cell=cell_np,
-                pbc=True,
+            # atomic_numbers_generated is already 1-indexed (sampler stores argmax + 1)
+            # ads_atomic_numbers is 0-indexed (sampler shifts it down by 1 for internal use)
+            atoms = build_slab_adsorbate(
+                prim_pos=prim_pos,
+                lattice_params=torch.cat([lengths, angles]),               # (6,) radians
+                transformation_matrix=M,
+                ads_pos=ads_pos,
+                prim_atomic_numbers=opt_graph.atomic_numbers_generated[prim_batch == b],
+                ads_atomic_numbers=opt_graph.ads_atomic_numbers[ads_batch == b] + 1,
+                vacuum=15.0,
             )
-            os.makedirs(write_dir, exist_ok=True)
-            ase.io.write(
-                os.path.join(write_dir, f'{batch_idx}_{b}_prim.vasp'),
-                prim_atoms,
-                format='vasp',
-            )
-        # --- END DEBUG ---
+
+            atoms_list.append(atoms)
+            gen_pos_all.append(atoms.get_positions())
+            gen_atomic_numbers_all.append(atoms.get_atomic_numbers())
+
+            # --- DEBUG: write primitive cell before supercell expansion ---
+            if write_dir:
+                cell_np = _to_numpy(cell)
+                prim_pos_np = _to_numpy(prim_pos)
+                prim_z_np = _to_numpy(opt_graph.atomic_numbers_generated[prim_batch == b])
+                prim_atoms = Atoms(
+                    numbers=prim_z_np,
+                    positions=prim_pos_np,
+                    cell=cell_np,
+                    pbc=True,
+                )
+                os.makedirs(write_dir, exist_ok=True)
+                ase.io.write(
+                    os.path.join(write_dir, f'{batch_idx}_{b}_prim.vasp'),
+                    prim_atoms,
+                    format='vasp',
+                )
+            # --- END DEBUG ---
+
+        except Exception as e:
+            print(f"[build_forge_batch] Failed to build graph {b}: {e}")
 
     opt_graph.gen_pos_all = gen_pos_all
     opt_graph.gen_atomic_numbers_all = gen_atomic_numbers_all
