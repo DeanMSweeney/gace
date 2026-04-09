@@ -609,6 +609,7 @@ class XMatching():
             self,
             input_graph: Data,
             t: torch.Tensor,  # Time points, e.g. linspace(0, 1, n_steps)
+            n_prim_atoms: Optional[int] = None,
     ) -> Data:
         """Generate structures for the forge variant via a custom Euler loop.
 
@@ -635,12 +636,25 @@ class XMatching():
         self.adsorbate_mask = (data.tags == 2)
         B = int(data.batch.max().item()) + 1
 
+        if n_prim_atoms is not None:
+            ads_mask = (data.tags == 2)
+            new_prim_batch = torch.repeat_interleave(
+                torch.arange(B, device=device), n_prim_atoms
+            )
+            new_prim_tags = torch.ones(
+                B * n_prim_atoms, dtype=data.tags.dtype, device=device
+            )
+            data.batch = torch.cat([new_prim_batch, data.batch[ads_mask]])
+            data.tags  = torch.cat([new_prim_tags,  data.tags[ads_mask]])
+            data.pos   = torch.zeros(B * n_prim_atoms, 3, device=device)
+            self.catalyst_mask = (data.tags == 1)
+            self.adsorbate_mask = (data.tags == 2)
+
         # Shift ads conditioning to 0-indexed (matches _build_atom_type_path)
         data.ads_atomic_numbers = data.ads_atomic_numbers.long() - 1
 
         # ── Initialise all generated modalities from prior (t = 0) ───────────
         # Continuous
-        print(data.pos.size())
         data.pos = torch.randn_like(data.pos)                              # (N_slab, 3)
         data.lengths_scaled = torch.randn(B, 3, device=device)            # (B, 3)
         data.angles_radians = torch.randn(B, 3, device=device)            # (B, 3)
@@ -652,6 +666,7 @@ class XMatching():
         com_0 = data.ads_com
         data.ads_rel_pos = torch.randn_like(data.ads_rel_pos)              # (N_ads, 3)
         relp_0 = data.ads_rel_pos
+        
         # Discrete: uniform random atom type
         N_prim = int(self.catalyst_mask.sum().item())
         z0_idx = torch.randint(0, 118, (N_prim,), device=device)
@@ -661,6 +676,7 @@ class XMatching():
         for i in range(len(t) - 1):
             t_curr = t[i].item()
             dt     = (t[i + 1] - t[i]).item()
+
 
             # Rebuild derived lattice fields from current state
             C_t = lattice_params_to_matrix(
@@ -706,6 +722,7 @@ class XMatching():
             input_graph: Data,
             t: torch.Tensor,  # Time points for ODE integration (typically [0, 1])
             ode_method: str = "dopri5",
+            n_prim_atoms: Optional[int] = None,
     ) -> Data:
         """
         Generate relaxed atomic structures by integrating the learned velocity field.
@@ -720,7 +737,7 @@ class XMatching():
         """
 
         if self.variant == "forge":
-            return self._sample_forge(input_graph, t)
+            return self._sample_forge(input_graph, t, n_prim_atoms=n_prim_atoms)
 
         data = input_graph.clone()
         x0_ref = input_graph.pos.clone().float()  # fixed reference for displacement embedding

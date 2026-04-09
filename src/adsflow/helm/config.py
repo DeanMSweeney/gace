@@ -308,6 +308,10 @@ class Config:
     gen_POS: Optional[str] = None
     """Output path for saving generated (model-predicted) structures during testing"""
 
+    n_prim_atoms: Optional[int] = 3
+    """Number of primitive atoms per graph to use during forge sampling.
+    If None, uses the atom count from the data. Set to e.g. 3 to force smaller unit cells."""
+
     rlxd_POS: Optional[str] = None
     """Output path for saving relaxed (ground truth) structures during testing"""
 

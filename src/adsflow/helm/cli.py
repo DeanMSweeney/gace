@@ -225,6 +225,7 @@ def main(cfg: Config) -> None:
         schedule_type=cfg.interpolant_schedule,  # Interpolant schedule type, 
         write_eval_metrics=cfg.write_eval_metrics,  # Write evaluation metrics
         num_integration_steps=cfg.num_integration_steps,  # Iterative refinement passes
+        n_prim_atoms=cfg.n_prim_atoms,
         **cfg.optimizer_hparams,  # Optimizer hyperparameters (lr, weight_decay, etc.)
         run_mlff=cfg.run_mlff,
         accelerator=cfg.accelerator,
