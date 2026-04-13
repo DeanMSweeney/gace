@@ -564,7 +564,7 @@ class XMatching():
         z1 = (data.atomic_numbers.long() - 1).unsqueeze(1) # N, 1
 
         # Prior: random atomic number indices (much more efficient than one-hot)
-        num_classes = 118
+        num_classes = 100
         z0 = torch.randint(low=0, high=num_classes, size=(z1.size(0), 1), device=device)  # N, 1
 
         # Hungarian alignment is intentionally skipped for atom types.
@@ -669,8 +669,8 @@ class XMatching():
         
         # Discrete: uniform random atom type
         N_prim = int(self.catalyst_mask.sum().item())
-        z0_idx = torch.randint(0, 118, (N_prim,), device=device)
-        data.atomic_numbers_hot = F.one_hot(z0_idx, num_classes=118).float()  # (N_slab, 118)
+        z0_idx = torch.randint(0, 100, (N_prim,), device=device)
+        data.atomic_numbers_hot = F.one_hot(z0_idx, num_classes=100).float()  # (N_slab, 100)
 
         # ── Euler integration loop ────────────────────────────────────────────
         for i in range(len(t) - 1):
