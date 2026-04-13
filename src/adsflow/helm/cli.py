@@ -278,6 +278,11 @@ def main(cfg: Config) -> None:
             """Module that returns dummy classes for any attribute (for pickle)."""
             __path__ = []
             def __getattr__(self, name):
+                # Never intercept dunder attrs — let Python use its defaults.
+                # This prevents __file__ etc. from becoming dummy classes,
+                # which breaks inspect/pydantic downstream.
+                if name.startswith("__") and name.endswith("__"):
+                    raise AttributeError(name)
                 cls = type(name, (), {"__module__": self.__name__})
                 setattr(self, name, cls)
                 return cls
@@ -291,6 +296,7 @@ def main(cfg: Config) -> None:
                     return sys.modules[fullname]
                 mod = _ZatomModule(fullname)
                 mod.__package__ = fullname
+                mod.__file__ = "<zatom-mock>"  # must be a string for inspect
                 sys.modules[fullname] = mod
                 return mod
 
