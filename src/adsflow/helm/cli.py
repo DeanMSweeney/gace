@@ -270,15 +270,25 @@ def main(cfg: Config) -> None:
     if cfg.ckpt_path and not cfg.resume_training:
         declare(f">>> Loading CLEAN preprocessed weights from: {cfg.ckpt_path}")
         # Mock zatom so its checkpoint can be loaded without installing the package.
-        # pickle only needs the module present in sys.modules to resolve class refs;
-        # the mock objects are never actually used (we only read state_dict tensors).
-        import sys
-        from unittest.mock import MagicMock
-        for _mod in [
-            "zatom", "zatom.models", "zatom.flow", "zatom.utils",
-            "zatom.data", "zatom.lightning", "zatom.helm",
-        ]:
-            sys.modules.setdefault(_mod, MagicMock())
+        # Uses a meta path finder so arbitrary-depth submodule refs (e.g.
+        # zatom.models.architectures.Foo) are handled without knowing them in advance.
+        import sys, types
+
+        class _ZatomFinder:
+            def find_module(self, fullname, path=None):
+                if fullname == "zatom" or fullname.startswith("zatom."):
+                    return self
+            def load_module(self, fullname):
+                if fullname in sys.modules:
+                    return sys.modules[fullname]
+                mod = types.ModuleType(fullname)
+                mod.__path__ = []   # mark as package so sub-imports work
+                mod.__package__ = fullname
+                sys.modules[fullname] = mod
+                return mod
+
+        if not any(type(f).__name__ == "_ZatomFinder" for f in sys.meta_path):
+            sys.meta_path.insert(0, _ZatomFinder())
 
         checkpoint = torch.load(cfg.ckpt_path, map_location="cpu")
         load_result = lightning.load_state_dict(checkpoint["state_dict"], strict=False)
