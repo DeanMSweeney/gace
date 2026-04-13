@@ -274,6 +274,14 @@ def main(cfg: Config) -> None:
         # zatom.models.architectures.Foo) are handled without knowing them in advance.
         import sys, types
 
+        class _ZatomModule(types.ModuleType):
+            """Module that returns dummy classes for any attribute (for pickle)."""
+            __path__ = []
+            def __getattr__(self, name):
+                cls = type(name, (), {"__module__": self.__name__})
+                setattr(self, name, cls)
+                return cls
+
         class _ZatomFinder:
             def find_module(self, fullname, path=None):
                 if fullname == "zatom" or fullname.startswith("zatom."):
@@ -281,8 +289,7 @@ def main(cfg: Config) -> None:
             def load_module(self, fullname):
                 if fullname in sys.modules:
                     return sys.modules[fullname]
-                mod = types.ModuleType(fullname)
-                mod.__path__ = []   # mark as package so sub-imports work
+                mod = _ZatomModule(fullname)
                 mod.__package__ = fullname
                 sys.modules[fullname] = mod
                 return mod
