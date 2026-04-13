@@ -20,7 +20,6 @@ def check_validity(atoms: Atoms) -> dict:
     # Volume check
     try:
         vol_ok = float(atoms.get_volume()) >= 0.1
-        print(atoms.get_volume())
     except Exception:
         vol_ok = False
 
