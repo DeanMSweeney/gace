@@ -269,6 +269,17 @@ def main(cfg: Config) -> None:
     # In your main training script:
     if cfg.ckpt_path and not cfg.resume_training:
         declare(f">>> Loading CLEAN preprocessed weights from: {cfg.ckpt_path}")
+        # Mock zatom so its checkpoint can be loaded without installing the package.
+        # pickle only needs the module present in sys.modules to resolve class refs;
+        # the mock objects are never actually used (we only read state_dict tensors).
+        import sys
+        from unittest.mock import MagicMock
+        for _mod in [
+            "zatom", "zatom.models", "zatom.flow", "zatom.utils",
+            "zatom.data", "zatom.lightning", "zatom.helm",
+        ]:
+            sys.modules.setdefault(_mod, MagicMock())
+
         checkpoint = torch.load(cfg.ckpt_path, map_location="cpu")
         load_result = lightning.load_state_dict(checkpoint["state_dict"], strict=False)
 
