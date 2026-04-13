@@ -304,7 +304,16 @@ def main(cfg: Config) -> None:
             sys.meta_path.insert(0, _ZatomFinder())
 
         checkpoint = torch.load(cfg.ckpt_path, map_location="cpu")
-        load_result = lightning.load_state_dict(checkpoint["state_dict"], strict=False)
+
+        # Zatom saves its model at self.model.model (two levels), giving keys
+        # like "model.model.transformer.*".  Our module uses self.model (one
+        # level), expecting "model.transformer.*".  Strip the extra prefix.
+        state_dict = checkpoint["state_dict"]
+        remapped = {
+            ("model." + k[len("model.model."):] if k.startswith("model.model.") else k): v
+            for k, v in state_dict.items()
+        }
+        load_result = lightning.load_state_dict(remapped, strict=False)
 
         #  DELETE CHECKPOINT TO FREE MEMORY
         del checkpoint
