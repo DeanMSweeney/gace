@@ -33,7 +33,7 @@ def check_validity(atoms: Atoms) -> dict:
         vol_ok = False
 
     # Atom clash check
-    # Toggle method: 1 = ASE fixed cutoff  2 = PyMatGen fixed cutoff  3 = ASE covalent radii
+    # Toggle method: 1 = ASE fixed cutoff  2 = ASE covalent radii
     DIST_METHOD = 2
     try:
         if len(atoms) > 1:
@@ -43,12 +43,6 @@ def check_validity(atoms: Atoms) -> dict:
                 dist_ok = bool(dists.min() >= 0.5)
 
             elif DIST_METHOD == 2:
-                structure = AseAtomsAdaptor.get_structure(atoms)
-                dist_mat = structure.distance_matrix
-                np.fill_diagonal(dist_mat, np.inf)
-                dist_ok = bool(dist_mat.min() >= 0.5)
-
-            elif DIST_METHOD == 3:
                 dists = atoms.get_all_distances(mic=True)
                 numbers = atoms.get_atomic_numbers()
                 radii = covalent_radii[numbers]               # (N,)
