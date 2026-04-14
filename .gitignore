@@ -48,3 +48,4 @@ catflow/
 poscar*/
 analysis/
 .claude/CLAUDE.md
+generated_samples/
