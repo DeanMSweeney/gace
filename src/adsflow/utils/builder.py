@@ -274,8 +274,6 @@ def build_forge_batch(
             gen_pos_all.append(atoms.get_positions())
             gen_atomic_numbers_all.append(atoms.get_atomic_numbers())
 
-            print(atoms_list)
-
             # --- DEBUG: write primitive cell before supercell expansion ---
             if write_dir:
                 cell_np = _to_numpy(cell)
@@ -296,6 +294,7 @@ def build_forge_batch(
             # --- END DEBUG ---
 
         except Exception as e:
+            print(atoms_list)
             print(f"[build_forge_batch] Failed to build graph {b}: {e}")
 
     opt_graph.gen_pos_all = gen_pos_all
