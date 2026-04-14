@@ -13,7 +13,7 @@ from torch_geometric.data import Data
 from transformers import get_cosine_schedule_with_warmup, get_polynomial_decay_schedule_with_warmup
 
 from adsflow.utils.x_matching import XMatching
-from adsflow.utils.evaluation import compute_eval_metrics
+from adsflow.utils.evaluator import compute_eval_metrics
 from adsflow.utils.relaxation import relax_struc
 from adsflow.utils.atoms import write_strucs
 from adsflow.utils.tft.wrapper import PyGToTensorDict
