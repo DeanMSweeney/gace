@@ -3,6 +3,7 @@
 import numpy as np
 from ase import Atoms
 from ase.data import covalent_radii
+from pymatgen.io.ase import AseAtomsAdaptor
 
 import torch
 from torch import Tensor
@@ -31,19 +32,29 @@ def check_validity(atoms: Atoms) -> dict:
     except Exception:
         vol_ok = False
 
-    # Atom clash check (covalent radii aware)
-    # Flag any pair closer than 50% of their summed covalent radii
+    # Atom clash check
+    # Toggle method: 1 = ASE fixed cutoff  2 = PyMatGen fixed cutoff  3 = ASE covalent radii
+    DIST_METHOD = 2
     try:
         if len(atoms) > 1:
-            dists = atoms.get_all_distances(mic=True)
-            numbers = atoms.get_atomic_numbers()
-            radii = covalent_radii[numbers]               # (N,)
-            sum_radii = radii[:, None] + radii[None, :]   # (N, N)
-            np.fill_diagonal(dists, np.inf)
-            dist_ok = bool(np.all(dists >= 0.5 * sum_radii))
-            # Simple fixed threshold (element-agnostic):
-            # min_dist = np.min(dists)
-            # dist_ok = bool(min_dist >= 0.5)
+            if DIST_METHOD == 1:
+                dists = atoms.get_all_distances(mic=True)
+                np.fill_diagonal(dists, np.inf)
+                dist_ok = bool(dists.min() >= 0.5)
+
+            elif DIST_METHOD == 2:
+                structure = AseAtomsAdaptor.get_structure(atoms)
+                dist_mat = structure.distance_matrix
+                np.fill_diagonal(dist_mat, np.inf)
+                dist_ok = bool(dist_mat.min() >= 0.5)
+
+            elif DIST_METHOD == 3:
+                dists = atoms.get_all_distances(mic=True)
+                numbers = atoms.get_atomic_numbers()
+                radii = covalent_radii[numbers]               # (N,)
+                sum_radii = radii[:, None] + radii[None, :]   # (N, N)
+                np.fill_diagonal(dists, np.inf)
+                dist_ok = bool(np.all(dists >= 0.5 * sum_radii))
         else:
             dist_ok = True
     except Exception:
