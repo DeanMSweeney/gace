@@ -294,8 +294,8 @@ def build_forge_batch(
             # --- END DEBUG ---
 
         except Exception as e:
-            print(atoms_list)
             print(f"[build_forge_batch] Failed to build graph {b}: {e}")
+            atoms_list.append(None)
 
     opt_graph.gen_pos_all = gen_pos_all
     opt_graph.gen_atomic_numbers_all = gen_atomic_numbers_all
