@@ -37,7 +37,7 @@ def check_validity(atoms: Atoms) -> dict:
 
     # Atom clash check
     # Toggle method: 1 = ASE fixed cutoff  2 = ASE covalent radii
-    DIST_METHOD = 1
+    DIST_METHOD = 2
     try:
         if len(atoms) > 1:
             if DIST_METHOD == 1:
