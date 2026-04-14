@@ -303,10 +303,11 @@ def build_forge_batch(
     if write_dir:
         os.makedirs(write_dir, exist_ok=True)
         for b, atoms in enumerate(atoms_list):
-            ase.io.write(
-                os.path.join(write_dir, f'{batch_idx}_{b}.vasp'),
-                atoms,
-                format='vasp',
-            )
+            if atoms is not None:
+                ase.io.write(
+                    os.path.join(write_dir, f'{batch_idx}_{b}.vasp'),
+                    atoms,
+                    format='vasp',
+                )
 
     return atoms_list
