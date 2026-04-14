@@ -274,6 +274,8 @@ def build_forge_batch(
             gen_pos_all.append(atoms.get_positions())
             gen_atomic_numbers_all.append(atoms.get_atomic_numbers())
 
+            print(atoms_list)
+
             # --- DEBUG: write primitive cell before supercell expansion ---
             if write_dir:
                 cell_np = _to_numpy(cell)

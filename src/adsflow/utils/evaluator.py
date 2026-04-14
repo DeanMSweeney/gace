@@ -72,8 +72,6 @@ def evaluate_forge_batch(atoms_list: list) -> dict:
     """
     results = [check_validity(atoms) for atoms in atoms_list]
 
-    print(results)
-
     return {
         "validity/vol_ok": float(np.mean([r["vol_ok"] for r in results])),
         "validity/dist_ok": float(np.mean([r["dist_ok"] for r in results])),
