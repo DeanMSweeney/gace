@@ -21,11 +21,14 @@ def check_validity(atoms: Atoms) -> dict:
     - Distance: no pair closer than 50% of their summed covalent radii (guards against atom clashes)
 
     Args:
-        atoms: ASE Atoms object to check.
+        atoms: ASE Atoms object to check, or None if build failed.
 
     Returns:
         dict with keys: vol_ok (bool), dist_ok (bool), is_valid (bool).
     """
+    if atoms is None:
+        return {"vol_ok": False, "dist_ok": False, "is_valid": False}
+
     # Volume check
     try:
         vol_ok = float(atoms.get_volume()) >= 0.1
