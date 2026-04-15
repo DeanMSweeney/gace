@@ -6,7 +6,7 @@ from torch_geometric.data import Data
 from torchdiffeq import odeint
 from typing import Optional, Literal, Union, Tuple
 
-from adsflow.utils.invariance import pbc_aware_delta, hungarian
+from adsflow.utils.invariance import pbc_aware_delta, batched_ot_align
 from adsflow.utils.utils import adsorbate_neighborhood_mask
 from adsflow.utils.builder import lattice_params_to_matrix
 from adsflow.utils.forge_sampler import euler_step, ctmc_step
@@ -17,35 +17,6 @@ class XMatching():
     """
     This Mixin supports image invariant interpolation paths and masked loss for frozen atoms
     """
-
-    def _ot_align(self, x0: Tensor, x1: Tensor, pbc_aware: bool = False) -> Tensor:
-        """
-        Optimally permute x0 rows to minimise transport cost to x1 via Hungarian algorithm.
-
-        Dispatches to `hungarian` from utils/invariance.py:
-          - 2D (N, D): sparse atom tensors or graph-level dense (B, D) — passed directly.
-          - 3D (B, N, D): flattened to (B*N, D) for batch-level assignment, then reshaped back.
-
-        Args:
-            x0:        noise tensor — shape (N, D) or (B, N, D)
-            x1:        target tensor — same shape as x0
-            pbc_aware: passed through to `hungarian` (True applies minimum-image convention)
-
-        Returns:
-            x0_aligned: same shape as x0, rows optimally permuted
-        """
-        if x0.dim() == 3:
-            # e.g. transformation matrix M: (B, 3, 3) → flatten rows → (B*3, 3)
-            B, N, D = x0.shape
-            x0_aligned = hungarian(
-                set0=x0.reshape(B * N, D),
-                set1=x1.reshape(B * N, D),
-                pbc_aware=pbc_aware,
-            )
-            return x0_aligned.reshape(B, N, D)
-        else:
-            # (N, D) sparse atoms or (B, D) graph-level dense — pass directly
-            return hungarian(set0=x0, set1=x1, pbc_aware=pbc_aware)
 
     def criterion(
         self,
@@ -167,13 +138,14 @@ class XMatching():
         ads_relp_loss = (pred["ads_rel_pos"] - data.ads_rel_pos_target).abs().mean()
         # ────────────────────────────────────────────────────────────────────────────────────────────────
 
-        lambda_z   = float(getattr(self.hparams, "lambda_z",   0.10))
-        lambda_ads = float(getattr(self.hparams, "lambda_ads", 1.0))
-        lambda_lat = float(getattr(self.hparams, "lambda_lat", 1.0))
-        lambda_M   = float(getattr(self.hparams, "lambda_M",   1.0))
-        
+        lambda_x   = float(self.hparams.lambda_x)
+        lambda_z   = float(self.hparams.lambda_z)
+        lambda_ads = float(self.hparams.lambda_ads)
+        lambda_lat = float(self.hparams.lambda_lat)
+        lambda_M   = float(self.hparams.lambda_M)
+
         total_loss = self.time_weight * (
-              x_loss
+              lambda_x   * x_loss
             + lambda_z   * z_loss
             + lambda_ads * (ads_com_loss + ads_relp_loss)
             + lambda_lat * (len_loss + ang_loss)
@@ -300,11 +272,6 @@ class XMatching():
         len0 = torch.randn_like(len1) # B, 3
         ang0 = torch.randn_like(ang1) # B, 3
 
-        if self.optimal_transport:
-            # B×B assignment across the batch for lengths and angles (B, 3)
-            len0 = self._ot_align(len0, len1, pbc_aware=False)  # (B, 3)
-            ang0 = self._ot_align(ang0, ang1, pbc_aware=False)  # (B, 3)
-
         t_len_per_graph = t # B, 1
         t_len = t_len_per_graph
 
@@ -364,10 +331,6 @@ class XMatching():
         # torch.eye gives (3, 3); unsqueeze + expand to (B, 3, 3)
         identity = torch.eye(3, device=device, dtype=dtype).unsqueeze(0).expand(B, -1, -1)
         M0 = identity + 0.1 * torch.randn_like(M1)
-
-        if self.optimal_transport:
-            # Per-graph: optimally permute the 3 row vectors of M — (B, 3, 3)
-            M0 = self._ot_align(M0, M1, pbc_aware=False)  # (B, 3, 3)
 
         t_M_per_graph = t # B, 1
         t_M = t_M_per_graph
@@ -463,8 +426,7 @@ class XMatching():
             x0 = torch.randn_like(x1, dtype=torch.float32)
 
             if self.optimal_transport:
-                # Optimally permute catalyst fractional coords (batch-level)
-                x0 = self._ot_align(x0, x1, pbc_aware=True)
+                x0 = batched_ot_align(x0, x1, batch=data.batch[self.catalyst_mask], pbc_aware=True)
 
             u_x = x1 - x0 
             u_x_n0 = torch.round(u_x)
@@ -519,10 +481,7 @@ class XMatching():
         adsRELP0 = torch.randn_like(adsRELP1) # (N_ads_total, 3)
 
         if self.optimal_transport:
-            # COM: B×B assignment across the batch (one 3D point per graph)
-            adsCOM0 = self._ot_align(adsCOM0, adsCOM1, pbc_aware=False)    # (B, 3)
-            # Relative positions: batch-level assignment of adsorbate atoms
-            adsRELP0 = self._ot_align(adsRELP0, adsRELP1, pbc_aware=False) # (N_ads, 3)
+            adsRELP0 = batched_ot_align(adsRELP0, adsRELP1, batch=data.batch[self.adsorbate_mask], pbc_aware=False)
 
         t_COM_per_graph = t
         t_COM = t_COM_per_graph # B, 1
