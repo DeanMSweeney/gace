@@ -11,7 +11,7 @@ from adsflow.utils.utils import adsorbate_neighborhood_mask
 from adsflow.utils.builder import lattice_params_to_matrix
 from adsflow.utils.forge_sampler import euler_step, ctmc_step
 
-NUM_CLASSES = 90  # number of atom-type classes (atomic numbers 1–90, shifted to 0-indexed)
+NUM_CLASSES = 100  # number of atom-type classes (atomic numbers 1–90, shifted to 0-indexed)
 
 class XMatching():
     """
@@ -648,7 +648,7 @@ class XMatching():
         
         # Discrete: uniform random atom type
         N_prim = int(self.catalyst_mask.sum().item())
-        z0_idx = torch.randint(0, 100, (N_prim,), device=device)
+        z0_idx = torch.randint(0, NUM_CLASSES, (N_prim,), device=device)
         data.atomic_numbers_hot = F.one_hot(z0_idx, num_classes=NUM_CLASSES).float()  # (N_slab, 100)
 
         # ── Euler integration loop ────────────────────────────────────────────
