@@ -128,7 +128,7 @@ def batched_ot_align(
     x1_dense, _    = to_dense_batch(x1, batch)  # (B, N_max, D)
     B, N_max, D = x0_dense.shape
 
-    print(x0.size())
+    print(x0_dense.size())
 
     # diff[b, i, j] = x1[b, j] - x0[b, i]
     diff = x1_dense.unsqueeze(1) - x0_dense.unsqueeze(2)  # (B, N_max, N_max, D)
