@@ -425,6 +425,11 @@ class XMatching():
             x1 = data.pos.float() # combined primtive cell 
             x0 = torch.randn_like(x1, dtype=torch.float32)
 
+
+            output, count = torch.unique(data.batch[self.catalyst_mask], return_counts=True)
+            print(count.size())
+
+
             if self.optimal_transport:
                 x0 = batched_ot_align(x0, x1, batch=data.batch[self.catalyst_mask], pbc_aware=True)
             u_x = x1 - x0 
