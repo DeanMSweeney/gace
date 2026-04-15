@@ -11,7 +11,7 @@ from adsflow.utils.utils import adsorbate_neighborhood_mask
 from adsflow.utils.builder import lattice_params_to_matrix
 from adsflow.utils.forge_sampler import euler_step, ctmc_step
 
-NUM_CLASSES = 118  # number of atom-type classes (atomic numbers 1–90, shifted to 0-indexed)
+NUM_CLASSES = 90  # number of atom-type classes (atomic numbers 1–90, shifted to 0-indexed)
 
 class XMatching():
     """
