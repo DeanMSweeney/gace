@@ -211,6 +211,7 @@ def main(cfg: Config) -> None:
     lightning = LightFlowMatch(
         model=model,
         variant=cfg.variant,  # Flow matching variant (e.g., conditional, optimal transport)
+        optimal_transport=cfg.optimal_transport,
         mode=cfg.mode,
         track_grad_norms=cfg.track_grad_norms,
         rtol=cfg.rtol,  # Relative tolerance for ODE solver

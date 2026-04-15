@@ -37,7 +37,6 @@ class XMatching():
         if x0.dim() == 3:
             # e.g. transformation matrix M: (B, 3, 3) → flatten rows → (B*3, 3)
             B, N, D = x0.shape
-            print("Running OT")
             x0_aligned = hungarian(
                 set0=x0.reshape(B * N, D),
                 set1=x1.reshape(B * N, D),
@@ -300,8 +299,6 @@ class XMatching():
 
         len0 = torch.randn_like(len1) # B, 3
         ang0 = torch.randn_like(ang1) # B, 3
-
-        print(self.optimal_transport)
 
         if self.optimal_transport:
             # B×B assignment across the batch for lengths and angles (B, 3)
