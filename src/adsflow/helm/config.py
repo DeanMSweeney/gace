@@ -265,6 +265,15 @@ class Config:
     - "cosine": alpha(t) = 1 - cos^2(t*pi/2) (more samples near endpoints)
     """
 
+    optimal_transport: bool = False
+    """
+    Whether to apply optimal transport (Hungarian algorithm) to align noise x0
+    with targets x1 before interpolation, minimising transport cost per modality.
+    Applied to: catalyst positions, adsorbate relative positions, adsorbate COM,
+    lattice lengths/angles, and transformation matrix M.
+    Not applied to atom types (corruption-mask scheme; alignment has no effect).
+    """
+
     # ==================== ODE Solver Settings (for Inference) ====================
 
     rtol: float = 1e-7
