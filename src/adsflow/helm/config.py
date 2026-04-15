@@ -94,6 +94,21 @@ class OptimizerConfig:
     t0_weight: float = 1.0
     """Weighting multiplier for t=0 in x_matching="endpoint"""
 
+    lambda_x: float = 1.0
+    """Loss weight for catalyst fractional coordinate loss (x_loss)"""
+
+    lambda_z: float = 0.10
+    """Loss weight for catalyst atom-type cross-entropy (z_loss)"""
+
+    lambda_ads: float = 1.0
+    """Loss weight for adsorbate position losses (ads_com_loss + ads_relp_loss)"""
+
+    lambda_lat: float = 1.0
+    """Loss weight for primitive-cell lattice parameter losses (len_loss + ang_loss)"""
+
+    lambda_M: float = 1.0
+    """Loss weight for supercell transformation matrix loss (M_loss)"""
+
     ema_decay: Optional[float] = None
     """Exponential moving average decay for model weights.
     - None: EMA disabled

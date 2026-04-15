@@ -8,6 +8,7 @@ hydra-core
 e3nn
 lightning
 wandb
+torch_ema
 torchdiffeq
 transformers
 scipy
