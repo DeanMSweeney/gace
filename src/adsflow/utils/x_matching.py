@@ -11,10 +11,41 @@ from adsflow.utils.utils import adsorbate_neighborhood_mask
 from adsflow.utils.builder import lattice_params_to_matrix
 from adsflow.utils.forge_sampler import euler_step, ctmc_step
 
+NUM_CLASSES = 90  # number of atom-type classes (atomic numbers 1–90, shifted to 0-indexed)
+
 class XMatching():
     """
     This Mixin supports image invariant interpolation paths and masked loss for frozen atoms
     """
+
+    def _ot_align(self, x0: Tensor, x1: Tensor, pbc_aware: bool = False) -> Tensor:
+        """
+        Optimally permute x0 rows to minimise transport cost to x1 via Hungarian algorithm.
+
+        Dispatches to `hungarian` from utils/invariance.py:
+          - 2D (N, D): sparse atom tensors or graph-level dense (B, D) — passed directly.
+          - 3D (B, N, D): flattened to (B*N, D) for batch-level assignment, then reshaped back.
+
+        Args:
+            x0:        noise tensor — shape (N, D) or (B, N, D)
+            x1:        target tensor — same shape as x0
+            pbc_aware: passed through to `hungarian` (True applies minimum-image convention)
+
+        Returns:
+            x0_aligned: same shape as x0, rows optimally permuted
+        """
+        if x0.dim() == 3:
+            # e.g. transformation matrix M: (B, 3, 3) → flatten rows → (B*3, 3)
+            B, N, D = x0.shape
+            x0_aligned = hungarian(
+                set0=x0.reshape(B * N, D),
+                set1=x1.reshape(B * N, D),
+                pbc_aware=pbc_aware,
+            )
+            return x0_aligned.reshape(B, N, D)
+        else:
+            # (N, D) sparse atoms or (B, D) graph-level dense — pass directly
+            return hungarian(set0=x0, set1=x1, pbc_aware=pbc_aware)
 
     def criterion(
         self,
@@ -83,7 +114,7 @@ class XMatching():
         with torch.no_grad():
             x_max_L = modified_L_per_atom.max()
 
-        return x_loss, x_max_L
+        return x_loss, {"x_loss": x_loss}
 
     def _criterion_forge(
         self,
@@ -149,11 +180,16 @@ class XMatching():
             + lambda_M   * M_loss
         )
 
-        with torch.no_grad():
-            z_max_L = (lambda_z * z_ce_per_atom).max()
-            max_L = torch.maximum(x_max_L, z_max_L)
-
-        return total_loss, max_L
+        modality_losses = {
+            "x_loss":        x_loss,
+            "z_loss":        z_loss,
+            "ads_com_loss":  ads_com_loss,
+            "ads_relp_loss": ads_relp_loss,
+            "len_loss":      len_loss,
+            "ang_loss":      ang_loss,
+            "M_loss":        M_loss,
+        }
+        return total_loss, modality_losses
 
     def path(
         self,
@@ -264,10 +300,10 @@ class XMatching():
         len0 = torch.randn_like(len1) # B, 3
         ang0 = torch.randn_like(ang1) # B, 3
 
-        # Hungarian alignment is intentionally skipped for lattice lengths/angles.
-        # These are graph-level scalars, not atom sets — there is no atom-permutation
-        # symmetry to resolve. The data processor uses a consistent ordering convention
-        # so no within-graph (a,b,c) reordering is needed.
+        if self.optimal_transport:
+            # B×B assignment across the batch for lengths and angles (B, 3)
+            len0 = self._ot_align(len0, len1, pbc_aware=False)  # (B, 3)
+            ang0 = self._ot_align(ang0, ang1, pbc_aware=False)  # (B, 3)
 
         t_len_per_graph = t # B, 1
         t_len = t_len_per_graph
@@ -329,9 +365,9 @@ class XMatching():
         identity = torch.eye(3, device=device, dtype=dtype).unsqueeze(0).expand(B, -1, -1)
         M0 = identity + 0.1 * torch.randn_like(M1)
 
-        # Hungarian is intentionally skipped for the transformation matrix.
-        # Permuting rows of M across graphs is semantically incorrect; within-graph
-        # row permutation symmetry is minor and not required for flow matching.
+        if self.optimal_transport:
+            # Per-graph: optimally permute the 3 row vectors of M — (B, 3, 3)
+            M0 = self._ot_align(M0, M1, pbc_aware=False)  # (B, 3, 3)
 
         t_M_per_graph = t # B, 1
         t_M = t_M_per_graph
@@ -426,16 +462,9 @@ class XMatching():
             x1 = data.pos.float() # combined primtive cell 
             x0 = torch.randn_like(x1, dtype=torch.float32)
 
-            # Hungarian alignment applied to catalyst atoms 
-            """
-            x0 = hungarian(
-                set0=x0,
-                set1=x1,
-                cell=data.cell.float(),
-                batch=data.batch[self.catalyst_mask],
-                pbc_aware=True,
-            ) # will detect if fractional coordinates or cartesian 
-            """
+            if self.optimal_transport:
+                # Optimally permute catalyst fractional coords (batch-level)
+                x0 = self._ot_align(x0, x1, pbc_aware=True)
 
             u_x = x1 - x0 
             u_x_n0 = torch.round(u_x)
@@ -489,18 +518,11 @@ class XMatching():
         adsCOM0 = torch.randn_like(adsCOM1)   # (B, 3)
         adsRELP0 = torch.randn_like(adsRELP1) # (N_ads_total, 3)
 
-        # Hungarian is intentionally skipped for COM: one position per graph (N=1),
-        # so no permutation to solve. Permuting COM across graphs is semantically incorrect.
-
-        # Hungarian alignment for adsorbate relative positions (permutation invariance)
-        # Relative positions are not in absolute space, so pbc_aware=False
-        """
-        adsRELP0 = hungarian(
-            set0=adsRELP0,
-            set1=adsRELP1,
-            pbc_aware=False,
-        )
-        """
+        if self.optimal_transport:
+            # COM: B×B assignment across the batch (one 3D point per graph)
+            adsCOM0 = self._ot_align(adsCOM0, adsCOM1, pbc_aware=False)    # (B, 3)
+            # Relative positions: batch-level assignment of adsorbate atoms
+            adsRELP0 = self._ot_align(adsRELP0, adsRELP1, pbc_aware=False) # (N_ads, 3)
 
         t_COM_per_graph = t
         t_COM = t_COM_per_graph # B, 1
@@ -564,8 +586,7 @@ class XMatching():
         z1 = (data.atomic_numbers.long() - 1).unsqueeze(1) # N, 1
 
         # Prior: random atomic number indices (much more efficient than one-hot)
-        num_classes = 100
-        z0 = torch.randint(low=0, high=num_classes, size=(z1.size(0), 1), device=device)  # N, 1
+        z0 = torch.randint(low=0, high=NUM_CLASSES, size=(z1.size(0), 1), device=device)  # N, 1
 
         # Hungarian alignment is intentionally skipped for atom types.
         # The corruption-mask scheme (zt = z0 * corrupt + z1 * (1-corrupt)) means
@@ -575,8 +596,8 @@ class XMatching():
 
         # Convert to one-hot after alignment
         # F.one_hot expects (N,) input, so squeeze the (N, 1) tensors
-        z0_hot = F.one_hot(z0.squeeze(1), num_classes=num_classes)      # N, num_classes
-        z1_hot = F.one_hot(z1.squeeze(1), num_classes=num_classes)      # N, num_classes
+        z0_hot = F.one_hot(z0.squeeze(1), num_classes=NUM_CLASSES)      # N, NUM_CLASSES
+        z1_hot = F.one_hot(z1.squeeze(1), num_classes=NUM_CLASSES)      # N, NUM_CLASSES
         
         # Sample per-graph interpolation time
         t_z_per_graph = t
@@ -670,7 +691,7 @@ class XMatching():
         # Discrete: uniform random atom type
         N_prim = int(self.catalyst_mask.sum().item())
         z0_idx = torch.randint(0, 100, (N_prim,), device=device)
-        data.atomic_numbers_hot = F.one_hot(z0_idx, num_classes=100).float()  # (N_slab, 100)
+        data.atomic_numbers_hot = F.one_hot(z0_idx, num_classes=NUM_CLASSES).float()  # (N_slab, 100)
 
         # ── Euler integration loop ────────────────────────────────────────────
         for i in range(len(t) - 1):

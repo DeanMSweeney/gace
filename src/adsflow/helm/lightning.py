@@ -83,6 +83,7 @@ class LightFlowMatch(LightningModule, XMatching):
             threshold: float=0.20,
             x_matching: Literal["flow", "endpoint"]="flow",
             schedule_type: Literal["linear", "cosine"]="linear",
+            optimal_transport: bool=False,
             write_eval_metrics: bool=False,
             num_integration_steps: int=1,
             run_mlff: bool=False,
@@ -98,7 +99,7 @@ class LightFlowMatch(LightningModule, XMatching):
         self.save_hyperparameters(ignore=["model", "variant", "mode", "rtol", "atol", "ode_method", \
             "track_grad_norms", "in_POS", "gen_POS", "rlxd_POS", "config_vasp", "threshold", "x_matching", \
             "interpolant_schedule", "write_eval_metrics", "num_integration_steps", "run_mlff", "mlff_checkpoint", \
-            "accelerator", "seed", "n_prim_atoms"])
+            "accelerator", "seed", "n_prim_atoms", "optimal_transport"])
 
         # Model and training configuration
         self.model = model  # Neural network (e.g., Equiformer)
@@ -122,6 +123,7 @@ class LightFlowMatch(LightningModule, XMatching):
         # Flow matching configuration
         self.x_matching = x_matching  # "flow" or "endpoint"
         self.schedule_type = schedule_type  # "linear" or "cosine"
+        self.optimal_transport = optimal_transport
         self.write_eval_metrics = write_eval_metrics
         self.num_integration_steps = num_integration_steps
         self.run_mlff = run_mlff
@@ -228,15 +230,15 @@ class LightFlowMatch(LightningModule, XMatching):
         # Model predicts velocity field (or dict for forge with z_logits)
         if self.variant =="place":
             f = self(data)
-            loss, max_loss = self.criterion(
+            loss, modality_losses = self.criterion(
                 input_graph=data,
                 pred=f,  # Model prediction
             )
         elif self.variant == "forge":
             pred = self._forge_forward(data)
-            loss, max_loss = self.criterion(input_graph=data, pred=pred)
+            loss, modality_losses = self.criterion(input_graph=data, pred=pred)
 
-        return loss, max_loss
+        return loss, modality_losses
     
     # ==================== Training and Validation Methods ====================
 
@@ -251,7 +253,7 @@ class LightFlowMatch(LightningModule, XMatching):
         Returns:
             loss: Loss value for backpropagation
         """
-        loss, max_loss = self._transport_loss(data)
+        loss, modality_losses = self._transport_loss(data)
 
         # Log average loss (weighted by batch size for multi-GPU training)
         self.log(
@@ -264,16 +266,15 @@ class LightFlowMatch(LightningModule, XMatching):
             sync_dist=True,  # Synchronize across GPUs
         )
 
-        # Log maximum per-atom loss (for monitoring outliers)
-        self.log(
-            "train/max_loss",
-            max_loss.detach(),
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            batch_size=data.num_graphs,
-            sync_dist=True,
-        )
+        for name, val in modality_losses.items():
+            self.log(
+                f"train/{name}",
+                val.detach(),
+                on_step=True,
+                on_epoch=True,
+                batch_size=data.num_graphs,
+                sync_dist=True,
+            )
 
         return loss
         
@@ -295,7 +296,7 @@ class LightFlowMatch(LightningModule, XMatching):
         if self.variant == "place": 
             data.Fmax = torch.ones_like(data.y_relaxed) * 0.03 
             data.dE = torch.zeros_like(data.Fmax)
-        loss, max_loss = self._transport_loss(data)
+        loss, modality_losses = self._transport_loss(data)
 
         # Log validation metrics (no on_step to avoid clutter)
         self.log(
@@ -306,13 +307,13 @@ class LightFlowMatch(LightningModule, XMatching):
             sync_dist=True,
         )
 
-        self.log(
-            "val/max_loss",
-            max_loss.detach(),
-            prog_bar=True,
-            batch_size=data.num_graphs,
-            sync_dist=True,
-        )
+        for name, val in modality_losses.items():
+            self.log(
+                f"val/{name}",
+                val.detach(),
+                batch_size=data.num_graphs,
+                sync_dist=True,
+            )
 
         return loss
     
