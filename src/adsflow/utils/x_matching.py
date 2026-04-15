@@ -427,7 +427,6 @@ class XMatching():
 
 
             output, count = torch.unique(data.batch[self.catalyst_mask], return_counts=True)
-            print(count)
 
 
             if self.optimal_transport:
