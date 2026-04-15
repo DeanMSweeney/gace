@@ -230,15 +230,15 @@ class LightFlowMatch(LightningModule, XMatching):
         # Model predicts velocity field (or dict for forge with z_logits)
         if self.variant =="place":
             f = self(data)
-            loss, modality_losses = self.criterion(
+            losses = self.criterion(
                 input_graph=data,
                 pred=f,  # Model prediction
             )
         elif self.variant == "forge":
             pred = self._forge_forward(data)
-            loss, modality_losses = self.criterion(input_graph=data, pred=pred)
+            losses = self.criterion(input_graph=data, pred=pred)
 
-        return loss, modality_losses
+        return losses
     
     # ==================== Training and Validation Methods ====================
 
@@ -253,30 +253,20 @@ class LightFlowMatch(LightningModule, XMatching):
         Returns:
             loss: Loss value for backpropagation
         """
-        loss, modality_losses = self._transport_loss(data)
+        losses = self._transport_loss(data)
 
-        # Log average loss (weighted by batch size for multi-GPU training)
-        self.log(
-            "train/loss",
-            loss.detach(),
-            on_step=True,  # Log every step
-            on_epoch=True,  # Also compute epoch average
-            prog_bar=True,  # Show in progress bar
-            batch_size=data.num_graphs,  # For proper averaging
-            sync_dist=True,  # Synchronize across GPUs
-        )
-
-        for name, val in modality_losses.items():
+        for name, val in losses.items():
             self.log(
                 f"train/{name}",
                 val.detach(),
                 on_step=True,
                 on_epoch=True,
+                prog_bar=(name == "total_loss"),
                 batch_size=data.num_graphs,
                 sync_dist=True,
             )
 
-        return loss
+        return losses["total_loss"]
         
     def validation_step(self, data: Data, batch_idx):
         """
@@ -296,26 +286,18 @@ class LightFlowMatch(LightningModule, XMatching):
         if self.variant == "place": 
             data.Fmax = torch.ones_like(data.y_relaxed) * 0.03 
             data.dE = torch.zeros_like(data.Fmax)
-        loss, modality_losses = self._transport_loss(data)
+        losses = self._transport_loss(data)
 
-        # Log validation metrics (no on_step to avoid clutter)
-        self.log(
-            "val/loss",
-            loss.detach(),
-            prog_bar=True,
-            batch_size=data.num_graphs,
-            sync_dist=True,
-        )
-
-        for name, val in modality_losses.items():
+        for name, val in losses.items():
             self.log(
                 f"val/{name}",
                 val.detach(),
+                prog_bar=(name == "total_loss"),
                 batch_size=data.num_graphs,
                 sync_dist=True,
             )
 
-        return loss
+        return losses["total_loss"]
     
     def test_step(self, data: Data, batch_idx):
         """

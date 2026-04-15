@@ -85,7 +85,7 @@ class XMatching():
         with torch.no_grad():
             x_max_L = modified_L_per_atom.max()
 
-        return x_loss, {"x_loss": x_loss}
+        return {"total_loss": x_loss, "x_loss": x_loss}
 
     def _criterion_forge(
         self,
@@ -152,7 +152,8 @@ class XMatching():
             + lambda_M   * M_loss
         )
 
-        modality_losses = {
+        return {
+            "total_loss":    total_loss,
             "x_loss":        x_loss,
             "z_loss":        z_loss,
             "ads_com_loss":  ads_com_loss,
@@ -161,7 +162,6 @@ class XMatching():
             "ang_loss":      ang_loss,
             "M_loss":        M_loss,
         }
-        return total_loss, modality_losses
 
     def path(
         self,
