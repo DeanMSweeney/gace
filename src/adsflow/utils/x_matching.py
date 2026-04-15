@@ -37,6 +37,7 @@ class XMatching():
         if x0.dim() == 3:
             # e.g. transformation matrix M: (B, 3, 3) → flatten rows → (B*3, 3)
             B, N, D = x0.shape
+            print("Running OT")
             x0_aligned = hungarian(
                 set0=x0.reshape(B * N, D),
                 set1=x1.reshape(B * N, D),
