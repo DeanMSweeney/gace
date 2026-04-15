@@ -301,7 +301,7 @@ class XMatching():
         len0 = torch.randn_like(len1) # B, 3
         ang0 = torch.randn_like(ang1) # B, 3
 
-        print("Hello")
+        print(self.optimal_transport)
 
         if self.optimal_transport:
             # B×B assignment across the batch for lengths and angles (B, 3)
