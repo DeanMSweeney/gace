@@ -426,6 +426,7 @@ class XMatching():
             x0 = torch.randn_like(x1, dtype=torch.float32)
 
             if self.optimal_transport:
+                print("Runnign OT")
                 x0 = batched_ot_align(x0, x1, batch=data.batch[self.catalyst_mask], pbc_aware=True)
 
             u_x = x1 - x0 
