@@ -94,6 +94,13 @@ class OptimizerConfig:
     t0_weight: float = 1.0
     """Weighting multiplier for t=0 in x_matching="endpoint"""
 
+    ema_decay: Optional[float] = None
+    """Exponential moving average decay for model weights.
+    - None: EMA disabled
+    - 0.9999: standard for flow matching / diffusion models
+    EMA weights are used during validation and saved in checkpoints.
+    """
+
     
 @dataclass
 class Config:

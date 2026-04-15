@@ -10,6 +10,7 @@ import numpy as np
 import torch
 from torch import Tensor
 from torch_geometric.data import Data
+from torch_geometric.utils import to_dense_batch
 from typing import Optional, Literal, Union, Tuple
 import itertools
 from torch_linear_assignment import batch_linear_assignment, assignment_to_indices
@@ -180,7 +181,8 @@ def hungarian(
     C_l2 = torch.linalg.norm(C, dim=-1)  # (N, N)
 
     # Solve linear assignment problem using Hungarian algorithm
-    assignment = batch_linear_assignment(C_l2)
+    # batch_linear_assignment requires (B, N, N); unsqueeze to add batch dim
+    assignment = batch_linear_assignment(C_l2.unsqueeze(0))  # (1, N, N) → (1, N)
     row_ind, col_ind = assignment_to_indices(assignment)
 
     # Reorder set0 into set1 ordering: aligned[col] = source[row]

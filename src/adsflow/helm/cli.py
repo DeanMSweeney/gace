@@ -49,6 +49,7 @@ from typing import Optional, Literal, Union, Tuple
 
 # AdsFlow modules
 from adsflow.helm.lightning import LightFlowMatch
+from adsflow.helm.callbacks import EMACallback
 from adsflow.utils.lmdb_loader import LazyLmdbDataset
 from adsflow.helm.config import Config
 
@@ -113,6 +114,10 @@ def main(cfg: Config) -> None:
     ))]
     # LearningRateMonitor: Track learning rate changes during training
     callbacks.append(LearningRateMonitor(logging_interval="epoch"))
+
+    if cfg.optimizer_hparams.ema_decay is not None:
+        callbacks.append(EMACallback(decay=cfg.optimizer_hparams.ema_decay))
+        declare(f">>> EMA enabled with decay={cfg.optimizer_hparams.ema_decay}")
 
     # === Dataset Loading ===
     # Set number of dataloader workers (leave 2 CPU cores free for system)
