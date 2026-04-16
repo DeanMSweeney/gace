@@ -18,7 +18,7 @@ from adsflow.utils.relaxation import relax_struc
 from adsflow.utils.atoms import write_strucs
 from adsflow.utils.tft.wrapper import PyGToTensorDict
 from adsflow.utils.builder import build_slab_adsorbate, lattice_params_to_matrix, build_forge_batch
-from adsflow.utils.evaluator import evaluate_forge_batch
+from adsflow.utils.evaluator import evaluate_forge_batch, check_validity
 import ase.io
 
 from typing import Optional, Literal, Union, Tuple
@@ -330,8 +330,24 @@ class LightFlowMatch(LightningModule, XMatching):
             opt_graph.pos_generated = opt_graph.pos   
         
         if self.variant == "forge":
-            atoms_list = build_forge_batch(opt_graph, write_dir=self.gen_POS, batch_idx=batch_idx)
-            validity_metrics = evaluate_forge_batch(atoms_list)
+            atoms_list = build_forge_batch(opt_graph, write_dir=None, batch_idx=batch_idx)
+            validity_results = [check_validity(atoms) for atoms in atoms_list]
+
+            if self.gen_POS:
+                os.makedirs(self.gen_POS, exist_ok=True)
+                for b, (atoms, result) in enumerate(zip(atoms_list, validity_results)):
+                    if result["is_valid"] and atoms is not None:
+                        ase.io.write(
+                            os.path.join(self.gen_POS, f'{batch_idx}_{b}.vasp'),
+                            atoms,
+                            format='vasp',
+                        )
+
+            validity_metrics = {
+                "validity/vol_ok":   float(np.mean([r["vol_ok"]   for r in validity_results])),
+                "validity/dist_ok":  float(np.mean([r["dist_ok"]  for r in validity_results])),
+                "validity/is_valid": float(np.mean([r["is_valid"] for r in validity_results])),
+            }
             for key, val in validity_metrics.items():
                 self.log(key, val, on_step=False, on_epoch=True, batch_size=len(atoms_list))
         """
