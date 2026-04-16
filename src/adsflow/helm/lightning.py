@@ -194,6 +194,8 @@ class LightFlowMatch(LightningModule, XMatching):
             ads_padding_mask=ads_padding_mask,
         )
 
+        print(f_prim.data["ads_binding_energy"])
+
         return {
             "pos":         x_prim.to_sparse(pred_prim[1]),   # (N_prim, 3)
             "z":           x_prim.to_sparse(pred_prim[0]),   # (N_prim, 118)
