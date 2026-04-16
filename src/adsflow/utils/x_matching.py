@@ -631,6 +631,12 @@ class XMatching():
 
         # Shift ads conditioning to 0-indexed (matches _build_atom_type_path)
         data.ads_atomic_numbers = data.ads_atomic_numbers.long() - 1
+        
+        # TEMPORARY: replace adsorbate with a single hydrogen atom per graph
+        data.ads_atomic_numbers = torch.zeros(B, dtype=torch.long, device=device)  # H = index 0
+        data.ads_rel_pos = torch.zeros(B, 3, device=device)  # single atom: zero relative displacement from COM
+
+
 
         # ── Initialise all generated modalities from prior (t = 0) ───────────
         # Continuous
@@ -641,9 +647,9 @@ class XMatching():
         data.transformation_matrix = (
             identity + 0.1 * torch.randn(B, 3, 3, device=device)
         ).float()                                                           # (B, 3, 3)
-        data.ads_com     = torch.randn_like(data.ads_com)                  # (B, 3)
+        data.ads_com     = torch.randn(B, 3, device=device)                 # (B, 3)
         com_0 = data.ads_com
-        data.ads_rel_pos = torch.randn_like(data.ads_rel_pos)              # (N_ads, 3)
+        data.ads_rel_pos = torch.zeros(B, 3, device=device)                # TEMPORARY: single H, zero relative displacement
         relp_0 = data.ads_rel_pos
         
         # Discrete: uniform random atom type
