@@ -107,7 +107,7 @@ def main(cfg: Config) -> None:
     callbacks = [(ModelCheckpoint(
         dirpath=cfg.ckpt_dir,
         filename=f"{cfg.run_name}-{{epoch:02d}}",
-        monitor="val/loss",
+        monitor="val/total_loss",
         mode="min",
         save_top_k=3,
         save_last=True,
