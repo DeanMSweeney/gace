@@ -1,8 +1,10 @@
 import os
+import sys
 
 import numpy as np 
 from ase import Atoms
 from ase.io import read, write
+from ase.data import atomic_masses
 
 import torch
 from torch import Tensor
@@ -10,53 +12,127 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.data import Data
 from typing import Optional, Literal, Union, Tuple
+from adsflow.utils.invariance import pbc_aware_delta
 
-def ship_data(
-    input_data: Data,
-    sample: torch.Tensor,
-    idx: Optional[int],
-):
+def adsorbate_neighborhood_mask(
+    data: Data,
+    cutoff: float,
+) -> Tensor:
+    """
+    Compute a boolean mask selecting adsorbate atoms and nearby catalyst atoms.
 
-    dir_name = "shipped_data" # directory to store data       
-    data = input_data.clone()
-    
-    # build mask for selected atoms and output atomic positions 
-    mask = (data.batch == sample)
-    x0 = data.pos_init[mask]
-    x1 = data.pos_relaxed[mask]
-    xt = data.pos[mask]
-    atomic_numbers = data.atomic_numbers[mask]
-    cell = data.cell[sample]
-    
-    # convert atomic positions to ASE objects 
-    x0 = Atoms(
-            positions=x0.detach().cpu().numpy(), # initial
-            numbers=atomic_numbers.detach().cpu().numpy(),
-            cell=cell.squeeze(0).detach().cpu().numpy(),
-            pbc=True,  # or (True,True,False) for a slab
+    For each graph in the batch, marks:
+    - All adsorbate atoms (tags == 2)
+    - Non-frozen catalyst atoms within `cutoff` Angstroms of any adsorbate atom
+      (using PBC-aware minimum image distances)
+
+    NOTE: Uses per-graph loop to avoid O(Nc_total × Na_total) memory from
+    cross-graph pairs. The vectorized version below is faster but requires
+    ~B× more memory (B = batch size). See commented code at end of function.
+
+    Args:
+        data: Batched PyG Data object with pos, cell, batch, tags, fixed attributes
+        cutoff: Distance threshold in Angstroms
+
+    Returns:
+        mask: Boolean tensor (N,) — True for atoms in the adsorbate neighborhood
+    """
+
+    pos = data.pos.float()
+    batch = data.batch
+    cell = data.cell.float()
+    adsorbate = (data.tags == 2)
+    not_fixed = (data.fixed == 0)
+
+    # Start with all adsorbate atoms
+    mask = adsorbate.clone()
+
+    num_graphs = batch.max().item() + 1
+    for g in range(num_graphs):
+        g_mask = (batch == g)
+        ads_idx = (g_mask & adsorbate).nonzero(as_tuple=True)[0]
+        cat_idx = (g_mask & ~adsorbate & not_fixed).nonzero(as_tuple=True)[0]
+
+        if len(ads_idx) == 0 or len(cat_idx) == 0:
+            continue
+
+        ads_pos = pos[ads_idx]  # (Na, 3)
+        cat_pos = pos[cat_idx]  # (Nc, 3)
+        Nc, Na = len(cat_idx), len(ads_idx)
+
+        # Pairwise deltas: (Nc, Na, 3)
+        delta = cat_pos.unsqueeze(1) - ads_pos.unsqueeze(0)
+
+        # PBC minimum image distances
+        batch_flat = torch.full(
+            (Nc * Na,), g, device=pos.device, dtype=torch.long
         )
-    x1 = Atoms(
-            positions=x1.detach().cpu().numpy(), # initial
-            numbers=atomic_numbers.detach().cpu().numpy(),
-            cell=cell.squeeze(0).detach().cpu().numpy(),
-            pbc=True,  # or (True,True,False) for a slab
-        )
-    xt = Atoms(
-            positions=xt.detach().cpu().numpy(), # initial
-            numbers=atomic_numbers.detach().cpu().numpy(),
-            cell=cell.squeeze(0).detach().cpu().numpy(),
-            pbc=True,  # or (True,True,False) for a slab
+        dist = pbc_aware_delta(
+            cell=cell,
+            delta=delta.reshape(-1, 3),
+            batch=batch_flat,
+            l2_norm=True,
+        ).reshape(Nc, Na)
+
+        # Min distance from each catalyst atom to nearest adsorbate
+        min_dist = dist.min(dim=1).values  # (Nc,)
+
+        # Mark catalyst atoms within cutoff
+        mask[cat_idx[min_dist <= cutoff]] = True
+
+    return mask
+
+
+def adsorbate_center_of_mass(
+    data: Data,
+    adsorbate_tag: int = 2,
+) -> Tensor:
+    """
+    Compute adsorbate center of mass (COM) for batched PyG data.
+
+    Args:
+        data: PyG Data/Batch with at least `pos`, `tags`, and optional `batch`,
+              `atomic_numbers`.
+        adsorbate_tag: Value in `data.tags` identifying adsorbate atoms.
+        mass_weighted: If True, use atomic masses from `data.atomic_numbers`.
+                       If False, returns geometric center of adsorbate atoms.
+        expand_to_atoms: If True, return per-atom COM tensor of shape (N, 3),
+                         where each atom receives its graph's adsorbate COM.
+                         If False, return per-graph COM tensor of shape (B, 3).
+
+    Returns:
+        Tensor of shape (B, 3) or (N, 3) depending on `expand_to_atoms`.
+    """
+    pos = data.pos.float()
+    N = pos.size(0)
+    if hasattr(data, "batch"):
+        batch = data.batch.long()
+    else:
+        batch = torch.zeros(N, dtype=torch.long, device=pos.device)
+
+    ads_mask = (data.tags == adsorbate_tag)
+    if not torch.any(ads_mask):
+        raise ValueError(f"No adsorbate atoms found with tag={adsorbate_tag}.")
+
+    graph_ids = batch[ads_mask]
+    pos_ads = pos[ads_mask]
+
+    weights = torch.ones((pos_ads.size(0), 1), dtype=pos.dtype, device=pos.device)
+
+    num_graphs = int(batch.max().item()) + 1
+    com = torch.zeros((num_graphs, 3), dtype=pos.dtype, device=pos.device)
+    weight_sum = torch.zeros((num_graphs, 1), dtype=pos.dtype, device=pos.device)
+
+    com.index_add_(0, graph_ids, pos_ads * weights)
+    weight_sum.index_add_(0, graph_ids, weights)
+
+    missing = (weight_sum.squeeze(1) == 0)
+    if torch.any(missing):
+        missing_graphs = torch.where(missing)[0].tolist()
+        raise ValueError(
+            f"Missing adsorbate atoms in graph(s): {missing_graphs}. "
+            "Each graph must contain at least one adsorbate atom."
         )
 
-    # write to POSCARs
-    print('>>> Writing POSCARs 👩‍💻')
-    os.makedirs(dir_name, exist_ok=True)
-    write(f"{dir_name}/POSCAR0_{idx}",  x0, direct=False)  # Cartesian
-    write(f"{dir_name}/POSCAR1_{idx}",  x1, direct=False)  # Cartesian
-    write(f"{dir_name}/POSCART_{idx}",  xt, direct=False)  # Cartesian
-    
-    print(f'Wrote POSCARS to ./{dir_name}')
-
-      
-    
-    
+    com = com / weight_sum
+    return com

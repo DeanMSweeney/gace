@@ -8,11 +8,12 @@ hydra-core
 e3nn
 lightning
 wandb
+torch_ema
 torchdiffeq
 transformers
 scipy
 
-# Other required dependecies for fairchem 
+# Other required dependecies for fairchem
 huggingface-hub>=0.27.1
 lmdb
 numba
@@ -24,3 +25,12 @@ submitit
 tensorboard
 torchtnt
 pyyaml
+
+# TFT / zatom dependencies
+beartype
+jaxtyping
+environs
+tensordict
+rich
+joblib
+mendeleev

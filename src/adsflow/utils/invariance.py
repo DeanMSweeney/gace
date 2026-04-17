@@ -3,16 +3,15 @@ Utilities for handling periodic boundary conditions (PBC) and atom permutation i
 
 This module provides functions for:
 1. Computing minimum image convention distances (pbc_aware_delta)
-2. Finding optimal atom alignments using Hungarian algorithm (hungarian)
+2. Per-graph optimal transport alignment of sparse atom tensors (batched_ot_align)
 """
 
 import numpy as np
 import torch
 from torch import Tensor
-from torch_geometric.data import Data
-from typing import Optional, Literal, Union, Tuple
-import itertools
-from torch_linear_assignment import assignment_to_indices
+from torch_geometric.utils import to_dense_batch
+from typing import Optional
+from torch_linear_assignment import batch_linear_assignment
 
 
 def pbc_aware_delta(
@@ -20,7 +19,8 @@ def pbc_aware_delta(
             delta: Tensor,
             batch: Optional[Tensor]=None,
             naive: bool=True,
-            norm: bool=False,
+            l1_norm: bool=False,
+            l2_norm: bool=False,
             cartesian: bool=True,
             cartesian_to_fractional: bool=False, 
 ) -> Tensor:
@@ -47,8 +47,8 @@ def pbc_aware_delta(
                If None, assumes single structure
         naive: If True, use simple rounding (fast but approximate)
                If False, search 27 neighboring cells (exact but slower)
-        norm: If True, return L1 norm of minimum distance (N, 1)
-              If False, return minimum distance vector (N, 3)
+        l1_norm: If True, return L1 norm (mean absolute value across xyz) (N, 1)
+        l2_norm: If True, return L2 norm (Euclidean distance) (N, 1)
 
     Returns:
         u_min: Minimum image distance vector (N, 3) or norm (N, 1)
@@ -89,78 +89,68 @@ def pbc_aware_delta(
     else:
         u_mic = u_f_mic
 
-    if norm:
+    if l1_norm:
         # Return L1 norm (mean absolute value across xyz)
         return u_mic.abs().mean(dim=1, keepdim=True)  # (N, 1)
+    elif l2_norm:
+        # Return Euclidean distance (L2 norm)
+        return u_mic.norm(dim=1, keepdim=True)  # (N, 1)
     else:
         # Return full minimum image vector
         return u_mic
 
-def hungarian(
-    set0: Tensor,
-    set1: Tensor,
-    batch: Optional[Tensor]=None,
-    cell: Optional[Tensor]=None,
+def batched_ot_align(
+    x0: Tensor,
+    x1: Tensor,
+    batch: Tensor,
+    pbc_aware: bool = False,
 ) -> Tensor:
     """
-    Find optimal atom permutation between two structures using Hungarian algorithm.
+    Per-graph optimal transport alignment of sparse atom tensors.
 
-    Given two sets of atomic positions (s0 and s1), finds the permutation of s0
-    that minimizes the total distance to s1. This is the solution to the linear
-    assignment problem, solved using the Hungarian (Kuhn-Munkres) algorithm.
-
-    Use case: When generating structures from noise (forge variant), catalyst atoms
-    need to be permuted to match the target structure's atom ordering.
-
-    Algorithm:
-    1. Compute pairwise distance matrix C[i,j] = |s1[j] - s0[i]| (with PBC)
-    2. Solve assignment problem: find permutation π minimizing Σ C[i, π(i)]
-    3. Return permuted s0 according to optimal assignment
+    For each graph b, finds the permutation of x0 atoms that minimises total
+    L2 transport cost to x1 atoms. Atoms in different graphs are never matched
+    against each other.
 
     Args:
-        s0: Initial atomic positions (N, 3) - positions to be permuted
-        s1: Target atomic positions (N, 3) - reference positions
-        cell: Unit cell lattice vectors for PBC handling
-        batch: Batch indices for each atom (maps atoms to their structures)
+        x0:        (N_total, D) noise tensor
+        x1:        (N_total, D) target tensor
+        batch:     (N_total,) graph index for each atom
+        pbc_aware: if True, applies minimum-image convention before computing
+                   distances (use for fractional coordinates in [0, 1])
 
     Returns:
-        s0_aligned: Permuted s0 positions (N, 3) optimally aligned to s1
-                    Minimizes total displacement: Σ |s1[i] - s0_aligned[i]|
-
-    Example:
-        If s0 = [[0,0,0], [1,0,0]] and s1 = [[1,0,0], [0,0,0]],
-        returns [[1,0,0], [0,0,0]] (atoms swapped to match s1 ordering)
-
-    Note:
-        Both s0 and s1 must have the same number of atoms of the same types.
-        Typically called per atom type (e.g., separately for C, O, H atoms).
+        x0_aligned: (N_total, D) x0 with rows permuted per-graph to minimise
+                    transport cost to x1
     """
+    # Densify sparse atoms → (B, N_max, D) with boolean mask (True = real atom)
+    x0_dense, mask = to_dense_batch(x0, batch)  # (B, N_max, D), (B, N_max)
+    x1_dense, _    = to_dense_batch(x1, batch)  # (B, N_max, D)
+    B, N_max, D = x0_dense.shape
 
-    N = set0.size(0)
+    # diff[b, i, j] = x1[b, j] - x0[b, i]
+    diff = x1_dense.unsqueeze(1) - x0_dense.unsqueeze(2)  # (B, N_max, N_max, D)
 
-    # Compute pairwise cost matrix: C[i,j] = distance from s0[i] to s1[j]
-    C = set1.unsqueeze(0) - set0.unsqueeze(1)  # (N, N, 3)
+    if pbc_aware:
+        diff = diff - torch.round(diff)  # minimum image in fractional coords
 
-    # Expand batch indices for all N*N pairwise distances
-    # Each row i uses cell from batch[i]
-    batch_expanded = batch.unsqueeze(1).expand(-1, N).reshape(-1)  # (N*N,)
+    cost = torch.linalg.norm(diff, dim=-1)  # (B, N_max, N_max)
 
-    # Apply PBC to get minimum image distances
-    if cell: 
-        C = pbc_aware_delta(
-            delta=C.reshape(-1, 3),  # (N*N, 3)
-            cell=cell,
-            batch=batch_expanded,
-        ).reshape(N, N, 3) # (N, N, 3)
+    # Exclude padding slots from the assignment
+    INF = 1e9
+    pad = ~mask  # (B, N_max)
+    cost = cost.masked_fill(pad.unsqueeze(2), INF)  # x0 padding rows
+    cost = cost.masked_fill(pad.unsqueeze(1), INF)  # x1 padding cols
 
-    # Compute L2 distance matrix (cost matrix for Hungarian algorithm)
-    C_l2 = torch.linalg.norm(C, dim=-1)  # (N, N)
+    # Solve B independent assignment problems
+    # assignment[b, i] = j  →  x0[b, i] is matched to x1[b, j]
+    assignment = batch_linear_assignment(cost)  # (B, N_max)
 
-    # Solve linear assignment problem using Hungarian algorithm
-    _, col_ind = assignment_to_indices(cost=C_l2)
+    # Scatter: x0_aligned[b, assignment[b,i]] = x0[b, i]
+    x0_aligned_dense = torch.zeros_like(x0_dense)
+    idx = assignment.unsqueeze(-1).expand(B, N_max, D)
+    x0_aligned_dense.scatter_(1, idx, x0_dense)
 
-    # Apply optimal permutation to t0
-    set0_aligned = set0[col_ind]
-
-    return set0_aligned
+    # Return sparse (N_total, D)
+    return x0_aligned_dense[mask]
    

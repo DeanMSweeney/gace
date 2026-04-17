@@ -1,3 +1,5 @@
+import contextlib
+import logging
 import os
 import numpy as np
 import pandas as pd
@@ -11,7 +13,13 @@ from torch_geometric.data import Data
 from transformers import get_cosine_schedule_with_warmup, get_polynomial_decay_schedule_with_warmup
 
 from adsflow.utils.x_matching import XMatching
-from adsflow.utils.evaluation import compute_eval_metrics
+from adsflow.utils.evaluator import compute_eval_metrics
+from adsflow.utils.relaxation import relax_struc
+from adsflow.utils.atoms import write_strucs
+from adsflow.utils.tft.wrapper import PyGToTensorDict
+from adsflow.utils.builder import build_slab_adsorbate, lattice_params_to_matrix, build_forge_batch
+from adsflow.utils.evaluator import evaluate_forge_batch, check_validity
+import ase.io
 
 from typing import Optional, Literal, Union, Tuple
 
@@ -62,7 +70,7 @@ class LightFlowMatch(LightningModule, XMatching):
     def __init__(
             self,
             model,
-            variant: str="relax",
+            variant: str="place",
             mode: str="debug",
             rtol: float = 1e-7,
             atol: float = 1e-9,
@@ -75,13 +83,24 @@ class LightFlowMatch(LightningModule, XMatching):
             threshold: float=0.20,
             x_matching: Literal["flow", "endpoint"]="flow",
             schedule_type: Literal["linear", "cosine"]="linear",
+            optimal_transport: bool=False,
             write_eval_metrics: bool=False,
+            num_integration_steps: int=1,
+            run_mlff: bool=False,
+            mlff_checkpoint: Optional[str]=None,
+            accelerator: str="gpu",
+            seed: int=42,
+            n_prim_atoms: Optional[int]=3,
+            target_binding_E: Optional[float]=None,
             **kwargs,
         ):
 
         super().__init__()
         # Save hyperparameters for logging and checkpointing (ignoring model-specific args)
-        self.save_hyperparameters(ignore=["model", "variant", "mode", "rtol", "atol", "ode_method", "track_grad_norms", "in_POS", "gen_POS", "rlxd_POS", "config_vasp", "threshold", "x_matching", "interpolant_schedule", "write_eval_metrics"])
+        self.save_hyperparameters(ignore=["model", "variant", "mode", "rtol", "atol", "ode_method", \
+            "track_grad_norms", "in_POS", "gen_POS", "rlxd_POS", "config_vasp", "threshold", "x_matching", \
+            "interpolant_schedule", "write_eval_metrics", "num_integration_steps", "run_mlff", "mlff_checkpoint", \
+            "accelerator", "seed", "n_prim_atoms", "optimal_transport"])
 
         # Model and training configuration
         self.model = model  # Neural network (e.g., Equiformer)
@@ -105,26 +124,89 @@ class LightFlowMatch(LightningModule, XMatching):
         # Flow matching configuration
         self.x_matching = x_matching  # "flow" or "endpoint"
         self.schedule_type = schedule_type  # "linear" or "cosine"
+        self.optimal_transport = optimal_transport
         self.write_eval_metrics = write_eval_metrics
+        self.num_integration_steps = num_integration_steps
+        self.run_mlff = run_mlff
+        self.accelerator = accelerator
+        self.seed = seed
+        self.n_prim_atoms = n_prim_atoms
+        self.mlff_checkpoint = mlff_checkpoint
+        self.target_binding_E = target_binding_E
 
         # Diagnostic mode: detailed loss analysis for model development
-        self.diagnostics = False
+        self._write_f_u = False
         self.bad_iter, self.good_ter, self.iter = 0, 0, 0
        # ==============================================================================
        
-    def forward(self, data):
+    def forward(self, data=None, **kwargs):
         """
         Forward pass through the model.
 
-        Args:
-            data: Batch of atomic structures with positions, atomic numbers, etc.
-
-        Returns:
-            Predicted velocity field u(x, t) for flow matching
+        For the 'place' variant, accepts a single PyG Data object.
+        For the 'forge' variant, accepts keyword arguments (x_prim, x_ads, etc.)
+        that are passed directly to the transformer model.
         """
+        if kwargs:
+            return self.model(**kwargs)
         return self.model(data)
 
-    def _transport_loss(self, input_data: Data) -> torch.Tensor:
+    def _forge_forward(self, data: Data) -> dict:
+        """Run the forge model forward pass and return a flat prediction dict.
+
+        Converts the PyG batch to dense tensors, calls the transformer, and
+        unpacks outputs back to sparse form. Used both during training
+        (via _transport_loss) and sampling (via XMatching._sample_forge),
+        which can call this as `self._forge_forward(data)` because
+        LightFlowMatch inherits from XMatching.
+
+        Args:
+            data: PyG Data/Batch with all forge fields populated.
+
+        Returns:
+            Dict with keys: pos, z, len, ang, M, ads_com, ads_rel_pos.
+        """
+        wrapper = PyGToTensorDict()
+        x_prim, x_ads, t_prim, t_ads, f_prim, f_ads = wrapper.to_tensordict(data)
+
+        prim_padding_mask = ~x_prim.mask  # (B, M)
+        ads_padding_mask  = ~x_ads.mask   # (B, N)
+
+        t = t_prim.data["t"].squeeze(-1)  # (B,)
+
+        pred_prim, pred_ads, _ = self(
+            x_prim=(
+                x_prim.data["atomic_numbers_hot"],     # (B, M, 118)
+                x_prim.data["frac_coords"],            # (B, M, 3)
+                x_prim.data["lengths_scaled"],         # (B, 1, 3)
+                x_prim.data["angles_radians"],         # (B, 1, 3)
+                x_prim.data["transformation_matrix"],  # (B, 3, 3)
+                x_prim.data["supercell_lattice"],      # (B, 3, 3)
+            ),
+            x_ads=(
+                x_ads.data["ads_atomic_numbers"],      # (B, N, 1)
+                x_ads.data["ads_com"],                 # (B, 1, 3)
+                x_ads.data["ads_rel_pos"],             # (B, N, 3)
+                x_ads.data["ads_pairwise_dist"],       # (B, N, D)
+            ),
+            t_prim=(t, t, t, t),
+            t_ads=(t, t),
+            feats={"ads_binding_energy": f_prim.data["ads_binding_energy"]},
+            prim_padding_mask=prim_padding_mask,
+            ads_padding_mask=ads_padding_mask,
+        )
+
+        return {
+            "pos":         x_prim.to_sparse(pred_prim[1]),   # (N_prim, 3)
+            "z":           x_prim.to_sparse(pred_prim[0]),   # (N_prim, 118)
+            "len":         pred_prim[2].squeeze(1),          # (B, 3)
+            "ang":         pred_prim[3].squeeze(1),          # (B, 3)
+            "M":           pred_prim[4],                     # (B, 3, 3)
+            "ads_com":     pred_ads[0].squeeze(1),           # (B, 3)
+            "ads_rel_pos": x_ads.to_sparse(pred_ads[1]),     # (N_ads, 3)
+        }
+
+    def _transport_loss(self, input_graph: Data) -> torch.Tensor:
         """
         Compute the flow matching loss for a batch of structures.
 
@@ -135,32 +217,30 @@ class LightFlowMatch(LightningModule, XMatching):
         4. Compute loss between predicted and target velocity
 
         Args:
-            input_data: Batch of atomic structures
+            input_graph: Batch of atomic structures
 
         Returns:
             loss: Average loss over batch
             max_loss: Maximum per-atom loss (for monitoring outliers)
             max_loss_idx: Index of atom with maximum loss
+            velocity_predictions: Dict with t, predicted velocity, target velocity, batch, tags
         """
-        # Generate interpolated training data at random time t
-        # data.pos = x(t), u = target velocity dx/dt
-        data, u = self.path(input_data=input_data) 
+        # Generate interpolated training data at random time t.
+        # path() stores supervision targets on the returned data object.
+        data = self.path(input_graph=input_graph) 
 
-        # Model predicts velocity field (or positions if endpoint matching)
-        f = self(data)
-        if self.variant == "relax":
-            # Compute loss between predicted and target
-            # For flow matching: loss = |f - u|^2 (velocity matching)
-            # For endpoint matching: loss = |f - x1|^2 (position matching)
-            loss, max_loss, max_loss_idx = self.criterion(
-                input_data=data,
-                a=f,  # Model prediction
-                b=data.pos_relaxed if self.x_matching == "endpoint" else u,  # Target
-                loss_fn=self.hparams.loss_fn,
-                tao=self.hparams.tao,  # Adsorbate weighting factor
+        # Model predicts velocity field (or dict for forge with z_logits)
+        if self.variant =="place":
+            f = self(data)
+            losses = self.criterion(
+                input_graph=data,
+                pred=f,  # Model prediction
             )
+        elif self.variant == "forge":
+            pred = self._forge_forward(data)
+            losses = self.criterion(input_graph=data, pred=pred)
 
-        return loss, max_loss, max_loss_idx
+        return losses
     
     # ==================== Training and Validation Methods ====================
 
@@ -175,33 +255,21 @@ class LightFlowMatch(LightningModule, XMatching):
         Returns:
             loss: Loss value for backpropagation
         """
-        loss, max_loss, _ = self._transport_loss(data)
+        losses = self._transport_loss(data)
 
-        # Log average loss (weighted by batch size for multi-GPU training)
-        self.log(
-            "train/loss",
-            loss,
-            on_step=True,  # Log every step
-            on_epoch=True,  # Also compute epoch average
-            prog_bar=True,  # Show in progress bar
-            batch_size=len(data.natoms),  # For proper averaging
-            sync_dist=True,  # Synchronize across GPUs
-        )
+        for name, val in losses.items():
+            self.log(
+                f"train/{name}",
+                val.detach(),
+                on_step=True,
+                on_epoch=True,
+                prog_bar=(name == "total_loss"),
+                batch_size=data.num_graphs,
+                sync_dist=True,
+            )
 
-        # Log maximum per-atom loss (for monitoring outliers)
-        self.log(
-            "train/max_loss",
-            max_loss,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-
-        return loss
+        return losses["total_loss"]
         
-
     def validation_step(self, data: Data, batch_idx):
         """
         Single validation step (one batch).
@@ -217,30 +285,21 @@ class LightFlowMatch(LightningModule, XMatching):
             loss: Validation loss for this batch
         """
         # Initialize energy difference if Fmax exists (for compatibility)
-        if hasattr(data, "Fmax"):
+        if self.variant == "place": 
             data.Fmax = torch.ones_like(data.y_relaxed) * 0.03 
             data.dE = torch.zeros_like(data.Fmax)
+        losses = self._transport_loss(data)
 
-        loss, max_loss, _ = self._transport_loss(data)
+        for name, val in losses.items():
+            self.log(
+                f"val/{name}",
+                val.detach(),
+                prog_bar=(name == "total_loss"),
+                batch_size=data.num_graphs,
+                sync_dist=True,
+            )
 
-        # Log validation metrics (no on_step to avoid clutter)
-        self.log(
-            "val/loss",
-            loss,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-
-        self.log(
-            "val/max_loss",
-            max_loss,
-            prog_bar=True,
-            batch_size=len(data.natoms),
-            sync_dist=True,
-        )
-
-        return loss
+        return losses["total_loss"]
     
     def test_step(self, data: Data, batch_idx):
         """
@@ -248,7 +307,7 @@ class LightFlowMatch(LightningModule, XMatching):
 
         For each structure:
         1. Compute training loss (for comparison)
-        2. Generate relaxed structure via ODE integration (if not in diagnostics mode)
+        2. Generate relaxed structure via ODE integration (if not in velocity_predictions mode)
         3. Compute evaluation metrics (MAE, DwT, ADwT)
         4. Optionally save structures to files
 
@@ -260,41 +319,84 @@ class LightFlowMatch(LightningModule, XMatching):
             loss: Test loss for this batch
         """
         # Compute training-style loss for comparison
+        if self.variant == "place":
+            data.dE = torch.ones_like(data.y_relaxed) * 0.05
+            data.Fmax = torch.ones_like(data.y_relaxed) * 0.10
+        
+        if self.num_integration_steps > 1:
+            # Iterative self-refinement: re-apply model to its own output
+            t = torch.linspace(0., 1, self.num_integration_steps, device=data.pos.device, dtype=data.pos.dtype)
+            opt_graph = self.sample(input_graph=data, t=t, ode_method=self.ode_method, n_prim_atoms=self.n_prim_atoms)
+        else:
+            opt_graph = data 
+            opt_graph.pos_generated = opt_graph.pos   
+        
+        if self.variant == "forge":
+            atoms_list = build_forge_batch(opt_graph, write_dir=None, batch_idx=batch_idx)
+            validity_results = [check_validity(atoms) for atoms in atoms_list]
 
-        data.dE = torch.zeros_like(data.y_relaxed)
-        data.Fmax = torch.ones_like(data.y_relaxed) * 0.02
-        loss, max_loss, max_loss_idx = self._transport_loss(data)
+            if self.gen_POS:
+                os.makedirs(self.gen_POS, exist_ok=True)
+                for b, (atoms, result) in enumerate(zip(atoms_list, validity_results)):
+                    if result["is_valid"] and atoms is not None:
+                        ase.io.write(
+                            os.path.join(self.gen_POS, f'{batch_idx}_{b}.vasp'),
+                            atoms,
+                            format='vasp',
+                        )
 
-        # Normal test mode: generate structures via ODE integration
-        t = torch.linspace(0., 1, 2, device=data.pos.device, dtype=data.pos.dtype)
-        opt_graph = self.sample(input_data=data, t=t)
-        eval_metrics = compute_eval_metrics(data=opt_graph, threshold=self.threshold)
+            validity_metrics = {
+                "validity/vol_ok":   float(np.mean([r["vol_ok"]   for r in validity_results])),
+                "validity/dist_ok":  float(np.mean([r["dist_ok"]  for r in validity_results])),
+                "validity/is_valid": float(np.mean([r["is_valid"] for r in validity_results])),
+            }
+            for key, val in validity_metrics.items():
+                self.log(key, val, on_step=False, on_epoch=True, batch_size=len(atoms_list))
+        """
+        else:
+            opt_graph = relax_struc(
+                opt_graph,
+                run_mlff=self.run_mlff,
+                config_vasp=self.config_vasp,
+                mlff_checkpoint=self.mlff_checkpoint,
+                accelerator=self.accelerator,
+                seed=self.seed,
+                gen_POS=self.gen_POS,
+                in_POS=self.in_POS,
+                rlxd_POS=self.rlxd_POS,
+            )
 
-        if self.write_eval_metrics:
-            if not hasattr(self, "eval_metrics"):
-                self.eval_metrics = {k: [] for k in eval_metrics.keys()}
-            for k, v in eval_metrics.items():
-                self.eval_metrics[k].append(v) # only append updated batch values
+            write_strucs(
+                data=opt_graph,
+                gen_POS=self.gen_POS,
+                in_POS=self.in_POS,
+                rlxd_POS=self.rlxd_POS,
+            )
 
-        # ==================== Log Test Metrics ====================
+            eval_metrics = compute_eval_metrics(data=opt_graph, threshold=self.threshold)
 
-        self.log("test/loss", loss, prog_bar=True, batch_size=len(data.natoms), sync_dist=True)
-        self.log("test/max_loss", max_loss, prog_bar=True, batch_size=len(data.natoms), sync_dist=True)
+            if self.write_eval_metrics:
+                if not hasattr(self, "eval_metrics"):
+                    self.eval_metrics = {k: [] for k in eval_metrics.keys()}
+                for k, v in eval_metrics.items():
+                    self.eval_metrics[k].append(v) # only append updated batch values
 
-        # Log all evaluation metrics
-        if eval_metrics:
-            for name, value in eval_metrics.items():
-                self.log(f"test/{name}", value, prog_bar=True, batch_size=len(data.natoms), sync_dist=True)
-
-        return loss    
+            # Log all evaluation metrics
+            if eval_metrics:
+                for name, value in eval_metrics.items():
+                    self.log(f"test/{name}", value, prog_bar=True, batch_size=data.num_graphs, sync_dist=True)
+        """
+        
+        return   
 
     def on_test_end(self):
         """
         Called after all test batches complete.
 
-        Saves evaluation metrics to CSV. Handles multi-GPU gathering.
+        Saves evaluation metrics to CSV and velocity velocity_predictions to parquet.
         """
-        if hasattr(self, "eval_metrics"):
+     
+        if self.write_eval_metrics and hasattr(self, "eval_metrics"):
             output_dir = './eval_metrics'
 
             # Check if running distributed
@@ -314,6 +416,53 @@ class LightFlowMatch(LightningModule, XMatching):
                 # Single GPU - write directly
                 os.makedirs(output_dir, exist_ok=True)
                 pd.DataFrame(self.eval_metrics).to_csv(os.path.join(output_dir, 'eval_metrics.csv'), index=False)
+
+    def predict_step(self, data: Data, batch_idx: int):
+        """Generate catalyst structures conditioned on adsorbate molecule and target binding energy.
+
+        Called by trainer.predict() in generate mode.  Runs the forge Euler sampling
+        loop and writes the resulting structures to gen_POS if set.
+
+        Args:
+            data: PyG Data built by build_molecule_data() — adsorbate conditioning
+                  fields populated, catalyst fields are placeholder zeros.
+            batch_idx: Index of this batch.
+
+        Returns:
+            List of ASE Atoms objects (one per graph in the batch).
+        """
+        # Override binding energy from config if provided
+        if self.target_binding_E is not None:
+            B = int(data.batch.max().item()) + 1
+            data.ads_binding_energy = torch.full(
+                (B,), self.target_binding_E,
+                device=data.pos.device, dtype=torch.float32,
+            )
+
+        t = torch.linspace(
+            0., 1., self.num_integration_steps,
+            device=data.pos.device, dtype=torch.float32,
+        )
+        opt_graph = self.sample(
+            input_graph=data,
+            t=t,
+            ode_method=self.ode_method,
+            n_prim_atoms=self.n_prim_atoms,
+        )
+
+        atoms_list = build_forge_batch(opt_graph, write_dir=None, batch_idx=batch_idx)
+
+        if self.gen_POS:
+            os.makedirs(self.gen_POS, exist_ok=True)
+            for b, atoms in enumerate(atoms_list):
+                if atoms is not None:
+                    ase.io.write(
+                        os.path.join(self.gen_POS, f'{batch_idx}_{b}.vasp'),
+                        atoms,
+                        format='vasp',
+                    )
+
+        return atoms_list
 
     # ==================== Optimizer Configuration ====================
 

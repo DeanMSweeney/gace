@@ -35,42 +35,15 @@ from fairchem.core.datasets._utils import rename_data_object_keys
 from fairchem.core.datasets.base_dataset import BaseDataset
 from fairchem.core.modules.transforms import DataTransforms
 
+from adsflow.utils.is2s_builders.pyg_converter import dict_to_pyg_data
+from adsflow.utils.catflow_builders.pyg_converter import catflow_dict_to_pyg_data
+
 if TYPE_CHECKING:
     from pathlib import Path
     from torch_geometric.data.data import BaseData
 
 T_co = TypeVar("T_co", covariant=True)
 
-def dict_to_pyg_data(data_dict: dict) -> Data:
-    """
-    Convert a dictionary to a PyG Data object.
-
-    Args:
-        data_dict: Dictionary with LMDB fields (from lmdb_builder.py)
-
-    Returns:
-        PyG Data object with all fields as torch tensors
-    """
-    # Convert numpy arrays to torch tensors
-    data = Data(
-        pos=torch.from_numpy(data_dict["pos"]),
-        pos_relaxed=torch.from_numpy(data_dict["pos_relaxed"]),
-        velocity=torch.from_numpy(data_dict["velocity"]),
-        cell=torch.from_numpy(data_dict["cell"]).unsqueeze(0),
-        atomic_numbers=torch.from_numpy(data_dict["atomic_numbers"]),
-        natoms=torch.tensor(data_dict["natoms"]),
-        fixed=torch.from_numpy(data_dict["fixed"]),
-        tags=torch.from_numpy(data_dict["tags"]),
-        Fmax=torch.tensor(data_dict["Fmax"]),
-        dE=torch.tensor(data_dict["dE"]),
-        dSmax=torch.tensor(data_dict["dSmax"]),
-        sid=torch.tensor(data_dict["sid"]),
-        fid=torch.tensor(data_dict["fid"]),
-        y_init=torch.tensor(data_dict["y_init"]),
-        y_relaxed=torch.tensor(data_dict["y_relaxed"]),
-    )
-
-    return data
 
 @registry.register_dataset("lmdb")
 @registry.register_dataset("single_point_lmdb")
@@ -167,14 +140,18 @@ class LazyLmdbDataset(BaseDataset):
 
         # deserialize
         loaded_data = pickle.loads(raw)
-
+        
         # check if it's a dictionary (from lmdb_builder) and convert to PyG Data
         if isinstance(loaded_data, dict):
-            data = dict_to_pyg_data(loaded_data)
+            if "primitive_slab" in loaded_data:
+                data = catflow_dict_to_pyg_data(loaded_data)
+            else:
+                # OC20-style sample: flat numpy arrays
+                data = dict_to_pyg_data(loaded_data)
         else:
             # already a PyG Data object, apply pyg2 transform
             data = pyg2_data_transform(loaded_data)
-
+        
         # user-postprocessing
         data = self.transforms(data)
         if self.key_mapping:
@@ -230,6 +207,8 @@ if __name__ == "__main__":
         dE.append(data.dE)
         Fmax.append(data.Fmax)
         dS.append(data.dSmax)
+
+        print(data.dE)
 
     # Concatenate lists into single tensors
     dE_tensor = torch.cat(dE, dim=0)

@@ -76,11 +76,44 @@ class OptimizerConfig:
 
     # ==================== Loss Weighting ====================
 
-    tao: float = 0
-    """Adsorbate weighting factor for loss computation
-    - 0: equal weighting for all atoms
-    - >0: upweight adsorbate atoms by factor tao
+    tao: float = 1
+    """Adsorbate weighting multiplier for loss computation.
+    Applied within the atoms selected by ads_cutoff.
+    - 1: equal weighting for all selected atoms (default)
+    - >1: upweight adsorbate atoms by factor tao
     E.g., tao=2 means adsorbate atoms contribute 2x more to loss
+    """
+
+    ads_cutoff: float = float('inf')
+    """Spatial cutoff controlling which atoms are supervised.
+    - 0: adsorbate atoms only (no catalyst supervision)
+    - >0 float: adsorbate + catalyst atoms within cutoff Angstroms
+    - inf: all non-frozen atoms (default, backward-compatible)
+    """
+
+    t0_weight: float = 1.0
+    """Weighting multiplier for t=0 in x_matching="endpoint"""
+
+    lambda_x: float = 1.0
+    """Loss weight for catalyst fractional coordinate loss (x_loss)"""
+
+    lambda_z: float = 0.10
+    """Loss weight for catalyst atom-type cross-entropy (z_loss)"""
+
+    lambda_ads: float = 1.0
+    """Loss weight for adsorbate position losses (ads_com_loss + ads_relp_loss)"""
+
+    lambda_lat: float = 1.0
+    """Loss weight for primitive-cell lattice parameter losses (len_loss + ang_loss)"""
+
+    lambda_M: float = 1.0
+    """Loss weight for supercell transformation matrix loss (M_loss)"""
+
+    ema_decay: Optional[float] = None
+    """Exponential moving average decay for model weights.
+    - None: EMA disabled
+    - 0.9999: standard for flow matching / diffusion models
+    EMA weights are used during validation and saved in checkpoints.
     """
 
     
@@ -224,7 +257,7 @@ class Config:
 
     # ==================== Model Run Mode ====================
 
-    variant: Literal["relax", "forge"] = "relax"
+    variant: Literal["place", "forge"] = "forge"
     """
     Flow matching variant:
     - "relax": learn x0 → x1 (initial to relaxed structure)
@@ -254,6 +287,15 @@ class Config:
     - "cosine": alpha(t) = 1 - cos^2(t*pi/2) (more samples near endpoints)
     """
 
+    optimal_transport: bool = False
+    """
+    Whether to apply optimal transport (Hungarian algorithm) to align noise x0
+    with targets x1 before interpolation, minimising transport cost per modality.
+    Applied to: catalyst positions, adsorbate relative positions, adsorbate COM,
+    lattice lengths/angles, and transformation matrix M.
+    Not applied to atom types (corruption-mask scheme; alignment has no effect).
+    """
+
     # ==================== ODE Solver Settings (for Inference) ====================
 
     rtol: float = 1e-7
@@ -281,15 +323,29 @@ class Config:
     E.g., 0.20 = count atoms within 0.2 Angstroms of target position
     """
 
+    num_integration_steps: int = 10
+    """Number of integration steps for ODE solver (for inference)
+    - 1: single-step integration (default, current behavior)
+    - >1: multi-step integration for higher accuracy
+    """
+
     # ==================== Structure Generation/Output ====================
 
     in_POS: Optional[str] = None
-    """Output path for saving initial (unrelaxed) structures during testing
-    Typically POSCAR format for visualization or DFT verification
+    """Path to adsorbate molecule POSCAR for generate mode, or initial structure
+    path for saving during testing (POSCAR format).
     """
+
+    target_binding_E: Optional[float] = None
+    """Target adsorption binding energy (eV) for structure generation.
+    Passed to the model as a conditioning signal during forge sampling."""
 
     gen_POS: Optional[str] = None
     """Output path for saving generated (model-predicted) structures during testing"""
+
+    n_prim_atoms: Optional[int] = 3
+    """Number of primitive atoms per graph to use during forge sampling.
+    If None, uses the atom count from the data. Set to e.g. 3 to force smaller unit cells."""
 
     rlxd_POS: Optional[str] = None
     """Output path for saving relaxed (ground truth) structures during testing"""
@@ -301,6 +357,14 @@ class Config:
 
     write_eval_metrics: bool = False
     """Whether to write evaluation metrics to file"""
+
+    # ==================== MLFF Relaxation ====================
+
+    run_mlff: bool = False
+    """Whether to run MLFF relaxation after generation"""
+
+    mlff_checkpoint: str = "EquiformerV2-153M-S2EF-OC20-All+MD"
+    """Path to MLFF checkpoint for relaxation"""
 
     # ==================== Miscellaneous ====================
 
