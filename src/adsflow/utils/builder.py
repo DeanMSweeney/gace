@@ -74,8 +74,14 @@ def lattice_params_to_matrix(
 # -----------------------------------------------------------------------------
 
 def _to_numpy(x):
-    """Convert tensor or array-like to numpy array."""
+    """Convert tensor or array-like to numpy array.
+
+    Casts BFloat16/Float16 tensors to Float32 first, since numpy has no
+    native bfloat16 dtype (common when the trainer runs bf16-mixed precision).
+    """
     if isinstance(x, torch.Tensor):
+        if x.dtype in (torch.bfloat16, torch.float16):
+            x = x.float()
         return x.detach().cpu().numpy()
     return np.asarray(x)
 
@@ -296,7 +302,7 @@ def forge_catalyst(
             # --- END DEBUG ---
 
         except Exception as e:
-            print(f"[build_forge_batch] Failed to build graph {b}: {e}")
+            print(f"[forge_catalyst] Failed to build graph {b}: {e}")
             atoms_list.append(None)
 
     opt_graph.gen_pos_all = gen_pos_all
