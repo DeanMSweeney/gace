@@ -8,6 +8,7 @@ from pymatgen.io.ase import AseAtomsAdaptor
 
 import torch
 from torch import Tensor
+from torch_geometric.data import Data
 from typing import Optional, Tuple
 
 def lattice_params_to_matrix(
@@ -311,3 +312,55 @@ def build_forge_batch(
                 )
 
     return atoms_list
+
+
+def build_molecule_data(
+    mol_atoms: Atoms,
+    binding_energy: float,
+    n_prim_atoms: int = 3,
+) -> Data:
+    """Build a minimal PyG Data object for forge generate mode.
+
+    Adsorbate conditioning fields are populated from `mol_atoms`.
+    Catalyst fields are zeroed placeholders — _sample_forge reinitialises
+    them from the prior distribution.
+
+    Args:
+        mol_atoms: ASE Atoms object for the adsorbate molecule.
+        binding_energy: Target adsorption energy (eV) used as conditioning signal.
+        n_prim_atoms: Number of primitive catalyst atoms to allocate (placeholder).
+
+    Returns:
+        PyG Data object with all fields required by _sample_forge.
+    """
+    from adsflow.utils.catflow_builders.data_processor import compute_ads_pairwise_distances
+
+    ads_pos_np = mol_atoms.get_positions().astype(np.float32)    # (N_ads, 3)
+    ads_z_np   = mol_atoms.get_atomic_numbers().astype(np.int64) # (N_ads,)
+    N_ads = len(ads_z_np)
+
+    ads_pos_t = torch.from_numpy(ads_pos_np)
+    ads_com   = ads_pos_t.mean(dim=0)              # (3,)
+    ads_rel_pos = ads_pos_t - ads_com              # (N_ads, 3)
+    ads_pairwise_dist = compute_ads_pairwise_distances(ads_pos_t)  # (N_ads, 15)
+
+    tags = torch.cat([
+        torch.ones(n_prim_atoms, dtype=torch.long),
+        torch.full((N_ads,), 2, dtype=torch.long),
+    ])  # (N_prim + N_ads,)
+
+    return Data(
+        num_nodes=n_prim_atoms + N_ads,
+        pos=torch.zeros(n_prim_atoms, 3),
+        tags=tags,
+        # Adsorbate conditioning (fixed throughout sampling)
+        ads_atomic_numbers=torch.from_numpy(ads_z_np),
+        ads_pairwise_dist=ads_pairwise_dist,
+        ads_com=ads_com.unsqueeze(0),              # (1, 3) → batches to (B, 3)
+        ads_rel_pos=ads_rel_pos,                   # (N_ads, 3)
+        ads_binding_energy=torch.tensor(binding_energy, dtype=torch.float32),
+        # Placeholder lattice / geometry (overwritten from noise in _sample_forge)
+        lengths_scaled=torch.zeros(1, 3),
+        angles_radians=torch.zeros(1, 3),
+        transformation_matrix=torch.eye(3, dtype=torch.long).unsqueeze(0),  # (1, 3, 3)
+    )

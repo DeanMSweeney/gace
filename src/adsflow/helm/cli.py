@@ -49,6 +49,7 @@ from typing import Optional, Literal, Union, Tuple
 
 # AdsFlow modules
 from adsflow.helm.lightning import LightFlowMatch
+from adsflow.utils.builder import build_molecule_data
 from adsflow.helm.callbacks import EMACallback
 from adsflow.utils.lmdb_loader import LazyLmdbDataset
 from adsflow.helm.config import Config
@@ -198,16 +199,21 @@ def main(cfg: Config) -> None:
         )
 
     # --- Generation Mode ---
-    # Load single atomic structure from POSCAR file for generation/prediction
+    # Build Data object from adsorbate molecule POSCAR + target binding energy
     elif cfg.mode == "generate" and cfg.in_POS:
-        declare(">>> Activated Generation mode with single user input 🧚‍♀️")
-        # Read atomic structure and convert to graph representation
-        atomic_struc = ase.io.read(cfg.in_POS)
-        poscar_to_data = AtomsToGraphs(radius=12).convert(atoms=atomic_struc)
+        declare(">>> Activated Generation mode with user adsorbate input")
+        mol_atoms = ase.io.read(cfg.in_POS)
+        n_prim = cfg.n_prim_atoms if cfg.n_prim_atoms is not None else 3
+        binding_e = cfg.target_binding_E if cfg.target_binding_E is not None else 0.0
+        gen_data = build_molecule_data(
+            mol_atoms=mol_atoms,
+            binding_energy=binding_e,
+            n_prim_atoms=n_prim,
+        )
         gen_loader = DataLoader(
-            dataset=[poscar_to_data],
+            dataset=[gen_data],
             batch_size=1,
-            num_workers=cfg.num_workers,
+            num_workers=0,
             pin_memory=pin_memory,
         )
         
@@ -232,6 +238,7 @@ def main(cfg: Config) -> None:
         write_eval_metrics=cfg.write_eval_metrics,  # Write evaluation metrics
         num_integration_steps=cfg.num_integration_steps,  # Iterative refinement passes
         n_prim_atoms=cfg.n_prim_atoms,
+        target_binding_E=cfg.target_binding_E,
         **cfg.optimizer_hparams,  # Optimizer hyperparameters (lr, weight_decay, etc.)
         run_mlff=cfg.run_mlff,
         accelerator=cfg.accelerator,

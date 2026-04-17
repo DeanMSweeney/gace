@@ -332,9 +332,13 @@ class Config:
     # ==================== Structure Generation/Output ====================
 
     in_POS: Optional[str] = None
-    """Output path for saving initial (unrelaxed) structures during testing
-    Typically POSCAR format for visualization or DFT verification
+    """Path to adsorbate molecule POSCAR for generate mode, or initial structure
+    path for saving during testing (POSCAR format).
     """
+
+    target_binding_E: Optional[float] = None
+    """Target adsorption binding energy (eV) for structure generation.
+    Passed to the model as a conditioning signal during forge sampling."""
 
     gen_POS: Optional[str] = None
     """Output path for saving generated (model-predicted) structures during testing"""
