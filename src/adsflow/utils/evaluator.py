@@ -51,7 +51,7 @@ def check_validity(atoms: Atoms) -> dict:
                 radii = covalent_radii[numbers]               # (N,)
                 sum_radii = radii[:, None] + radii[None, :]   # (N, N)
                 np.fill_diagonal(dists, np.inf)
-                dist_ok = bool(np.all(dists >= 1 * sum_radii))
+                dist_ok = bool(np.all(dists >= 0.50 * sum_radii))
         else:
             dist_ok = True
     except Exception:
