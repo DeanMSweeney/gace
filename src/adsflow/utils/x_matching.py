@@ -631,6 +631,8 @@ class XMatching():
 
         # Shift ads conditioning to 0-indexed (matches _build_atom_type_path)
         data.ads_atomic_numbers = data.ads_atomic_numbers.long() - 1
+        data.ads_com     = torch.randn_like(data.ads_com)                  # (B, 3)
+        data.ads_rel_pos = torch.randn_like(data.ads_rel_pos)              # (N_ads, 3)
         
         # ── Initialise all generated modalities from prior (t = 0) ───────────
         # Continuous
@@ -638,14 +640,8 @@ class XMatching():
         data.lengths_scaled = torch.randn(B, 3, device=device)            # (B, 3)
         data.angles_radians = torch.randn(B, 3, device=device)            # (B, 3)
         identity = torch.eye(3, device=device).unsqueeze(0).expand(B, -1, -1)
-        data.transformation_matrix = (
-            identity + 0.1 * torch.randn(B, 3, 3, device=device)
-        ).float()                                                           # (B, 3, 3)
-        data.ads_com     = torch.randn_like(data.ads_com)                  # (B, 3)
-        com_0 = data.ads_com
-        data.ads_rel_pos = torch.randn_like(data.ads_rel_pos)              # (N_ads, 3)
-        relp_0 = data.ads_rel_pos
-        
+        data.transformation_matrix = (identity + 0.1 * torch.randn(B, 3, 3, device=device)).float()   # (B, 3, 3)
+
         # Discrete: uniform random atom type
         N_prim = int(self.catalyst_mask.sum().item())
         z0_idx = torch.randint(0, NUM_CLASSES, (N_prim,), device=device)

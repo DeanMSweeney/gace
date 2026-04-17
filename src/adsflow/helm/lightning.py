@@ -17,7 +17,7 @@ from adsflow.utils.evaluator import compute_eval_metrics
 from adsflow.utils.relaxation import relax_struc
 from adsflow.utils.atoms import write_strucs
 from adsflow.utils.tft.wrapper import PyGToTensorDict
-from adsflow.utils.builder import build_slab_adsorbate, lattice_params_to_matrix, build_forge_batch
+from adsflow.utils.builder import forge_catalyst
 from adsflow.utils.evaluator import evaluate_forge_batch, check_validity
 import ase.io
 
@@ -92,6 +92,7 @@ class LightFlowMatch(LightningModule, XMatching):
             seed: int=42,
             n_prim_atoms: Optional[int]=3,
             target_binding_E: Optional[float]=None,
+            num_generated_samples: int=1,
             **kwargs,
         ):
 
@@ -133,6 +134,7 @@ class LightFlowMatch(LightningModule, XMatching):
         self.n_prim_atoms = n_prim_atoms
         self.mlff_checkpoint = mlff_checkpoint
         self.target_binding_E = target_binding_E
+        self.num_generated_samples = num_generated_samples
 
         # Diagnostic mode: detailed loss analysis for model development
         self._write_f_u = False
@@ -315,15 +317,10 @@ class LightFlowMatch(LightningModule, XMatching):
             loss: Test loss for this batch
         """
         
-        if self.num_integration_steps > 1:
-            # Iterative self-refinement: re-apply model to its own output
-            t = torch.linspace(0., 1, self.num_integration_steps, device=data.pos.device, dtype=data.pos.dtype)
-            opt_graph = self.sample(input_graph=data, t=t, ode_method=self.ode_method, n_prim_atoms=self.n_prim_atoms)
-        else:
-            opt_graph = data 
-            opt_graph.pos_generated = opt_graph.pos   
+        t = torch.linspace(0., 1, self.num_integration_steps, device=data.pos.device, dtype=data.pos.dtype)
+        opt_graph = self.sample(input_graph=data, t=t, ode_method=self.ode_method, n_prim_atoms=self.n_prim_atoms)
         
-        atoms_list = build_forge_batch(opt_graph, write_dir=None, batch_idx=batch_idx)
+        atoms_list = forge_catalyst(opt_graph, write_dir=None, batch_idx=batch_idx)
         validity_results = [check_validity(atoms) for atoms in atoms_list]
 
         if self.gen_POS:
@@ -386,26 +383,31 @@ class LightFlowMatch(LightningModule, XMatching):
             0., 1., self.num_integration_steps,
             device=data.pos.device, dtype=torch.float32,
         )
-        opt_graph = self.sample(
-            input_graph=data,
-            t=t,
-            ode_method=self.ode_method,
-            n_prim_atoms=self.n_prim_atoms,
-        )
 
-        atoms_list = build_forge_batch(opt_graph, write_dir=None, batch_idx=batch_idx)
+        all_atoms = []
+        for sample_idx in range(self.num_generated_samples):
+            opt_graph = self.sample(
+                input_graph=data,
+                t=t,
+                ode_method=self.ode_method,
+                n_prim_atoms=self.n_prim_atoms,
+            )
 
-        if self.gen_POS:
-            os.makedirs(self.gen_POS, exist_ok=True)
-            for b, atoms in enumerate(atoms_list):
-                if atoms is not None:
-                    ase.io.write(
-                        os.path.join(self.gen_POS, f'{batch_idx}_{b}.vasp'),
-                        atoms,
-                        format='vasp',
-                    )
+            atoms_list = forge_catalyst(opt_graph, write_dir=None, batch_idx=batch_idx)
 
-        return atoms_list
+            if self.gen_POS:
+                os.makedirs(self.gen_POS, exist_ok=True)
+                for b, atoms in enumerate(atoms_list):
+                    if atoms is not None:
+                        ase.io.write(
+                            os.path.join(self.gen_POS, f'{batch_idx}_{sample_idx}_{b}.vasp'),
+                            atoms,
+                            format='vasp',
+                        )
+
+            all_atoms.extend(atoms_list)
+
+        return all_atoms
 
     # ==================== Optimizer Configuration ====================
 

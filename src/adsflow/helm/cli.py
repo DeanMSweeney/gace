@@ -49,7 +49,7 @@ from typing import Optional, Literal, Union, Tuple
 
 # AdsFlow modules
 from adsflow.helm.lightning import LightFlowMatch
-from adsflow.utils.builder import build_molecule_data
+from adsflow.utils.builder import build_graph_from_atoms
 from adsflow.helm.callbacks import EMACallback
 from adsflow.utils.lmdb_loader import LazyLmdbDataset
 from adsflow.helm.config import Config
@@ -203,15 +203,16 @@ def main(cfg: Config) -> None:
     elif cfg.mode == "generate" and cfg.in_POS:
         declare(">>> Activated Generation mode with user adsorbate input")
         mol_atoms = ase.io.read(cfg.in_POS)
-        n_prim = cfg.n_prim_atoms if cfg.n_prim_atoms is not None else 3
-        binding_e = cfg.target_binding_E if cfg.target_binding_E is not None else 0.0
-        gen_data = build_molecule_data(
+        n_prim = cfg.n_prim_atoms
+        binding_E = cfg.target_binding_E
+
+        initial_graph = build_graph_from_atoms(
             mol_atoms=mol_atoms,
-            binding_energy=binding_e,
+            binding_energy=binding_E,
             n_prim_atoms=n_prim,
         )
         gen_loader = DataLoader(
-            dataset=[gen_data],
+            dataset=[initial_graph],
             batch_size=1,
             num_workers=0,
             pin_memory=pin_memory,
@@ -239,6 +240,7 @@ def main(cfg: Config) -> None:
         num_integration_steps=cfg.num_integration_steps,  # Iterative refinement passes
         n_prim_atoms=cfg.n_prim_atoms,
         target_binding_E=cfg.target_binding_E,
+        num_generated_samples=cfg.num_generated_samples,
         **cfg.optimizer_hparams,  # Optimizer hyperparameters (lr, weight_decay, etc.)
         run_mlff=cfg.run_mlff,
         accelerator=cfg.accelerator,
