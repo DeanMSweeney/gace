@@ -394,16 +394,20 @@ class LightFlowMatch(LightningModule, XMatching):
             )
 
             atoms_list = forge_catalyst(opt_graph, write_dir=None, batch_idx=batch_idx)
+            validity_results = [check_validity(atoms) for atoms in atoms_list]
 
             if self.gen_POS:
                 os.makedirs(self.gen_POS, exist_ok=True)
-                for b, atoms in enumerate(atoms_list):
-                    if atoms is not None:
+                for b, (atoms, result) in enumerate(zip(atoms_list, validity_results)):
+                    if atoms is not None and result["is_valid"]:
                         ase.io.write(
                             os.path.join(self.gen_POS, f'{batch_idx}_{sample_idx}_{b}.vasp'),
                             atoms,
                             format='vasp',
                         )
+                    elif atoms is not None:
+                        print(f"[predict_step] Skipping invalid structure {batch_idx}_{sample_idx}_{b}: "
+                              f"vol_ok={result['vol_ok']}, dist_ok={result['dist_ok']}")
 
             all_atoms.extend(atoms_list)
 
