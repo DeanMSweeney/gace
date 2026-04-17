@@ -19,13 +19,14 @@ The script uses PyTorch Lightning for training orchestration and supports:
 """
 
 # Core dependencies
-import os
+import os, psutil 
 import torch
 from torch import optim
 from torch.utils.data import random_split
 from torch.cuda.amp import autocast
 from torch.optim.lr_scheduler import LinearLR, ExponentialLR, ReduceLROnPlateau, SequentialLR
 import torch.nn as nn
+import torch.distributed as dist
 
 # PyTorch Lightning for training orchestration
 import pytorch_lightning as pl
@@ -48,9 +49,9 @@ from typing import Optional, Literal, Union, Tuple
 
 # AdsFlow modules
 from adsflow.helm.lightning import LightFlowMatch
-from adsflow.models.gemnet.gemnet_flow import GemNetFlow
+from adsflow.utils.builder import build_molecule_data
+from adsflow.helm.callbacks import EMACallback
 from adsflow.utils.lmdb_loader import LazyLmdbDataset
-from adsflow.utils.utils import ship_data
 from adsflow.helm.config import Config
 
 # FairChem dataset handling
@@ -80,6 +81,13 @@ def main(cfg: Config) -> None:
     defaults_cfg = OmegaConf.create(asdict(defaults))
     cfg = OmegaConf.merge(defaults_cfg, cfg)
 
+    if cfg.mode == "eval":
+        cfg.precision = 32 
+    
+    if cfg.run_mlff:
+        declare(">>> Configured for MLFF relaxation on generated samples, setting batch size to 1 ⛷️")
+        cfg.batch_size = 1
+
     # === Reproducibility & Performance Setup ===
     # Seed RNG for reproducibility across multi-GPU training
     pl.seed_everything(cfg.seed, workers=True)
@@ -96,17 +104,21 @@ def main(cfg: Config) -> None:
     declare(f">>> Training and model configurations:\n {OmegaConf.to_yaml(cfg)}")
 
     # === Callbacks Configuration ===
-    # ModelCheckpoint: Save top-3 models based on validation loss
+    # ModelCheckpoint: Save tp-3 models based on validation loss
     callbacks = [(ModelCheckpoint(
         dirpath=cfg.ckpt_dir,
         filename=f"{cfg.run_name}-{{epoch:02d}}",
-        monitor="val/loss",
+        monitor="val/total_loss",
         mode="min",
         save_top_k=3,
         save_last=True,
     ))]
     # LearningRateMonitor: Track learning rate changes during training
     callbacks.append(LearningRateMonitor(logging_interval="epoch"))
+
+    if cfg.optimizer_hparams.ema_decay is not None:
+        callbacks.append(EMACallback(decay=cfg.optimizer_hparams.ema_decay))
+        declare(f">>> EMA enabled with decay={cfg.optimizer_hparams.ema_decay}")
 
     # === Dataset Loading ===
     # Set number of dataloader workers (leave 2 CPU cores free for system)
@@ -178,7 +190,7 @@ def main(cfg: Config) -> None:
         declare(f">>> Activated Evaluation mode with OC20-test: {cfg.oc20_test} 🦉")
         ptst = {"src": cfg.oc20_test}
         test_set = LazyLmdbDataset(ptst)
-        test_set = Subset(test_set, indices=range(1000))
+        test_set = Subset(test_set, indices=range(100))
         test_loader = DataLoader(
             dataset=test_set,
             batch_size=cfg.batch_size,
@@ -187,16 +199,21 @@ def main(cfg: Config) -> None:
         )
 
     # --- Generation Mode ---
-    # Load single atomic structure from POSCAR file for generation/prediction
+    # Build Data object from adsorbate molecule POSCAR + target binding energy
     elif cfg.mode == "generate" and cfg.in_POS:
-        declare(">>> Activated Generation mode with single user input 🧚‍♀️")
-        # Read atomic structure and convert to graph representation
-        atomic_struc = ase.io.read(cfg.in_POS)
-        poscar_to_data = AtomsToGraphs(radius=12).convert(atoms=atomic_struc)
+        declare(">>> Activated Generation mode with user adsorbate input")
+        mol_atoms = ase.io.read(cfg.in_POS)
+        n_prim = cfg.n_prim_atoms if cfg.n_prim_atoms is not None else 3
+        binding_e = cfg.target_binding_E if cfg.target_binding_E is not None else 0.0
+        gen_data = build_molecule_data(
+            mol_atoms=mol_atoms,
+            binding_energy=binding_e,
+            n_prim_atoms=n_prim,
+        )
         gen_loader = DataLoader(
-            dataset=[poscar_to_data],
+            dataset=[gen_data],
             batch_size=1,
-            num_workers=cfg.num_workers,
+            num_workers=0,
             pin_memory=pin_memory,
         )
         
@@ -205,6 +222,7 @@ def main(cfg: Config) -> None:
     lightning = LightFlowMatch(
         model=model,
         variant=cfg.variant,  # Flow matching variant (e.g., conditional, optimal transport)
+        optimal_transport=cfg.optimal_transport,
         mode=cfg.mode,
         track_grad_norms=cfg.track_grad_norms,
         rtol=cfg.rtol,  # Relative tolerance for ODE solver
@@ -218,7 +236,14 @@ def main(cfg: Config) -> None:
         x_matching=cfg.x_matching,  # Position matching strategy
         schedule_type=cfg.interpolant_schedule,  # Interpolant schedule type, 
         write_eval_metrics=cfg.write_eval_metrics,  # Write evaluation metrics
+        num_integration_steps=cfg.num_integration_steps,  # Iterative refinement passes
+        n_prim_atoms=cfg.n_prim_atoms,
+        target_binding_E=cfg.target_binding_E,
         **cfg.optimizer_hparams,  # Optimizer hyperparameters (lr, weight_decay, etc.)
+        run_mlff=cfg.run_mlff,
+        accelerator=cfg.accelerator,
+        mlff_checkpoint=cfg.mlff_checkpoint,
+        seed=cfg.seed,
     )
 
     # === Logger Setup ===
@@ -252,53 +277,75 @@ def main(cfg: Config) -> None:
         gradient_clip_val=1,  # Gradient clipping value
     )
 
-
    # === Checkpoint Loading ===
-    ckpt_path_for_trainer = cfg.ckpt_path # resume training from checkpoint
-    if cfg.ckpt_path and not cfg.resume_training: # restart training with pretained model 
-        declare(f">>> Loading model weights only from: {cfg.ckpt_path} 🔄")
+    ckpt_path_for_trainer = cfg.ckpt_path 
+    # In your main training script:
+    if cfg.ckpt_path and not cfg.resume_training:
+        declare(f">>> Loading CLEAN preprocessed weights from: {cfg.ckpt_path}")
+        # Mock zatom so its checkpoint can be loaded without installing the package.
+        # Uses a meta path finder so arbitrary-depth submodule refs (e.g.
+        # zatom.models.architectures.Foo) are handled without knowing them in advance.
+        import sys, types
+
+        class _ZatomModule(types.ModuleType):
+            """Module that returns dummy classes for any attribute (for pickle)."""
+            __path__ = []
+            def __getattr__(self, name):
+                # Never intercept dunder attrs — let Python use its defaults.
+                # This prevents __file__ etc. from becoming dummy classes,
+                # which breaks inspect/pydantic downstream.
+                if name.startswith("__") and name.endswith("__"):
+                    raise AttributeError(name)
+                cls = type(name, (), {"__module__": self.__name__})
+                setattr(self, name, cls)
+                return cls
+
+        class _ZatomFinder:
+            def find_module(self, fullname, path=None):
+                if fullname == "zatom" or fullname.startswith("zatom."):
+                    return self
+            def load_module(self, fullname):
+                if fullname in sys.modules:
+                    return sys.modules[fullname]
+                mod = _ZatomModule(fullname)
+                mod.__package__ = fullname
+                mod.__file__ = "<zatom-mock>"  # must be a string for inspect
+                sys.modules[fullname] = mod
+                return mod
+
+        if not any(type(f).__name__ == "_ZatomFinder" for f in sys.meta_path):
+            sys.meta_path.insert(0, _ZatomFinder())
 
         checkpoint = torch.load(cfg.ckpt_path, map_location="cpu")
-        state_dict = checkpoint["state_dict"] if "state_dict" in checkpoint else checkpoint
 
-        # --- Universal Prefix & Renaming Logic ---
-        new_state_dict = {}
-        for k, v in state_dict.items():
-            # 1. Clean nesting
-            clean_key = k.replace("module.module.", "").replace("module.", "")
-            
-            # 2. Rename Force -> Velocity
-            if "force_block" in clean_key:
-                clean_key = clean_key.replace("force_block", "velocity_block")
-            
-            # 3. Prepend 'model.' prefix
-            if not clean_key.startswith("model."):
-                final_key = f"model.{clean_key}"
-            else:
-                final_key = clean_key
-            
-            new_state_dict[final_key] = v
+        # Zatom saves its model at self.model.model (two levels), giving keys
+        # like "model.model.transformer.*".  Our module uses self.model (one
+        # level), expecting "model.transformer.*".  Strip the extra prefix.
+        state_dict = checkpoint["state_dict"]
+        remapped = {
+            ("model." + k[len("model.model."):] if k.startswith("model.model.") else k): v
+            for k, v in state_dict.items()
+        }
+        load_result = lightning.load_state_dict(remapped, strict=False)
 
-        # Load into the model
-        load_result = lightning.load_state_dict(new_state_dict, strict=False)
-       
+        #  DELETE CHECKPOINT TO FREE MEMORY
+        del checkpoint
+        torch.cuda.empty_cache()  # Clear GPU cache if using CUDA
+
         # Verification Reports
-        print("\n--- LOADING REPORT ---")
-        vel_keys = [k for k in new_state_dict.keys() if "velocity_block" in k]
-        print(f"✅ Mapped {len(vel_keys)} weights into velocity_block.")
-
         if load_result.missing_keys:
-            print("\n--- MISSING KEYS (Not w/in Checkpoint) ---")
+            print("\n--- MISSING KEYS (Not w/in Checkpoint ⭐) ---")
             for key in load_result.missing_keys:
                 print(f"  [!] {key}")
 
         if load_result.unexpected_keys:
-            print("\n--- UNEXPECTED KEYS (Ignored from Checkpoint) ---")
-            for key in load_result.unexpected_keys:
-                print(f"  [?] {key}")
-
+                print("\n--- UNEXPECTED KEYS (Ignored from Checkpoint ⭐) ---")
+                for key in load_result.unexpected_keys:
+                    print(f"  [?] {key}")
+        
         declare(">>> Model weights initialized. Training/Eval will proceed.")
         ckpt_path_for_trainer = None
+
 
     # === Training/Evaluation/Generation Execution ===
     if cfg.mode == "debug" or cfg.mode == "train":

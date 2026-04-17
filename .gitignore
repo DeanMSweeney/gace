@@ -9,9 +9,7 @@ CONTCAR*
 POSCAR*
 
 # BATCH/bash
-*.out
 *.qmd
-*.err
 *.sif
 *.ckpt*
 *.swp
@@ -34,15 +32,20 @@ logs/
 sandbox/
 outputs/
 checkpoints/
+.place_checkpoints/
 strucs/
 strucs_1.0/
 conf/
 0/
 trajs/
-dense/
 old/
 l-*/
 ocp_checkpoints/
 plots/
 *_files/
-.DS_Store
+mlff_checkpoint_cache/ 
+catflow/
+poscar*/
+analysis/
+.claude/CLAUDE.md
+generated_samples/

@@ -26,6 +26,7 @@ import torch.nn as nn
 from pyexpat.model import XML_CQUANT_OPT
 
 from fairchem.core.common.registry import registry
+from adsflow.utils.graphs.build_graph import get_pbc_distances, radius_graph_pbc
 from fairchem.core.common.utils import conditional_grad
 from fairchem.core.models.scn.sampling import CalcSpherePoints
 from fairchem.core.models.scn.smearing import (
@@ -173,6 +174,7 @@ class EquiformerV2(BaseModel):
         energy_n_emb_freqs: int=16,
         force_n_emb_freqs: int=16,
         energy_force_conditioning: bool=False,
+        remember_x0: bool=False,
     ):
         super().__init__()
 
@@ -235,6 +237,7 @@ class EquiformerV2(BaseModel):
         self.regress_forces=True
         self.direct_forces=True
         self.energy_force_conditioning = energy_force_conditioning
+        self.remember_x0 = remember_x0
 
         # Precompute the frequency as multipliers as a buffer, register time_freq as an attribute
         self.register_buffer(
@@ -243,17 +246,8 @@ class EquiformerV2(BaseModel):
             persistent=False 
         ) 
         
-        self.register_buffer(
-            'energy_emb_freqs', 
-            torch.arange(1, energy_n_emb_freqs + 1) * torch.pi,
-            persistent=False 
-        ) 
-        
-        self.register_buffer(
-            'force_emb_freqs', 
-            torch.arange(1, force_n_emb_freqs + 1) * torch.pi,
-            persistent=False 
-        ) 
+        # Energy and force embeddings use simple linear projection (no Fourier features)
+        # The log transform already provides sufficient nonlinearity for these continuous scalars 
         
         # Weights for message initialization
         self.sphere_embedding = nn.Embedding(self.max_num_elements, self.sphere_channels_all)
@@ -261,9 +255,9 @@ class EquiformerV2(BaseModel):
         # Initialize time embedding 
         self.time_emb = nn.Linear(2 * time_n_emb_freqs, self.sphere_channels)
         if self.energy_force_conditioning: 
-            self.energy_emb = nn.Linear(2 * energy_n_emb_freqs, self.sphere_channels)
-            self.force_emb = nn.Linear(2 * force_n_emb_freqs, self.sphere_channels)
-            
+            self.energy_emb = nn.Linear(1, self.sphere_channels)
+            self.force_emb = nn.Linear(1, self.sphere_channels)
+
         # Initialize the function used to measure the distances between atoms
         assert self.distance_function in [
             'gaussian',
@@ -280,7 +274,10 @@ class EquiformerV2(BaseModel):
             raise ValueError
         
         # Initialize the sizes of radial functions (input channels and 2 hidden channels)
-        self.edge_channels_list = [int(self.distance_expansion.num_output)] + [self.edge_channels] * 2
+        if self.remember_x0:
+            self.edge_channels_list = [int(self.distance_expansion.num_output * 2)] + [self.edge_channels] * 2
+        else:
+            self.edge_channels_list = [int(self.distance_expansion.num_output)] + [self.edge_channels] * 2
 
         # Initialize atom edge embedding
         if self.share_atom_edge_embedding and self.use_atom_edge_embedding:
@@ -415,9 +412,9 @@ class EquiformerV2(BaseModel):
         # extract energy and force metrics if included 
         if self.energy_force_conditioning:
             dE = data.dE[data.batch].unsqueeze(1) # (N,1)
-            dE_log = torch.log(dE + 1e-6)
+            dE_log = torch.log1p(dE)
             Fmax = data.Fmax[data.batch].unsqueeze(1) # (N,1)
-            Fmax_log = torch.log(Fmax + 1e-6)
+            Fmax_log = torch.log1p(Fmax)
         
         # Build graph 
         (
@@ -461,8 +458,8 @@ class EquiformerV2(BaseModel):
         
         # enegry and force mebedding when necessayr 
         if self.energy_force_conditioning:
-            energy_embeds = self.energy_emb(self.process_scalar_embeds(s=dE_log, s_emb_freqs=self.energy_emb_freqs))
-            force_embeds = self.force_emb(self.process_scalar_embeds(s=Fmax_log, s_emb_freqs=self.force_emb_freqs))
+            energy_embeds = self.energy_emb(dE_log)
+            force_embeds = self.force_emb(Fmax_log)
         
         offset_res = 0
         offset = 0
@@ -479,7 +476,26 @@ class EquiformerV2(BaseModel):
             offset_res = offset_res + int((self.lmax_list[i] + 1) ** 2)
 
         # Edge encoding (distance and atom edge)
-        edge_distance = self.distance_expansion(edge_distance)
+        if self.remember_x0:
+             # Compute edge distances for the initial configuration (x0) using the SAME graph structure
+            out_0 = get_pbc_distances(
+                data.pos_init,
+                edge_index,
+                data.cell,
+                cell_offsets, # from current graph
+                neighbors,    # from current graph
+                return_offsets=False,
+                return_distance_vec=False,
+            )
+            edge_distance_0 = out_0["distances"]
+            edge_distance_0 = self.distance_expansion(edge_distance_0)
+            
+            edge_distance = self.distance_expansion(edge_distance)
+            edge_distance = torch.cat([edge_distance, edge_distance_0], dim=-1)
+
+        else:
+            edge_distance = self.distance_expansion(edge_distance)
+
         if self.share_atom_edge_embedding and self.use_atom_edge_embedding:
             source_element = atomic_numbers[edge_index[0]]  # Source atom atomic number
             target_element = atomic_numbers[edge_index[1]]  # Target atom atomic number
@@ -494,7 +510,9 @@ class EquiformerV2(BaseModel):
             edge_index)
         x.embedding = x.embedding + edge_degree.embedding 
         x.embedding = x.embedding + time_embeds.unsqueeze(1)
-        #x.embedding[:, 0:1, :] = x.embedding[:, 0:1, :] + time_embeds.unsqueeze(1) # tried this but foudn worse performance 
+
+        # if self.remember_x0:
+        #     x.embedding = x.embedding + disp_embeds.unsqueeze(1)
       
         if self.energy_force_conditioning:
             x.embedding = x.embedding + energy_embeds.unsqueeze(1) + force_embeds.unsqueeze(1)

@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir --no-build-isolation \
 # Install requriements and dependecies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-deps torch-linear-assignment
+RUN pip install torch-linear-assignment --no-build-isolation
 RUN pip install --no-cache-dir --no-deps fairchem-core==1.10.0
 
 # Install local package 
