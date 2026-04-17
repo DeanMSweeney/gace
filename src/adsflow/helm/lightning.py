@@ -91,6 +91,7 @@ class LightFlowMatch(LightningModule, XMatching):
             accelerator: str="gpu",
             seed: int=42,
             n_prim_atoms: Optional[int]=3,
+            target_binding_E: Optional[float]=None,
             **kwargs,
         ):
 
@@ -131,6 +132,7 @@ class LightFlowMatch(LightningModule, XMatching):
         self.seed = seed
         self.n_prim_atoms = n_prim_atoms
         self.mlff_checkpoint = mlff_checkpoint
+        self.target_binding_E = target_binding_E
 
         # Diagnostic mode: detailed loss analysis for model development
         self._write_f_u = False
@@ -193,8 +195,6 @@ class LightFlowMatch(LightningModule, XMatching):
             prim_padding_mask=prim_padding_mask,
             ads_padding_mask=ads_padding_mask,
         )
-
-        print(f_prim.data["ads_binding_energy"])
 
         return {
             "pos":         x_prim.to_sparse(pred_prim[1]),   # (N_prim, 3)
@@ -416,6 +416,53 @@ class LightFlowMatch(LightningModule, XMatching):
                 # Single GPU - write directly
                 os.makedirs(output_dir, exist_ok=True)
                 pd.DataFrame(self.eval_metrics).to_csv(os.path.join(output_dir, 'eval_metrics.csv'), index=False)
+
+    def predict_step(self, data: Data, batch_idx: int):
+        """Generate catalyst structures conditioned on adsorbate molecule and target binding energy.
+
+        Called by trainer.predict() in generate mode.  Runs the forge Euler sampling
+        loop and writes the resulting structures to gen_POS if set.
+
+        Args:
+            data: PyG Data built by build_molecule_data() — adsorbate conditioning
+                  fields populated, catalyst fields are placeholder zeros.
+            batch_idx: Index of this batch.
+
+        Returns:
+            List of ASE Atoms objects (one per graph in the batch).
+        """
+        # Override binding energy from config if provided
+        if self.target_binding_E is not None:
+            B = int(data.batch.max().item()) + 1
+            data.ads_binding_energy = torch.full(
+                (B,), self.target_binding_E,
+                device=data.pos.device, dtype=torch.float32,
+            )
+
+        t = torch.linspace(
+            0., 1., self.num_integration_steps,
+            device=data.pos.device, dtype=torch.float32,
+        )
+        opt_graph = self.sample(
+            input_graph=data,
+            t=t,
+            ode_method=self.ode_method,
+            n_prim_atoms=self.n_prim_atoms,
+        )
+
+        atoms_list = build_forge_batch(opt_graph, write_dir=None, batch_idx=batch_idx)
+
+        if self.gen_POS:
+            os.makedirs(self.gen_POS, exist_ok=True)
+            for b, atoms in enumerate(atoms_list):
+                if atoms is not None:
+                    ase.io.write(
+                        os.path.join(self.gen_POS, f'{batch_idx}_{b}.vasp'),
+                        atoms,
+                        format='vasp',
+                    )
+
+        return atoms_list
 
     # ==================== Optimizer Configuration ====================
 
