@@ -405,9 +405,6 @@ class LightFlowMatch(LightningModule, XMatching):
                             atoms,
                             format='vasp',
                         )
-                    elif atoms is not None:
-                        print(f"[predict_step] Skipping invalid structure {batch_idx}_{sample_idx}_{b}: "
-                              f"vol_ok={result['vol_ok']}, dist_ok={result['dist_ok']}")
 
             all_atoms.extend(atoms_list)
 
