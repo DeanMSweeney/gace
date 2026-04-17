@@ -10,6 +10,7 @@ import torch
 from torch import Tensor
 from torch_geometric.data import Data
 from typing import Optional, Tuple
+from adsflow.utils.factorized_builders.data_processor import compute_ads_pairwise_distances
 
 def lattice_params_to_matrix(
     lengths: Tensor,
@@ -333,7 +334,6 @@ def build_graph_from_atoms(
     Returns:
         PyG Data object with all fields required by _sample_forge.
     """
-    from adsflow.utils.catflow_builders.data_processor import compute_ads_pairwise_distances
 
     ads_pos_np = mol_atoms.get_positions().astype(np.float32)    # (N_ads, 3)
     ads_z_np   = mol_atoms.get_atomic_numbers().astype(np.int64) # (N_ads,)
