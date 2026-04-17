@@ -210,7 +210,7 @@ def build_slab_adsorbate(
     return slab + ads
 
 
-def build_forge_batch(
+def forge_catalyst(
     opt_graph,
     write_dir: Optional[str] = None,
     batch_idx: Optional[int] = None,
@@ -314,7 +314,7 @@ def build_forge_batch(
     return atoms_list
 
 
-def build_molecule_data(
+def build_graph_from_atoms(
     mol_atoms: Atoms,
     binding_energy: float,
     n_prim_atoms: int = 3,

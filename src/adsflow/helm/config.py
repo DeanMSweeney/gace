@@ -331,6 +331,18 @@ class Config:
 
     # ==================== Structure Generation/Output ====================
 
+    num_generated_samples: int = 1
+    """Number of catalyst structures to generate at the target binding energy.
+    Each sample is an independent ODE integration from a fresh noise draw.
+    Output files are indexed by batch_idx: 0_0.vasp, 1_0.vasp, etc.
+    """
+
+    num_generated_samples: int = 1
+    """Number of catalyst structures to generate at the target binding energy.
+    Each sample is an independent ODE integration from a fresh noise draw.
+    Output files are indexed as {batch_idx}_{sample_idx}_{b}.vasp.
+    """
+
     in_POS: Optional[str] = None
     """Path to adsorbate molecule POSCAR for generate mode, or initial structure
     path for saving during testing (POSCAR format).
