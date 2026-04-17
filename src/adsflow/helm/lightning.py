@@ -284,10 +284,6 @@ class LightFlowMatch(LightningModule, XMatching):
         Returns:
             loss: Validation loss for this batch
         """
-        # Initialize energy difference if Fmax exists (for compatibility)
-        if self.variant == "place": 
-            data.Fmax = torch.ones_like(data.y_relaxed) * 0.03 
-            data.dE = torch.zeros_like(data.Fmax)
         losses = self._transport_loss(data)
 
         for name, val in losses.items():
@@ -318,10 +314,6 @@ class LightFlowMatch(LightningModule, XMatching):
         Returns:
             loss: Test loss for this batch
         """
-        # Compute training-style loss for comparison
-        if self.variant == "place":
-            data.dE = torch.ones_like(data.y_relaxed) * 0.05
-            data.Fmax = torch.ones_like(data.y_relaxed) * 0.10
         
         if self.num_integration_steps > 1:
             # Iterative self-refinement: re-apply model to its own output
@@ -331,30 +323,29 @@ class LightFlowMatch(LightningModule, XMatching):
             opt_graph = data 
             opt_graph.pos_generated = opt_graph.pos   
         
-        if self.variant == "forge":
-            atoms_list = build_forge_batch(opt_graph, write_dir=None, batch_idx=batch_idx)
-            validity_results = [check_validity(atoms) for atoms in atoms_list]
+        atoms_list = build_forge_batch(opt_graph, write_dir=None, batch_idx=batch_idx)
+        validity_results = [check_validity(atoms) for atoms in atoms_list]
 
-            if self.gen_POS:
-                os.makedirs(self.gen_POS, exist_ok=True)
-                for b, (atoms, result) in enumerate(zip(atoms_list, validity_results)):
-                    if result["is_valid"] and atoms is not None:
-                        ase.io.write(
-                            os.path.join(self.gen_POS, f'{batch_idx}_{b}.vasp'),
-                            atoms,
-                            format='vasp',
-                        )
+        if self.gen_POS:
+            os.makedirs(self.gen_POS, exist_ok=True)
+            for b, (atoms, result) in enumerate(zip(atoms_list, validity_results)):
+                if result["is_valid"] and atoms is not None:
+                    ase.io.write(
+                        os.path.join(self.gen_POS, f'{batch_idx}_{b}.vasp'),
+                        atoms,
+                        format='vasp',
+                    )
 
-            validity_metrics = {
-                "validity/vol_ok":   float(np.mean([r["vol_ok"]   for r in validity_results])),
-                "validity/dist_ok":  float(np.mean([r["dist_ok"]  for r in validity_results])),
-                "validity/is_valid": float(np.mean([r["is_valid"] for r in validity_results])),
-            }
-            for key, val in validity_metrics.items():
-                self.log(key, val, on_step=False, on_epoch=True, batch_size=len(atoms_list))
+        validity_metrics = {
+            "validity/vol_ok":   float(np.mean([r["vol_ok"]   for r in validity_results])),
+            "validity/dist_ok":  float(np.mean([r["dist_ok"]  for r in validity_results])),
+            "validity/is_valid": float(np.mean([r["is_valid"] for r in validity_results])),
+        }
+        for key, val in validity_metrics.items():
+            self.log(key, val, on_step=False, on_epoch=True, batch_size=len(atoms_list))
+
         """
-        else:
-            opt_graph = relax_struc(
+        opt_graph = relax_struc(
                 opt_graph,
                 run_mlff=self.run_mlff,
                 config_vasp=self.config_vasp,
@@ -365,57 +356,9 @@ class LightFlowMatch(LightningModule, XMatching):
                 in_POS=self.in_POS,
                 rlxd_POS=self.rlxd_POS,
             )
-
-            write_strucs(
-                data=opt_graph,
-                gen_POS=self.gen_POS,
-                in_POS=self.in_POS,
-                rlxd_POS=self.rlxd_POS,
-            )
-
-            eval_metrics = compute_eval_metrics(data=opt_graph, threshold=self.threshold)
-
-            if self.write_eval_metrics:
-                if not hasattr(self, "eval_metrics"):
-                    self.eval_metrics = {k: [] for k in eval_metrics.keys()}
-                for k, v in eval_metrics.items():
-                    self.eval_metrics[k].append(v) # only append updated batch values
-
-            # Log all evaluation metrics
-            if eval_metrics:
-                for name, value in eval_metrics.items():
-                    self.log(f"test/{name}", value, prog_bar=True, batch_size=data.num_graphs, sync_dist=True)
         """
         
         return   
-
-    def on_test_end(self):
-        """
-        Called after all test batches complete.
-
-        Saves evaluation metrics to CSV and velocity velocity_predictions to parquet.
-        """
-     
-        if self.write_eval_metrics and hasattr(self, "eval_metrics"):
-            output_dir = './eval_metrics'
-
-            # Check if running distributed
-            if self.trainer.world_size > 1:
-                # Gather metrics from all GPUs
-                gathered_metrics = {}
-                for k, v in self.eval_metrics.items():
-                    eval_tensor = torch.tensor(v, device=self.device)
-                    gathered_eval_tensors = self.all_gather(eval_tensor)
-                    gathered_metrics[k] = gathered_eval_tensors.flatten().cpu().tolist()
-
-                # Only rank 0 writes the CSV
-                if self.global_rank == 0:
-                    os.makedirs(output_dir, exist_ok=True)
-                    pd.DataFrame(gathered_metrics).to_csv(os.path.join(output_dir, 'eval_metrics.csv'), index=False)
-            else:
-                # Single GPU - write directly
-                os.makedirs(output_dir, exist_ok=True)
-                pd.DataFrame(self.eval_metrics).to_csv(os.path.join(output_dir, 'eval_metrics.csv'), index=False)
 
     def predict_step(self, data: Data, batch_idx: int):
         """Generate catalyst structures conditioned on adsorbate molecule and target binding energy.
