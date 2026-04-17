@@ -400,6 +400,7 @@ class LightFlowMatch(LightningModule, XMatching):
                 os.makedirs(self.gen_POS, exist_ok=True)
                 for b, (atoms, result) in enumerate(zip(atoms_list, validity_results)):
                     if atoms is not None and result["is_valid"]:
+                        print(validity_results)
                         ase.io.write(
                             os.path.join(self.gen_POS, f'{batch_idx}_{sample_idx}_{b}.vasp'),
                             atoms,
