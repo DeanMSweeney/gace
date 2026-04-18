@@ -84,7 +84,7 @@ def main(cfg: Config) -> None:
     if cfg.mode == "eval":
         cfg.precision = 32 
     
-    if cfg.run_mlff:
+    if cfg.sampler_cfg.run_mlff:
         declare(">>> Configured for MLFF relaxation on generated samples, setting batch size to 1 ⛷️")
         cfg.batch_size = 1
 
@@ -200,16 +200,13 @@ def main(cfg: Config) -> None:
 
     # --- Generation Mode ---
     # Build Data object from adsorbate molecule POSCAR + target binding energy
-    elif cfg.mode == "generate" and cfg.in_POS:
+    elif cfg.mode == "generate" and cfg.sampler_cfg.in_POS:
         declare(">>> Activated Generation mode with user adsorbate input")
-        mol_atoms = ase.io.read(cfg.in_POS)
-        n_prim = cfg.n_prim_atoms
-        binding_E = cfg.target_binding_E
-
+        mol_atoms = ase.io.read(cfg.sampler_cfg.in_POS)
         initial_graph = build_graph_from_atoms(
             mol_atoms=mol_atoms,
-            binding_energy=binding_E,
-            n_prim_atoms=n_prim,
+            binding_energy=cfg.sampler_cfg.target_binding_E,
+            num_prim_atoms=cfg.sampler_cfg.num_prim_atoms,
         )
         gen_loader = DataLoader(
             dataset=[initial_graph],
@@ -222,30 +219,16 @@ def main(cfg: Config) -> None:
     # Wrap model in LightningModule for training orchestration
     lightning = LightFlowMatch(
         model=model,
-        variant=cfg.variant,  # Flow matching variant (e.g., conditional, optimal transport)
+        variant=cfg.variant,
         optimal_transport=cfg.optimal_transport,
         mode=cfg.mode,
         track_grad_norms=cfg.track_grad_norms,
-        rtol=cfg.rtol,  # Relative tolerance for ODE solver
-        atol=cfg.atol,  # Absolute tolerance for ODE solver
-        ode_method=cfg.ode_method,  # ODE solver method (e.g., dopri5, euler)
-        in_POS=cfg.in_POS,  # Input POSCAR path for generation
-        gen_POS=cfg.gen_POS,  # Generated output POSCAR path
-        rlxd_POS=cfg.rlxd_POS,  # Relaxed structure output path
-        config_vasp=cfg.config_vasp,  # VASP configuration for relaxation
-        threshold=cfg.threshold,  # Force convergence threshold
-        x_matching=cfg.x_matching,  # Position matching strategy
-        schedule_type=cfg.interpolant_schedule,  # Interpolant schedule type, 
-        write_eval_metrics=cfg.write_eval_metrics,  # Write evaluation metrics
-        num_integration_steps=cfg.num_integration_steps,  # Iterative refinement passes
-        n_prim_atoms=cfg.n_prim_atoms,
-        target_binding_E=cfg.target_binding_E,
-        num_generated_samples=cfg.num_generated_samples,
-        **cfg.optimizer_hparams,  # Optimizer hyperparameters (lr, weight_decay, etc.)
-        run_mlff=cfg.run_mlff,
+        x_matching=cfg.x_matching,
+        schedule_type=cfg.interpolant_schedule,
         accelerator=cfg.accelerator,
-        mlff_checkpoint=cfg.mlff_checkpoint,
         seed=cfg.seed,
+        **cfg.sampler_cfg,           # All sampler/generation/MLFF settings
+        **cfg.optimizer_hparams,     # Optimizer hyperparameters (lr, weight_decay, etc.)
     )
 
     # === Logger Setup ===

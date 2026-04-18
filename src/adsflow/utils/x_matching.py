@@ -588,7 +588,7 @@ class XMatching():
             self,
             input_graph: Data,
             t: torch.Tensor,  # Time points, e.g. linspace(0, 1, n_steps)
-            n_prim_atoms: Optional[int] = None,
+            num_prim_atoms: Optional[int] = None,
     ) -> Data:
         """Generate structures for the forge variant via a custom Euler loop.
 
@@ -615,17 +615,17 @@ class XMatching():
         self.adsorbate_mask = (data.tags == 2)
         B = int(data.batch.max().item()) + 1
 
-        if n_prim_atoms is not None:
+        if num_prim_atoms is not None:
             ads_mask = (data.tags == 2)
             new_prim_batch = torch.repeat_interleave(
-                torch.arange(B, device=device), n_prim_atoms
+                torch.arange(B, device=device), num_prim_atoms
             )
             new_prim_tags = torch.ones(
-                B * n_prim_atoms, dtype=data.tags.dtype, device=device
+                B * num_prim_atoms, dtype=data.tags.dtype, device=device
             )
             data.batch = torch.cat([new_prim_batch, data.batch[ads_mask]])
             data.tags  = torch.cat([new_prim_tags,  data.tags[ads_mask]])
-            data.pos   = torch.zeros(B * n_prim_atoms, 3, device=device)
+            data.pos   = torch.zeros(B * num_prim_atoms, 3, device=device)
             self.catalyst_mask = (data.tags == 1)
             self.adsorbate_mask = (data.tags == 2)
 
@@ -697,7 +697,7 @@ class XMatching():
             input_graph: Data,
             t: torch.Tensor,  # Time points for ODE integration (typically [0, 1])
             ode_method: str = "dopri5",
-            n_prim_atoms: Optional[int] = None,
+            num_prim_atoms: Optional[int] = None,
     ) -> Data:
         """
         Generate relaxed atomic structures by integrating the learned velocity field.
@@ -712,7 +712,7 @@ class XMatching():
         """
 
         if self.variant == "forge":
-            return self._sample_forge(input_graph, t, n_prim_atoms=n_prim_atoms)
+            return self._sample_forge(input_graph, t, num_prim_atoms=num_prim_atoms)
 
         data = input_graph.clone()
         x0_ref = input_graph.pos.clone().float()  # fixed reference for displacement embedding

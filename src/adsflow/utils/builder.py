@@ -324,7 +324,7 @@ def forge_catalyst(
 def build_graph_from_atoms(
     mol_atoms: Atoms,
     binding_energy: float,
-    n_prim_atoms: int = 3,
+    num_prim_atoms: int = 3,
 ) -> Data:
     """Build a minimal PyG Data object for forge generate mode.
 
@@ -335,7 +335,7 @@ def build_graph_from_atoms(
     Args:
         mol_atoms: ASE Atoms object for the adsorbate molecule.
         binding_energy: Target adsorption energy (eV) used as conditioning signal.
-        n_prim_atoms: Number of primitive catalyst atoms to allocate (placeholder).
+        num_prim_atoms: Number of primitive catalyst atoms to allocate (placeholder).
 
     Returns:
         PyG Data object with all fields required by _sample_forge.
@@ -351,13 +351,13 @@ def build_graph_from_atoms(
     ads_pairwise_dist = compute_ads_pairwise_distances(ads_pos_t)  # (N_ads, 15)
 
     tags = torch.cat([
-        torch.ones(n_prim_atoms, dtype=torch.long),
+        torch.ones(num_prim_atoms, dtype=torch.long),
         torch.full((N_ads,), 2, dtype=torch.long),
     ])  # (N_prim + N_ads,)
 
     return Data(
-        num_nodes=n_prim_atoms + N_ads,
-        pos=torch.zeros(n_prim_atoms, 3),
+        num_nodes=num_prim_atoms + N_ads,
+        pos=torch.zeros(num_prim_atoms, 3),
         tags=tags,
         # Adsorbate conditioning (fixed throughout sampling)
         ads_atomic_numbers=torch.from_numpy(ads_z_np),
