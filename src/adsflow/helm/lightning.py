@@ -90,7 +90,7 @@ class LightFlowMatch(LightningModule, XMatching):
             mlff_checkpoint: Optional[str]=None,
             accelerator: str="gpu",
             seed: int=42,
-            n_prim_atoms: Optional[int]=3,
+            num_prim_atoms: Optional[int]=3,
             target_binding_E: Optional[float]=None,
             num_generated_samples: int=1,
             **kwargs,
@@ -101,7 +101,7 @@ class LightFlowMatch(LightningModule, XMatching):
         self.save_hyperparameters(ignore=["model", "variant", "mode", "rtol", "atol", "ode_method", \
             "track_grad_norms", "in_POS", "gen_POS", "rlxd_POS", "config_vasp", "threshold", "x_matching", \
             "interpolant_schedule", "write_eval_metrics", "num_integration_steps", "run_mlff", "mlff_checkpoint", \
-            "accelerator", "seed", "n_prim_atoms", "optimal_transport"])
+            "accelerator", "seed", "num_prim_atoms", "optimal_transport"])
 
         # Model and training configuration
         self.model = model  # Neural network (e.g., Equiformer)
@@ -131,7 +131,7 @@ class LightFlowMatch(LightningModule, XMatching):
         self.run_mlff = run_mlff
         self.accelerator = accelerator
         self.seed = seed
-        self.n_prim_atoms = n_prim_atoms
+        self.num_prim_atoms = num_prim_atoms
         self.mlff_checkpoint = mlff_checkpoint
         self.target_binding_E = target_binding_E
         self.num_generated_samples = num_generated_samples
@@ -318,7 +318,7 @@ class LightFlowMatch(LightningModule, XMatching):
         """
         
         t = torch.linspace(0., 1, self.num_integration_steps, device=data.pos.device, dtype=data.pos.dtype)
-        opt_graph = self.sample(input_graph=data, t=t, ode_method=self.ode_method, n_prim_atoms=self.n_prim_atoms)
+        opt_graph = self.sample(input_graph=data, t=t, ode_method=self.ode_method, num_prim_atoms=self.num_prim_atoms)
         
         atoms_list = forge_catalyst(opt_graph, write_dir=None, batch_idx=batch_idx)
         validity_results = [check_validity(atoms) for atoms in atoms_list]
@@ -390,7 +390,7 @@ class LightFlowMatch(LightningModule, XMatching):
                 input_graph=data,
                 t=t,
                 ode_method=self.ode_method,
-                n_prim_atoms=self.n_prim_atoms,
+                num_prim_atoms=self.num_prim_atoms,
             )
 
             atoms_list = forge_catalyst(opt_graph, write_dir=None, batch_idx=batch_idx)
@@ -400,7 +400,6 @@ class LightFlowMatch(LightningModule, XMatching):
                 os.makedirs(self.gen_POS, exist_ok=True)
                 for b, (atoms, result) in enumerate(zip(atoms_list, validity_results)):
                     if atoms is not None and result["is_valid"]:
-                        print(validity_results)
                         ase.io.write(
                             os.path.join(self.gen_POS, f'{batch_idx}_{sample_idx}_{b}.vasp'),
                             atoms,
