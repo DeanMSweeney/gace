@@ -49,3 +49,4 @@ poscar*/
 analysis/
 .claude/CLAUDE.md
 generated_samples/
+analysis/struc.ipynb
