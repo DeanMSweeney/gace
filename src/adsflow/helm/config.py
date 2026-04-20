@@ -378,6 +378,7 @@ class Config:
     """
 
     optimal_transport: bool = False
+    informed_priors: bool = True
     """
     Whether to apply optimal transport (Hungarian algorithm) to align noise x0
     with targets x1 before interpolation, minimising transport cost per modality.

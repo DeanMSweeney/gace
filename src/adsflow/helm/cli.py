@@ -221,6 +221,7 @@ def main(cfg: Config) -> None:
         model=model,
         variant=cfg.variant,
         optimal_transport=cfg.optimal_transport,
+        informed_priors=cfg.informed_priors,
         mode=cfg.mode,
         track_grad_norms=cfg.track_grad_norms,
         x_matching=cfg.x_matching,
