@@ -116,9 +116,9 @@ def main(cfg: Config) -> None:
     # LearningRateMonitor: Track learning rate changes during training
     callbacks.append(LearningRateMonitor(logging_interval="epoch"))
 
-    if cfg.optimizer_hparams.ema_decay is not None:
-        callbacks.append(EMACallback(decay=cfg.optimizer_hparams.ema_decay))
-        declare(f">>> EMA enabled with decay={cfg.optimizer_hparams.ema_decay}")
+    if cfg.optim_cfg.ema_decay is not None:
+        callbacks.append(EMACallback(decay=cfg.optim_cfg.ema_decay))
+        declare(f">>> EMA enabled with decay={cfg.optim_cfg.ema_decay}")
 
     # === Dataset Loading ===
     # Set number of dataloader workers (leave 2 CPU cores free for system)
@@ -228,7 +228,7 @@ def main(cfg: Config) -> None:
         accelerator=cfg.accelerator,
         seed=cfg.seed,
         **cfg.sampler_cfg,           # All sampler/generation/MLFF settings
-        **cfg.optimizer_hparams,     # Optimizer hyperparameters (lr, weight_decay, etc.)
+        **cfg.optim_cfg,     # Optimizer hyperparameters (lr, weight_decay, etc.)
     )
 
     # === Logger Setup ===
@@ -255,7 +255,7 @@ def main(cfg: Config) -> None:
         num_nodes=cfg.num_nodes,  # Number of compute nodes
         strategy=cfg.strategy,  # Distributed strategy (ddp, deepspeed, etc.)
         precision=cfg.precision,  # Mixed precision (16-mixed, 32, bf16-mixed)
-        max_epochs=cfg.optimizer_hparams.max_epochs,
+        max_epochs=cfg.optim_cfg.max_epochs,
         accumulate_grad_batches=cfg.accumulate_grad_batches,  # Gradient accumulation steps
         val_check_interval=cfg.val_check_interval,  # Validation frequency
         log_every_n_steps=10,

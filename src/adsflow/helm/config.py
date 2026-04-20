@@ -234,7 +234,7 @@ class Config:
     - GemNet-OC: embedding dimensions, interaction blocks, etc.
     """
 
-    optimizer_hparams: OptimizerConfig = field(default_factory=OptimizerConfig)
+    optim_cfg: OptimizerConfig = field(default_factory=OptimizerConfig)
     """Optimizer and learning rate scheduler configuration"""
 
     # ==================== Dataset Paths ====================
