@@ -269,8 +269,10 @@ class XMatching():
         len1 = data.lengths_scaled.float()  # (B, 3)
         ang1 = data.angles_radians.float()  # (B, 3)
 
-        len0 = torch.randn_like(len1) # B, 3
-        ang0 = torch.randn_like(ang1) # B, 3
+        _LEN_LOC   = torch.tensor([1.5846, 1.8048, 2.0629], device=len1.device, dtype=torch.float32)
+        _LEN_SCALE = torch.tensor([0.3457, 0.4262, 0.4395], device=len1.device, dtype=torch.float32)
+        len0 = torch.distributions.LogNormal(_LEN_LOC, _LEN_SCALE).sample((len1.size(0),))  # (B, 3)
+        ang0 = torch.empty_like(ang1).uniform_(torch.pi / 3, 2 * torch.pi / 3)  # Uniform(60°, 120°)
 
         t_len_per_graph = t # B, 1
         t_len = t_len_per_graph
@@ -423,7 +425,7 @@ class XMatching():
 
         elif self.variant == "forge":
             x1 = data.pos.float() # combined primtive cell 
-            x0 = torch.randn_like(x1, dtype=torch.float32)
+            x0 = torch.rand_like(x1, dtype=torch.float32)  # Uniform[0, 1) — fractional coords live on torus
 
             if self.optimal_transport:
                 x0 = batched_ot_align(x0, x1, batch=data.batch[self.catalyst_mask], pbc_aware=True)
@@ -476,8 +478,12 @@ class XMatching():
         adsCOM1 = data.ads_com.float()       # (B, 3)
         adsRELP1 = data.ads_rel_pos.float()  # (N_ads_total, 3)
 
-        adsCOM0 = torch.randn_like(adsCOM1)   # (B, 3)
-        adsRELP0 = torch.randn_like(adsRELP1) # (N_ads_total, 3)
+        _COM_MEAN = torch.tensor([ 0.0149, -0.6210,  0.9004], device=adsCOM1.device, dtype=torch.float32)
+        _COM_STD  = torch.tensor([ 8.0432,  8.7759,  9.7387], device=adsCOM1.device, dtype=torch.float32)
+        adsCOM0 = _COM_MEAN + _COM_STD * torch.randn_like(adsCOM1)  # (B, 3) Cartesian Å
+
+        _RELP_STD = torch.tensor([1.3098, 1.3619, 1.4047], device=adsRELP1.device, dtype=torch.float32)
+        adsRELP0 = _RELP_STD * torch.randn_like(adsRELP1)  # (N_ads_total, 3)
 
         if self.optimal_transport:
             adsRELP0 = batched_ot_align(adsRELP0, adsRELP1, batch=data.batch[self.adsorbate_mask], pbc_aware=False)
@@ -631,14 +637,22 @@ class XMatching():
 
         # Shift ads conditioning to 0-indexed (matches _build_atom_type_path)
         data.ads_atomic_numbers = data.ads_atomic_numbers.long() - 1
-        data.ads_com     = torch.randn_like(data.ads_com)                  # (B, 3)
-        data.ads_rel_pos = torch.randn_like(data.ads_rel_pos)              # (N_ads, 3)
-        
+        _COM_MEAN = torch.tensor([ 0.0149, -0.6210,  0.9004], device=device, dtype=torch.float32)
+        _COM_STD  = torch.tensor([ 8.0432,  8.7759,  9.7387], device=device, dtype=torch.float32)
+        data.ads_com = _COM_MEAN + _COM_STD * torch.randn(B, 3, device=device)  # (B, 3) Cartesian Å
+
+        N_ads = int(self.adsorbate_mask.sum().item())
+        _RELP_STD = torch.tensor([1.3098, 1.3619, 1.4047], device=device, dtype=torch.float32)
+        data.ads_rel_pos = _RELP_STD * torch.randn(N_ads, 3, device=device)  # (N_ads, 3)
+
         # ── Initialise all generated modalities from prior (t = 0) ───────────
         # Continuous
-        data.pos = torch.randn_like(data.pos)                              # (N_slab, 3)
-        data.lengths_scaled = torch.randn(B, 3, device=device)            # (B, 3)
-        data.angles_radians = torch.randn(B, 3, device=device)            # (B, 3)
+        data.pos = torch.rand_like(data.pos)                               # (N_slab, 3) Uniform[0,1) fractional
+
+        _LEN_LOC   = torch.tensor([1.5846, 1.8048, 2.0629], device=device, dtype=torch.float32)
+        _LEN_SCALE = torch.tensor([0.3457, 0.4262, 0.4395], device=device, dtype=torch.float32)
+        data.lengths_scaled = torch.distributions.LogNormal(_LEN_LOC, _LEN_SCALE).sample((B,))  # (B, 3)
+        data.angles_radians = torch.empty(B, 3, device=device).uniform_(torch.pi / 3, 2 * torch.pi / 3)  # (B, 3)
         identity = torch.eye(3, device=device).unsqueeze(0).expand(B, -1, -1)
         data.transformation_matrix = (identity + 0.1 * torch.randn(B, 3, 3, device=device)).float()   # (B, 3, 3)
 
