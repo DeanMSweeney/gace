@@ -87,9 +87,10 @@ def catflow_dict_to_pyg_data(d: dict) -> Data:
         np.array(d["frac_coords"], dtype=np.float32)
     )  # (N_slab, 3)
 
-    lengths_scaled = torch.from_numpy(
-        np.array(d["lengths_scaled"], dtype=np.float32)
-    ).unsqueeze(0)  # (1, 3) → batches to (B, 3)
+    lengths_scaled = (
+        torch.from_numpy(np.array(d["lengths_scaled"], dtype=np.float32))
+        / prim_natoms ** (1 / 3)
+    ).unsqueeze(0)  # (1, 3) → batches to (B, 3), normalised by N^(1/3)
 
     angles_radians = torch.from_numpy(
         np.array(d["angles_radians"], dtype=np.float32)

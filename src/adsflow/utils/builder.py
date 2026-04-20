@@ -10,6 +10,7 @@ import torch
 from torch import Tensor
 from torch_geometric.data import Data
 from typing import Optional, Tuple
+from adsflow.utils.factorized_builders.data_processor import compute_ads_pairwise_distances
 
 def lattice_params_to_matrix(
     lengths: Tensor,
@@ -73,8 +74,14 @@ def lattice_params_to_matrix(
 # -----------------------------------------------------------------------------
 
 def _to_numpy(x):
-    """Convert tensor or array-like to numpy array."""
+    """Convert tensor or array-like to numpy array.
+
+    Casts BFloat16/Float16 tensors to Float32 first, since numpy has no
+    native bfloat16 dtype (common when the trainer runs bf16-mixed precision).
+    """
     if isinstance(x, torch.Tensor):
+        if x.dtype in (torch.bfloat16, torch.float16):
+            x = x.float()
         return x.detach().cpu().numpy()
     return np.asarray(x)
 
@@ -210,7 +217,7 @@ def build_slab_adsorbate(
     return slab + ads
 
 
-def build_forge_batch(
+def forge_catalyst(
     opt_graph,
     write_dir: Optional[str] = None,
     batch_idx: Optional[int] = None,
@@ -295,7 +302,7 @@ def build_forge_batch(
             # --- END DEBUG ---
 
         except Exception as e:
-            print(f"[build_forge_batch] Failed to build graph {b}: {e}")
+            print(f"[forge_catalyst] Failed to build graph {b}: {e}")
             atoms_list.append(None)
 
     opt_graph.gen_pos_all = gen_pos_all
@@ -314,10 +321,10 @@ def build_forge_batch(
     return atoms_list
 
 
-def build_molecule_data(
+def build_graph_from_atoms(
     mol_atoms: Atoms,
     binding_energy: float,
-    n_prim_atoms: int = 3,
+    num_prim_atoms: int = 3,
 ) -> Data:
     """Build a minimal PyG Data object for forge generate mode.
 
@@ -328,12 +335,11 @@ def build_molecule_data(
     Args:
         mol_atoms: ASE Atoms object for the adsorbate molecule.
         binding_energy: Target adsorption energy (eV) used as conditioning signal.
-        n_prim_atoms: Number of primitive catalyst atoms to allocate (placeholder).
+        num_prim_atoms: Number of primitive catalyst atoms to allocate (placeholder).
 
     Returns:
         PyG Data object with all fields required by _sample_forge.
     """
-    from adsflow.utils.catflow_builders.data_processor import compute_ads_pairwise_distances
 
     ads_pos_np = mol_atoms.get_positions().astype(np.float32)    # (N_ads, 3)
     ads_z_np   = mol_atoms.get_atomic_numbers().astype(np.int64) # (N_ads,)
@@ -345,13 +351,13 @@ def build_molecule_data(
     ads_pairwise_dist = compute_ads_pairwise_distances(ads_pos_t)  # (N_ads, 15)
 
     tags = torch.cat([
-        torch.ones(n_prim_atoms, dtype=torch.long),
+        torch.ones(num_prim_atoms, dtype=torch.long),
         torch.full((N_ads,), 2, dtype=torch.long),
     ])  # (N_prim + N_ads,)
 
     return Data(
-        num_nodes=n_prim_atoms + N_ads,
-        pos=torch.zeros(n_prim_atoms, 3),
+        num_nodes=num_prim_atoms + N_ads,
+        pos=torch.zeros(num_prim_atoms, 3),
         tags=tags,
         # Adsorbate conditioning (fixed throughout sampling)
         ads_atomic_numbers=torch.from_numpy(ads_z_np),

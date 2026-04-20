@@ -49,7 +49,7 @@ from typing import Optional, Literal, Union, Tuple
 
 # AdsFlow modules
 from adsflow.helm.lightning import LightFlowMatch
-from adsflow.utils.builder import build_molecule_data
+from adsflow.utils.builder import build_graph_from_atoms
 from adsflow.helm.callbacks import EMACallback
 from adsflow.utils.lmdb_loader import LazyLmdbDataset
 from adsflow.helm.config import Config
@@ -84,7 +84,7 @@ def main(cfg: Config) -> None:
     if cfg.mode == "eval":
         cfg.precision = 32 
     
-    if cfg.run_mlff:
+    if cfg.sampler_cfg.run_mlff:
         declare(">>> Configured for MLFF relaxation on generated samples, setting batch size to 1 ⛷️")
         cfg.batch_size = 1
 
@@ -116,9 +116,9 @@ def main(cfg: Config) -> None:
     # LearningRateMonitor: Track learning rate changes during training
     callbacks.append(LearningRateMonitor(logging_interval="epoch"))
 
-    if cfg.optimizer_hparams.ema_decay is not None:
-        callbacks.append(EMACallback(decay=cfg.optimizer_hparams.ema_decay))
-        declare(f">>> EMA enabled with decay={cfg.optimizer_hparams.ema_decay}")
+    if cfg.optim_cfg.ema_decay is not None:
+        callbacks.append(EMACallback(decay=cfg.optim_cfg.ema_decay))
+        declare(f">>> EMA enabled with decay={cfg.optim_cfg.ema_decay}")
 
     # === Dataset Loading ===
     # Set number of dataloader workers (leave 2 CPU cores free for system)
@@ -200,18 +200,16 @@ def main(cfg: Config) -> None:
 
     # --- Generation Mode ---
     # Build Data object from adsorbate molecule POSCAR + target binding energy
-    elif cfg.mode == "generate" and cfg.in_POS:
+    elif cfg.mode == "generate" and cfg.sampler_cfg.in_POS:
         declare(">>> Activated Generation mode with user adsorbate input")
-        mol_atoms = ase.io.read(cfg.in_POS)
-        n_prim = cfg.n_prim_atoms if cfg.n_prim_atoms is not None else 3
-        binding_e = cfg.target_binding_E if cfg.target_binding_E is not None else 0.0
-        gen_data = build_molecule_data(
+        mol_atoms = ase.io.read(cfg.sampler_cfg.in_POS)
+        initial_graph = build_graph_from_atoms(
             mol_atoms=mol_atoms,
-            binding_energy=binding_e,
-            n_prim_atoms=n_prim,
+            binding_energy=cfg.sampler_cfg.target_binding_E,
+            num_prim_atoms=cfg.sampler_cfg.num_prim_atoms,
         )
         gen_loader = DataLoader(
-            dataset=[gen_data],
+            dataset=[initial_graph],
             batch_size=1,
             num_workers=0,
             pin_memory=pin_memory,
@@ -221,29 +219,17 @@ def main(cfg: Config) -> None:
     # Wrap model in LightningModule for training orchestration
     lightning = LightFlowMatch(
         model=model,
-        variant=cfg.variant,  # Flow matching variant (e.g., conditional, optimal transport)
+        variant=cfg.variant,
         optimal_transport=cfg.optimal_transport,
+        informed_priors=cfg.informed_priors,
         mode=cfg.mode,
         track_grad_norms=cfg.track_grad_norms,
-        rtol=cfg.rtol,  # Relative tolerance for ODE solver
-        atol=cfg.atol,  # Absolute tolerance for ODE solver
-        ode_method=cfg.ode_method,  # ODE solver method (e.g., dopri5, euler)
-        in_POS=cfg.in_POS,  # Input POSCAR path for generation
-        gen_POS=cfg.gen_POS,  # Generated output POSCAR path
-        rlxd_POS=cfg.rlxd_POS,  # Relaxed structure output path
-        config_vasp=cfg.config_vasp,  # VASP configuration for relaxation
-        threshold=cfg.threshold,  # Force convergence threshold
-        x_matching=cfg.x_matching,  # Position matching strategy
-        schedule_type=cfg.interpolant_schedule,  # Interpolant schedule type, 
-        write_eval_metrics=cfg.write_eval_metrics,  # Write evaluation metrics
-        num_integration_steps=cfg.num_integration_steps,  # Iterative refinement passes
-        n_prim_atoms=cfg.n_prim_atoms,
-        target_binding_E=cfg.target_binding_E,
-        **cfg.optimizer_hparams,  # Optimizer hyperparameters (lr, weight_decay, etc.)
-        run_mlff=cfg.run_mlff,
+        x_matching=cfg.x_matching,
+        schedule_type=cfg.interpolant_schedule,
         accelerator=cfg.accelerator,
-        mlff_checkpoint=cfg.mlff_checkpoint,
         seed=cfg.seed,
+        **cfg.sampler_cfg,           # All sampler/generation/MLFF settings
+        **cfg.optim_cfg,     # Optimizer hyperparameters (lr, weight_decay, etc.)
     )
 
     # === Logger Setup ===
@@ -270,7 +256,7 @@ def main(cfg: Config) -> None:
         num_nodes=cfg.num_nodes,  # Number of compute nodes
         strategy=cfg.strategy,  # Distributed strategy (ddp, deepspeed, etc.)
         precision=cfg.precision,  # Mixed precision (16-mixed, 32, bf16-mixed)
-        max_epochs=cfg.optimizer_hparams.max_epochs,
+        max_epochs=cfg.optim_cfg.max_epochs,
         accumulate_grad_batches=cfg.accumulate_grad_batches,  # Gradient accumulation steps
         val_check_interval=cfg.val_check_interval,  # Validation frequency
         log_every_n_steps=10,

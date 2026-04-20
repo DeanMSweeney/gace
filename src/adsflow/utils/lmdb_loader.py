@@ -36,7 +36,7 @@ from fairchem.core.datasets.base_dataset import BaseDataset
 from fairchem.core.modules.transforms import DataTransforms
 
 from adsflow.utils.is2s_builders.pyg_converter import dict_to_pyg_data
-from adsflow.utils.catflow_builders.pyg_converter import catflow_dict_to_pyg_data
+from adsflow.utils.factorized_builders.pyg_converter import catflow_dict_to_pyg_data
 
 if TYPE_CHECKING:
     from pathlib import Path

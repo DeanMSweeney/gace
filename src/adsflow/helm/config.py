@@ -118,6 +118,96 @@ class OptimizerConfig:
 
     
 @dataclass
+class SamplerConfig:
+    """
+    Configuration for ODE-based sampling and structure generation.
+
+    Contains all hyperparameters for ODE integration and generation settings
+    used at inference time (eval and generate modes).
+    """
+
+    # ==================== ODE Solver Settings ====================
+
+    rtol: float = 1e-7
+    """Relative tolerance for adaptive ODE solver (controls accuracy)
+    Smaller values → higher accuracy but slower integration
+    """
+
+    atol: float = 1e-9
+    """Absolute tolerance for adaptive ODE solver (controls accuracy)
+    Smaller values → higher accuracy but slower integration
+    """
+
+    ode_method: str = "dopri5"
+    """
+    ODE integration method for sampling (torchdiffeq):
+    - "dopri5": Dormand-Prince 5th order (adaptive, recommended)
+    - "euler": Forward Euler (fast but inaccurate)
+    - "rk4": 4th order Runge-Kutta (fixed step, accurate)
+    - "adaptive_heun": 2nd order adaptive (good speed/accuracy tradeoff)
+    """
+
+    num_integration_steps: int = 10
+    """Number of integration steps for ODE solver (for inference)
+    - 1: single-step integration
+    - >1: multi-step integration for higher accuracy
+    """
+
+    # ==================== Evaluation ====================
+
+    threshold: Optional[float] = 0.20
+    """Distance threshold (Angstroms) for computing evaluation metrics
+    Used for Distance within Threshold (DwT) and ADwT metrics
+    E.g., 0.20 = count atoms within 0.2 Angstroms of target position
+    """
+
+    write_eval_metrics: bool = False
+    """Whether to write evaluation metrics to file"""
+
+    # ==================== Structure Generation ====================
+
+    num_generated_samples: int = 1
+    """Number of catalyst structures to generate at the target binding energy.
+    Each sample is an independent ODE integration from a fresh noise draw.
+    Output files are indexed as {batch_idx}_{sample_idx}_{b}.vasp.
+    """
+
+    target_binding_E: Optional[float] = None
+    """Target adsorption binding energy (eV) for structure generation.
+    Passed to the model as a conditioning signal during forge sampling."""
+
+    num_prim_atoms: Optional[int] = 3
+    """Number of primitive atoms per graph to use during forge sampling.
+    If None, uses the atom count from the data. Set to e.g. 3 to force smaller unit cells."""
+
+    # ==================== Structure Generation/Output ====================
+
+    in_POS: Optional[str] = None
+    """Path to adsorbate molecule POSCAR for generate mode, or initial structure
+    path for saving during testing (POSCAR format).
+    """
+
+    gen_POS: Optional[str] = None
+    """Output path for saving generated (model-predicted) structures during testing"""
+
+    rlxd_POS: Optional[str] = None
+    """Output path for saving relaxed (ground truth) structures during testing"""
+
+    config_vasp: bool = False
+    """Whether to generate VASP DFT input files for generated structures
+    Creates INCAR, KPOINTS, POTCAR files for DFT verification workflow
+    """
+
+    # ==================== MLFF Relaxation ====================
+
+    run_mlff: bool = False
+    """Whether to run MLFF relaxation after generation"""
+
+    mlff_checkpoint: str = "EquiformerV2-153M-S2EF-OC20-All+MD"
+    """Path to MLFF checkpoint for relaxation"""
+
+
+@dataclass
 class Config:
     """
     Main configuration for AdsFlow training pipeline.
@@ -144,7 +234,7 @@ class Config:
     - GemNet-OC: embedding dimensions, interaction blocks, etc.
     """
 
-    optimizer_hparams: OptimizerConfig = field(default_factory=OptimizerConfig)
+    optim_cfg: OptimizerConfig = field(default_factory=OptimizerConfig)
     """Optimizer and learning rate scheduler configuration"""
 
     # ==================== Dataset Paths ====================
@@ -288,6 +378,7 @@ class Config:
     """
 
     optimal_transport: bool = False
+    informed_priors: bool = True
     """
     Whether to apply optimal transport (Hungarian algorithm) to align noise x0
     with targets x1 before interpolation, minimising transport cost per modality.
@@ -296,75 +387,10 @@ class Config:
     Not applied to atom types (corruption-mask scheme; alignment has no effect).
     """
 
-    # ==================== ODE Solver Settings (for Inference) ====================
+    # ==================== Sampler Settings (for Inference) ====================
 
-    rtol: float = 1e-7
-    """Relative tolerance for adaptive ODE solver (controls accuracy)
-    Smaller values → higher accuracy but slower integration
-    """
-
-    atol: float = 1e-9
-    """Absolute tolerance for adaptive ODE solver (controls accuracy)
-    Smaller values → higher accuracy but slower integration
-    """
-
-    ode_method: str = "dopri5"
-    """
-    ODE integration method for sampling (torchdiffeq):
-    - "dopri5": Dormand-Prince 5th order (adaptive, recommended)
-    - "euler": Forward Euler (fast but inaccurate)
-    - "rk4": 4th order Runge-Kutta (fixed step, accurate)
-    - "adaptive_heun": 2nd order adaptive (good speed/accuracy tradeoff)
-    """
-
-    threshold: Optional[float] = 0.20
-    """Distance threshold (Angstroms) for computing evaluation metrics
-    Used for Distance within Threshold (DwT) and ADwT metrics
-    E.g., 0.20 = count atoms within 0.2 Angstroms of target position
-    """
-
-    num_integration_steps: int = 10
-    """Number of integration steps for ODE solver (for inference)
-    - 1: single-step integration (default, current behavior)
-    - >1: multi-step integration for higher accuracy
-    """
-
-    # ==================== Structure Generation/Output ====================
-
-    in_POS: Optional[str] = None
-    """Path to adsorbate molecule POSCAR for generate mode, or initial structure
-    path for saving during testing (POSCAR format).
-    """
-
-    target_binding_E: Optional[float] = None
-    """Target adsorption binding energy (eV) for structure generation.
-    Passed to the model as a conditioning signal during forge sampling."""
-
-    gen_POS: Optional[str] = None
-    """Output path for saving generated (model-predicted) structures during testing"""
-
-    n_prim_atoms: Optional[int] = 3
-    """Number of primitive atoms per graph to use during forge sampling.
-    If None, uses the atom count from the data. Set to e.g. 3 to force smaller unit cells."""
-
-    rlxd_POS: Optional[str] = None
-    """Output path for saving relaxed (ground truth) structures during testing"""
-
-    config_vasp: bool = False
-    """Whether to generate VASP DFT input files for generated structures
-    Creates INCAR, KPOINTS, POTCAR files for DFT verification workflow
-    """
-
-    write_eval_metrics: bool = False
-    """Whether to write evaluation metrics to file"""
-
-    # ==================== MLFF Relaxation ====================
-
-    run_mlff: bool = False
-    """Whether to run MLFF relaxation after generation"""
-
-    mlff_checkpoint: str = "EquiformerV2-153M-S2EF-OC20-All+MD"
-    """Path to MLFF checkpoint for relaxation"""
+    sampler_cfg: SamplerConfig = field(default_factory=SamplerConfig)
+    """ODE solver, evaluation, and structure generation settings used at inference time"""
 
     # ==================== Miscellaneous ====================
 
