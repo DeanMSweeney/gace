@@ -435,7 +435,11 @@ class XMatching():
                 x0 = torch.randn_like(x1, dtype=torch.float32)  # N(0, 1)
 
             if self.optimal_transport:
+                print("Before OT")
+                print(x1)
                 x1 = batched_ot_align(source=x0, target=x1, batch=data.batch[self.primitive_mask], pbc_aware=True)
+                print("After OT")
+                print(x1)
             u_x = x1 - x0 
             u_x_n0 = torch.round(u_x)
             u_x = u_x - u_x_n0
