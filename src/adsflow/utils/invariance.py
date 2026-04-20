@@ -100,36 +100,38 @@ def pbc_aware_delta(
         return u_mic
 
 def batched_ot_align(
-    x0: Tensor,
-    x1: Tensor,
+    source: Tensor,
+    target: Tensor,
     batch: Tensor,
     pbc_aware: bool = False,
 ) -> Tensor:
     """
     Per-graph optimal transport alignment of sparse atom tensors.
 
-    For each graph b, finds the permutation of x0 atoms that minimises total
-    L2 transport cost to x1 atoms. Atoms in different graphs are never matched
-    against each other.
+    For each graph b, finds the permutation of target atoms that minimises total
+    L2 transport cost to source atoms. Source (noise) is never modified — only
+    the target (true structure) is permuted. This ensures x0 remains an
+    unmodified Gaussian draw at both train and inference time.
 
     Args:
-        x0:        (N_total, D) noise tensor
-        x1:        (N_total, D) target tensor
+        source:    (N_total, D) noise tensor — used as reference, never permuted
+        target:    (N_total, D) true structure tensor — permuted to align with source
         batch:     (N_total,) graph index for each atom
         pbc_aware: if True, applies minimum-image convention before computing
-                   distances (use for fractional coordinates in [0, 1])
+                   distances (use for fractional coordinates)
 
     Returns:
-        x0_aligned: (N_total, D) x0 with rows permuted per-graph to minimise
-                    transport cost to x1
+        target_aligned: (N_total, D) target with rows permuted per-graph so that
+                        target_aligned[j] ≈ source[j] for every atom j
     """
     # Densify sparse atoms → (B, N_max, D) with boolean mask (True = real atom)
-    x0_dense, mask = to_dense_batch(x0, batch)  # (B, N_max, D), (B, N_max)
-    x1_dense, _    = to_dense_batch(x1, batch)  # (B, N_max, D)
-    B, N_max, D = x0_dense.shape
+    target_dense, mask = to_dense_batch(target, batch)  # (B, N_max, D), (B, N_max)
+    source_dense, _    = to_dense_batch(source, batch)  # (B, N_max, D)
+    B, N_max, D = target_dense.shape
 
-    # diff[b, i, j] = x1[b, j] - x0[b, i]
-    diff = x1_dense.unsqueeze(1) - x0_dense.unsqueeze(2)  # (B, N_max, N_max, D)
+    # diff[b, i, j] = source[b, j] - target[b, i]
+    # cost[b, i, j] = distance from target atom i to source atom j
+    diff = source_dense.unsqueeze(1) - target_dense.unsqueeze(2)  # (B, N_max, N_max, D)
 
     if pbc_aware:
         diff = diff - torch.round(diff)  # minimum image in fractional coords
@@ -139,18 +141,21 @@ def batched_ot_align(
     # Exclude padding slots from the assignment
     INF = 1e9
     pad = ~mask  # (B, N_max)
-    cost = cost.masked_fill(pad.unsqueeze(2), INF)  # x0 padding rows
-    cost = cost.masked_fill(pad.unsqueeze(1), INF)  # x1 padding cols
+    cost = cost.masked_fill(pad.unsqueeze(2), INF)  # target padding rows
+    cost = cost.masked_fill(pad.unsqueeze(1), INF)  # source padding cols
 
     # Solve B independent assignment problems
-    # assignment[b, i] = j  →  x0[b, i] is matched to x1[b, j]
+    # assignment[b, i] = j  →  target atom i is matched to source atom j
     assignment = batch_linear_assignment(cost)  # (B, N_max)
 
-    # Scatter: x0_aligned[b, assignment[b,i]] = x0[b, i]
-    x0_aligned_dense = torch.zeros_like(x0_dense)
+    # Scatter target into aligned positions:
+    #   target_aligned[b, assignment[b,i], :] = target[b, i, :]
+    # → target_aligned[j] holds the target atom matched to source[j]
+    # → target_aligned[j] ≈ source[j]
+    target_aligned_dense = torch.zeros_like(target_dense)
     idx = assignment.unsqueeze(-1).expand(B, N_max, D)
-    x0_aligned_dense.scatter_(1, idx, x0_dense)
+    target_aligned_dense.scatter_(1, idx, target_dense)
 
     # Return sparse (N_total, D)
-    return x0_aligned_dense[mask]
+    return target_aligned_dense[mask]
    

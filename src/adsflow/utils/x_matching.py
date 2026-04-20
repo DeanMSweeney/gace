@@ -435,7 +435,7 @@ class XMatching():
                 x0 = torch.randn_like(x1, dtype=torch.float32)  # N(0, 1)
 
             if self.optimal_transport:
-                x0 = batched_ot_align(x0, x1, batch=data.batch[self.primitive_mask], pbc_aware=True)
+                x1 = batched_ot_align(source=x0, target=x1, batch=data.batch[self.primitive_mask], pbc_aware=True)
             u_x = x1 - x0 
             u_x_n0 = torch.round(u_x)
             u_x = u_x - u_x_n0
@@ -489,7 +489,7 @@ class XMatching():
         adsRELP0 = torch.randn_like(adsRELP1)  # N(0, 1)
 
         if self.optimal_transport:
-            adsRELP0 = batched_ot_align(adsRELP0, adsRELP1, batch=data.batch[self.adsorbate_mask], pbc_aware=False)
+            adsRELP1 = batched_ot_align(source=adsRELP0, target=adsRELP1, batch=data.batch[self.adsorbate_mask], pbc_aware=False)
 
         t_COM_per_graph = t
         t_COM = t_COM_per_graph # B, 1
