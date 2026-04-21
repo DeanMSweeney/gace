@@ -196,7 +196,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--out",
-        default=str(Path(__file__).parent / "results" / "dist_thresholds.txt"),
+        default=str(Path(__file__).parent / "dist_thresholds.txt"),
         help="Output .txt file path",
     )
     args = parser.parse_args()
