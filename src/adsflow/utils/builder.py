@@ -294,7 +294,7 @@ def forge_catalyst(
                 vacuum=15.0,
             )
 
-            print(atoms.get_positions())
+            print("CAT POSITIONS:", atoms.get_positions())
 
             cat_atoms_list.append(atoms)
             prim_atoms_list.append(prim_atoms)
