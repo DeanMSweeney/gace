@@ -8,15 +8,13 @@ Method 2: minimum (dist / sum_covalent_radii) ratio  →  informs the 0.50 fract
 Outputs a summary to stdout and writes results/dist_thresholds.txt.
 
 Usage:
-    python compute_dist_thresholds.py --lmdb /path/to/data.lmdb [--limit N] [--workers N]
+    python compute_dist_thresholds.py --lmdb /path/to/data.lmdb [--limit N]
 """
 
 import sys
 import pickle
 import argparse
-import os
 from pathlib import Path
-from multiprocessing import Pool
 
 # Numpy compatibility shim (data pickled with numpy>=1.25)
 import numpy, numpy.core  # noqa: E401
@@ -37,40 +35,25 @@ from ase.data import covalent_radii
 from tqdm import tqdm
 
 
-def _numpy_shim():
-    import numpy, numpy.core
-    if not hasattr(numpy, "_core"):
-        numpy._core = numpy.core
-        import pkgutil
-        for _, modname, _ in pkgutil.walk_packages(
-            numpy.core.__path__, prefix="numpy.core.", onerror=lambda x: None
-        ):
-            alias = modname.replace("numpy.core", "numpy._core")
-            if modname in sys.modules:
-                sys.modules[alias] = sys.modules[modname]
-
-
 def _to_np(x):
+    """Convert tensor / numpy array / list to plain numpy float64 array."""
     try:
         return np.array(x.cpu().numpy(), dtype=np.float64)
     except AttributeError:
         return np.array(x, dtype=np.float64)
 
 
-def _process_raw(raw: bytes) -> tuple[float, float] | tuple[None, None]:
-    """Unpickle one LMDB entry and compute (min_dist_m1, min_ratio_m2)."""
-    _numpy_shim()
-    import numpy as np
-    from ase import Atoms
-    from ase.data import covalent_radii
-
+def process_structure(data) -> tuple[float | None, float | None]:
+    """
+    Return (min_dist_method1, min_ratio_method2) for catalyst atoms only.
+    Returns (None, None) if the structure has fewer than 2 catalyst atoms.
+    """
     try:
-        data = pickle.loads(raw)
-        tags    = np.array(data.tags,           dtype=int).flatten()
-        pos     = np.array(data.pos,            dtype=np.float64)
-        numbers = np.array(data.atomic_numbers, dtype=int).flatten()
-        cell    = np.array(data.cell,           dtype=np.float64).reshape(3, 3)
-    except Exception:
+        tags    = _to_np(data.tags).astype(int).flatten()
+        pos     = _to_np(data.pos)
+        numbers = _to_np(data.atomic_numbers).astype(int).flatten()
+        cell    = _to_np(data.cell).reshape(3, 3)
+    except AttributeError:
         return None, None
 
     cat_mask = tags != 2
@@ -99,7 +82,7 @@ def _process_raw(raw: bytes) -> tuple[float, float] | tuple[None, None]:
     return min_dist, min_ratio
 
 
-def run(lmdb_path: str, limit: int | None, workers: int, out_file: Path) -> None:
+def run(lmdb_path: str, limit: int | None, out_file: Path) -> None:
     env = lmdb.open(
         lmdb_path,
         subdir=False,
@@ -107,7 +90,6 @@ def run(lmdb_path: str, limit: int | None, workers: int, out_file: Path) -> None
         lock=False,
         readahead=False,
         meminit=False,
-        max_readers=workers + 1,
     )
 
     with env.begin() as txn:
@@ -115,30 +97,30 @@ def run(lmdb_path: str, limit: int | None, workers: int, out_file: Path) -> None
         n_total = pickle.loads(length_entry) if length_entry is not None else env.stat()["entries"]
 
     n_scan = n_total if limit is None else min(limit, n_total)
-    print(f"Scanning {n_scan} / {n_total} entries  |  workers: {workers}")
+    print(f"Scanning {n_scan} / {n_total} entries from {lmdb_path}")
 
-    print("Reading raw bytes from LMDB...")
+    min_dists_m1: list[float] = []
+    min_ratios_m2: list[float] = []
+    n_skipped = 0
+
     with env.begin() as txn:
-        raws = []
-        for idx in tqdm(range(n_scan), desc="Reading", ncols=100):
+        for idx in tqdm(range(n_scan), desc="Processing", ncols=100):
             raw = txn.get(str(idx).encode("ascii"))
-            if raw is not None:
-                raws.append(raw)
+            if raw is None:
+                n_skipped += 1
+                continue
+
+            data = pickle.loads(raw)
+            m1, m2 = process_structure(data)
+
+            if m1 is None:
+                n_skipped += 1
+                continue
+
+            min_dists_m1.append(m1)
+            min_ratios_m2.append(m2)
+
     env.close()
-
-    print(f"Processing {len(raws)} entries in parallel...")
-    chunksize = max(1, len(raws) // (workers * 8))
-    with Pool(processes=workers) as pool:
-        results = list(tqdm(
-            pool.imap(_process_raw, raws, chunksize=chunksize),
-            total=len(raws),
-            desc="Processing",
-            ncols=100,
-        ))
-
-    min_dists_m1 = [m1 for m1, _ in results if m1 is not None]
-    min_ratios_m2 = [m2 for _, m2 in results if m2 is not None]
-    n_skipped = len(raws) - len(min_dists_m1)
 
     n_valid = len(min_dists_m1)
     print(f"\nValid structures : {n_valid}  |  Skipped : {n_skipped}")
@@ -165,7 +147,6 @@ def run(lmdb_path: str, limit: int | None, workers: int, out_file: Path) -> None
         f"LMDB            : {lmdb_path}",
         f"Structures used : {n_valid}",
         f"Structures limit: {limit if limit is not None else 'all'}",
-        f"Workers         : {workers}",
         "=" * 70,
         "",
         "METHOD 1 — raw minimum pairwise distance (Å)",
@@ -214,12 +195,6 @@ def main() -> None:
         help="Max number of structures to scan (default: all)",
     )
     parser.add_argument(
-        "--workers",
-        type=int,
-        default=os.cpu_count(),
-        help="Number of worker processes (default: cpu_count)",
-    )
-    parser.add_argument(
         "--out",
         default=str(Path(__file__).parent / "results" / "dist_thresholds.txt"),
         help="Output .txt file path",
@@ -229,7 +204,6 @@ def main() -> None:
     run(
         lmdb_path=args.lmdb,
         limit=args.limit,
-        workers=args.workers,
         out_file=Path(args.out),
     )
 
