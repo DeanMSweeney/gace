@@ -8,13 +8,15 @@ Method 2: minimum (dist / sum_covalent_radii) ratio  →  informs the 0.50 fract
 Outputs a summary to stdout and writes results/dist_thresholds.txt.
 
 Usage:
-    python compute_dist_thresholds.py --lmdb /path/to/data.lmdb [--limit N]
+    python compute_dist_thresholds.py --lmdb /path/to/data.lmdb [--limit N] [--workers N]
 """
 
 import sys
 import pickle
 import argparse
+import os
 from pathlib import Path
+from multiprocessing import Pool
 
 # Numpy compatibility shim (data pickled with numpy>=1.25)
 import numpy, numpy.core  # noqa: E401
@@ -35,65 +37,69 @@ from ase.data import covalent_radii
 from tqdm import tqdm
 
 
+def _numpy_shim():
+    import numpy, numpy.core
+    if not hasattr(numpy, "_core"):
+        numpy._core = numpy.core
+        import pkgutil
+        for _, modname, _ in pkgutil.walk_packages(
+            numpy.core.__path__, prefix="numpy.core.", onerror=lambda x: None
+        ):
+            alias = modname.replace("numpy.core", "numpy._core")
+            if modname in sys.modules:
+                sys.modules[alias] = sys.modules[modname]
+
+
 def _to_np(x):
-    """Convert tensor / numpy array / list to plain numpy float32 array."""
     try:
         return np.array(x.cpu().numpy(), dtype=np.float64)
     except AttributeError:
         return np.array(x, dtype=np.float64)
 
 
-def process_structure(data) -> tuple[float | None, float | None]:
-    """
-    Return (min_dist_method1, min_ratio_method2) for catalyst atoms only.
-    Returns (None, None) if the structure has fewer than 2 catalyst atoms.
-    """
+def _process_raw(raw: bytes) -> tuple[float, float] | tuple[None, None]:
+    """Unpickle one LMDB entry and compute (min_dist_m1, min_ratio_m2)."""
+    _numpy_shim()
+    import numpy as np
+    from ase import Atoms
+    from ase.data import covalent_radii
+
     try:
-        tags = _to_np(data.tags).astype(int).flatten()
-        pos = _to_np(data.pos)                   # (N, 3)
-        numbers = _to_np(data.atomic_numbers).astype(int).flatten()
-        cell = _to_np(data.cell).reshape(3, 3)   # (3, 3)
-    except AttributeError:
+        data = pickle.loads(raw)
+        tags    = np.array(data.tags,           dtype=int).flatten()
+        pos     = np.array(data.pos,            dtype=np.float64)
+        numbers = np.array(data.atomic_numbers, dtype=int).flatten()
+        cell    = np.array(data.cell,           dtype=np.float64).reshape(3, 3)
+    except Exception:
         return None, None
 
-    # Catalyst mask: tags 0 (sub-surface) and 1 (surface)
     cat_mask = tags != 2
-    n_cat = cat_mask.sum()
-    if n_cat < 2:
+    if cat_mask.sum() < 2:
         return None, None
 
-    cat_pos = pos[cat_mask]
-    cat_numbers = numbers[cat_mask]
-
-    # Build ASE Atoms for catalyst subset (PBC on)
     atoms = Atoms(
-        numbers=cat_numbers,
-        positions=cat_pos,
+        numbers=numbers[cat_mask],
+        positions=pos[cat_mask],
         cell=cell,
         pbc=True,
     )
 
-    dists = atoms.get_all_distances(mic=True)   # (n_cat, n_cat)
+    dists = atoms.get_all_distances(mic=True)
     np.fill_diagonal(dists, np.inf)
 
-    # Method 1: raw minimum distance (Å)
     min_dist = float(dists.min())
 
-    # Method 2: minimum distance normalised by summed covalent radii
-    radii = covalent_radii[cat_numbers]          # (n_cat,)
-    sum_radii = radii[:, None] + radii[None, :]  # (n_cat, n_cat)
-    # Zero sum_radii means one/both atoms have undefined covalent radius in ASE;
-    # treat those pairs as non-clashing by mapping them to inf before dividing.
-    sum_radii[sum_radii == 0.0] = np.inf
-    # Do NOT fill diagonal of sum_radii: dists diagonal is already inf,
-    # so inf / (2*r_i) = inf cleanly. inf/inf would produce nan.
-    ratio = dists / sum_radii
+    radii     = covalent_radii[numbers[cat_mask]]
+    sum_radii = radii[:, None] + radii[None, :]
+    sum_radii[sum_radii == 0.0] = np.inf  # undefined covalent radius → skip pair
+    # leave sum_radii diagonal finite: inf/finite = inf, avoiding inf/inf = nan
+    ratio     = dists / sum_radii
     min_ratio = float(ratio.min())
 
     return min_dist, min_ratio
 
 
-def run(lmdb_path: str, limit: int | None, out_file: Path) -> None:
+def run(lmdb_path: str, limit: int | None, workers: int, out_file: Path) -> None:
     env = lmdb.open(
         lmdb_path,
         subdir=False,
@@ -101,6 +107,7 @@ def run(lmdb_path: str, limit: int | None, out_file: Path) -> None:
         lock=False,
         readahead=False,
         meminit=False,
+        max_readers=workers + 1,
     )
 
     with env.begin() as txn:
@@ -108,30 +115,30 @@ def run(lmdb_path: str, limit: int | None, out_file: Path) -> None:
         n_total = pickle.loads(length_entry) if length_entry is not None else env.stat()["entries"]
 
     n_scan = n_total if limit is None else min(limit, n_total)
-    print(f"Scanning {n_scan} / {n_total} entries from {lmdb_path}")
+    print(f"Scanning {n_scan} / {n_total} entries  |  workers: {workers}")
 
-    min_dists_m1: list[float] = []
-    min_ratios_m2: list[float] = []
-    n_skipped = 0
-
+    print("Reading raw bytes from LMDB...")
     with env.begin() as txn:
-        for idx in tqdm(range(n_scan), desc="Processing"):
+        raws = []
+        for idx in tqdm(range(n_scan), desc="Reading", ncols=100):
             raw = txn.get(str(idx).encode("ascii"))
-            if raw is None:
-                n_skipped += 1
-                continue
-
-            data = pickle.loads(raw)
-            m1, m2 = process_structure(data)
-
-            if m1 is None:
-                n_skipped += 1
-                continue
-
-            min_dists_m1.append(m1)
-            min_ratios_m2.append(m2)
-
+            if raw is not None:
+                raws.append(raw)
     env.close()
+
+    print(f"Processing {len(raws)} entries in parallel...")
+    chunksize = max(1, len(raws) // (workers * 8))
+    with Pool(processes=workers) as pool:
+        results = list(tqdm(
+            pool.imap(_process_raw, raws, chunksize=chunksize),
+            total=len(raws),
+            desc="Processing",
+            ncols=100,
+        ))
+
+    min_dists_m1 = [m1 for m1, _ in results if m1 is not None]
+    min_ratios_m2 = [m2 for _, m2 in results if m2 is not None]
+    n_skipped = len(raws) - len(min_dists_m1)
 
     n_valid = len(min_dists_m1)
     print(f"\nValid structures : {n_valid}  |  Skipped : {n_skipped}")
@@ -140,16 +147,16 @@ def run(lmdb_path: str, limit: int | None, out_file: Path) -> None:
     arr_m2 = np.array(min_ratios_m2)
 
     stats = {
-        "method1_mean_min_dist_A":    float(arr_m1.mean()),
-        "method1_median_min_dist_A":  float(np.median(arr_m1)),
-        "method1_p5_min_dist_A":      float(np.percentile(arr_m1, 5)),
-        "method1_p1_min_dist_A":      float(np.percentile(arr_m1, 1)),
-        "method1_min_of_mins_A":      float(arr_m1.min()),
-        "method2_mean_min_ratio":     float(arr_m2.mean()),
-        "method2_median_min_ratio":   float(np.median(arr_m2)),
-        "method2_p5_min_ratio":       float(np.percentile(arr_m2, 5)),
-        "method2_p1_min_ratio":       float(np.percentile(arr_m2, 1)),
-        "method2_min_of_mins_ratio":  float(arr_m2.min()),
+        "method1_mean_min_dist_A":   float(arr_m1.mean()),
+        "method1_median_min_dist_A": float(np.median(arr_m1)),
+        "method1_p5_min_dist_A":     float(np.percentile(arr_m1, 5)),
+        "method1_p1_min_dist_A":     float(np.percentile(arr_m1, 1)),
+        "method1_min_of_mins_A":     float(arr_m1.min()),
+        "method2_mean_min_ratio":    float(arr_m2.mean()),
+        "method2_median_min_ratio":  float(np.median(arr_m2)),
+        "method2_p5_min_ratio":      float(np.percentile(arr_m2, 5)),
+        "method2_p1_min_ratio":      float(np.percentile(arr_m2, 1)),
+        "method2_min_of_mins_ratio": float(arr_m2.min()),
     }
 
     lines = [
@@ -158,6 +165,7 @@ def run(lmdb_path: str, limit: int | None, out_file: Path) -> None:
         f"LMDB            : {lmdb_path}",
         f"Structures used : {n_valid}",
         f"Structures limit: {limit if limit is not None else 'all'}",
+        f"Workers         : {workers}",
         "=" * 70,
         "",
         "METHOD 1 — raw minimum pairwise distance (Å)",
@@ -206,6 +214,12 @@ def main() -> None:
         help="Max number of structures to scan (default: all)",
     )
     parser.add_argument(
+        "--workers",
+        type=int,
+        default=os.cpu_count(),
+        help="Number of worker processes (default: cpu_count)",
+    )
+    parser.add_argument(
         "--out",
         default=str(Path(__file__).parent / "results" / "dist_thresholds.txt"),
         help="Output .txt file path",
@@ -215,6 +229,7 @@ def main() -> None:
     run(
         lmdb_path=args.lmdb,
         limit=args.limit,
+        workers=args.workers,
         out_file=Path(args.out),
     )
 
