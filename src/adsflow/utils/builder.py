@@ -240,7 +240,9 @@ def forge_catalyst(
         batch_idx:   Batch index used to name POSCAR files (`{batch_idx}_{b}.vasp`).
 
     Returns:
-        List of ASE Atoms objects, one per sample in the batch.
+        Tuple of (cat_atoms_list, prim_atoms_list): one ASE Atoms per sample.
+        cat_atoms_list contains the full supercell slab + adsorbate.
+        prim_atoms_list contains the primitive unit cell atoms only.
     """
     prim_mask  = (opt_graph.tags == 1)
     ads_mask   = (opt_graph.tags == 2)
@@ -249,7 +251,8 @@ def forge_catalyst(
     # num_graphs is not set on forge-sampled batches; derive from batch index
     num_graphs = int(opt_graph.batch.max().item()) + 1
 
-    atoms_list = []
+    cat_atoms_list = []
+    prim_atoms_list = []
     gen_pos_all = []
     gen_atomic_numbers_all = []
 
@@ -266,6 +269,17 @@ def forge_catalyst(
             ads_rel = opt_graph.ads_rel_pos_generated[ads_batch == b]     # (N_ads, 3)
             ads_pos = opt_graph.ads_com_generated[b].unsqueeze(0) + ads_rel  # (N_ads, 3)
 
+            cell_np    = _to_numpy(cell)
+            prim_pos_np = _to_numpy(prim_pos)
+            prim_z_np   = _to_numpy(opt_graph.atomic_numbers_generated[prim_batch == b])
+
+            prim_atoms = Atoms(
+                numbers=prim_z_np,
+                positions=prim_pos_np,
+                cell=cell_np,
+                pbc=True,
+            )
+
             # atomic_numbers_generated is already 1-indexed (sampler stores argmax + 1)
             # ads_atomic_numbers is 0-indexed (sampler shifts it down by 1 for internal use)
             atoms = build_slab_adsorbate(
@@ -278,39 +292,30 @@ def forge_catalyst(
                 vacuum=15.0,
             )
 
-            atoms_list.append(atoms)
+            cat_atoms_list.append(atoms)
+            prim_atoms_list.append(prim_atoms)
             gen_pos_all.append(atoms.get_positions())
             gen_atomic_numbers_all.append(atoms.get_atomic_numbers())
 
-            # --- DEBUG: write primitive cell before supercell expansion ---
             if write_dir:
-                cell_np = _to_numpy(cell)
-                prim_pos_np = _to_numpy(prim_pos)
-                prim_z_np = _to_numpy(opt_graph.atomic_numbers_generated[prim_batch == b])
-                prim_atoms = Atoms(
-                    numbers=prim_z_np,
-                    positions=prim_pos_np,
-                    cell=cell_np,
-                    pbc=True,
-                )
                 os.makedirs(write_dir, exist_ok=True)
                 ase.io.write(
                     os.path.join(write_dir, f'{batch_idx}_{b}_prim.vasp'),
                     prim_atoms,
                     format='vasp',
                 )
-            # --- END DEBUG ---
 
         except Exception as e:
             print(f"[forge_catalyst] Failed to build graph {b}: {e}")
-            atoms_list.append(None)
+            cat_atoms_list.append(None)
+            prim_atoms_list.append(None)
 
     opt_graph.gen_pos_all = gen_pos_all
     opt_graph.gen_atomic_numbers_all = gen_atomic_numbers_all
 
     if write_dir:
         os.makedirs(write_dir, exist_ok=True)
-        for b, atoms in enumerate(atoms_list):
+        for b, atoms in enumerate(cat_atoms_list):
             if atoms is not None:
                 ase.io.write(
                     os.path.join(write_dir, f'{batch_idx}_{b}.vasp'),
@@ -318,7 +323,7 @@ def forge_catalyst(
                     format='vasp',
                 )
 
-    return atoms_list
+    return cat_atoms_list, prim_atoms_list
 
 
 def build_graph_from_atoms(

@@ -200,6 +200,11 @@ class SamplerConfig:
 
     # ==================== MLFF Relaxation ====================
 
+    covalent_radii_scale: float = 0.75
+    """Scale factor applied to summed covalent radii for the atom-clash distance check (DIST_METHOD=2).
+    A pair is flagged as clashing if its distance is below covalent_radii_scale * (r_i + r_j).
+    Lower values are more permissive; higher values are stricter."""
+
     run_mlff: bool = False
     """Whether to run MLFF relaxation after generation"""
 
