@@ -74,6 +74,7 @@ def process_structure(data) -> tuple[float | None, float | None]:
 
     radii     = covalent_radii[numbers[cat_mask]]
     sum_radii = radii[:, None] + radii[None, :]
+    print(sum_radii)
     sum_radii[sum_radii == 0.0] = np.inf  # undefined covalent radius → skip pair
     # leave sum_radii diagonal finite: inf/finite = inf, avoiding inf/inf = nan
     ratio     = dists / sum_radii
