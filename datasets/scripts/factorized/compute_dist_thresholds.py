@@ -85,7 +85,8 @@ def process_structure(data) -> tuple[float | None, float | None]:
     # Zero sum_radii means one/both atoms have undefined covalent radius in ASE;
     # treat those pairs as non-clashing by mapping them to inf before dividing.
     sum_radii[sum_radii == 0.0] = np.inf
-    np.fill_diagonal(sum_radii, np.inf)
+    # Do NOT fill diagonal of sum_radii: dists diagonal is already inf,
+    # so inf / (2*r_i) = inf cleanly. inf/inf would produce nan.
     ratio = dists / sum_radii
     min_ratio = float(ratio.min())
 
