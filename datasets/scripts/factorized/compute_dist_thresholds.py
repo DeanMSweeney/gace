@@ -82,7 +82,10 @@ def process_structure(data) -> tuple[float | None, float | None]:
     # Method 2: minimum distance normalised by summed covalent radii
     radii = covalent_radii[cat_numbers]          # (n_cat,)
     sum_radii = radii[:, None] + radii[None, :]  # (n_cat, n_cat)
-    np.fill_diagonal(sum_radii, np.inf)          # avoid divide-by-zero on diagonal
+    # Zero sum_radii means one/both atoms have undefined covalent radius in ASE;
+    # treat those pairs as non-clashing by mapping them to inf before dividing.
+    sum_radii[sum_radii == 0.0] = np.inf
+    np.fill_diagonal(sum_radii, np.inf)
     ratio = dists / sum_radii
     min_ratio = float(ratio.min())
 
