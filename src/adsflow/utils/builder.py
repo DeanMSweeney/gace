@@ -280,6 +280,8 @@ def forge_catalyst(
                 pbc=True,
             )
 
+            print(prim.get_positions())
+
             # atomic_numbers_generated is already 1-indexed (sampler stores argmax + 1)
             # ads_atomic_numbers is 0-indexed (sampler shifts it down by 1 for internal use)
             atoms = build_slab_adsorbate(
@@ -291,6 +293,8 @@ def forge_catalyst(
                 ads_atomic_numbers=opt_graph.ads_atomic_numbers[ads_batch == b] + 1,
                 vacuum=15.0,
             )
+
+            print(atoms.get_positions())
 
             cat_atoms_list.append(atoms)
             prim_atoms_list.append(prim_atoms)
