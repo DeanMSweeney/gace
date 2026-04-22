@@ -104,6 +104,7 @@ def batched_ot_align(
     target: Tensor,
     batch: Tensor,
     pbc_aware: bool = False,
+    return_assignment: bool = False,
 ) -> Tensor:
     """
     Per-graph optimal transport alignment of sparse atom tensors.
@@ -156,6 +157,8 @@ def batched_ot_align(
     idx = assignment.unsqueeze(-1).expand(B, N_max, D)
     target_aligned_dense.scatter_(1, idx, target_dense)
 
-    # Return sparse (N_total, D)
+    # Return sparse (N_total, D), optionally also return the (B, N_max) assignment
+    if return_assignment:
+        return target_aligned_dense[mask], assignment
     return target_aligned_dense[mask]
    
