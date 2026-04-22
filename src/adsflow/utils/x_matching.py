@@ -269,11 +269,27 @@ class XMatching():
         len1 = data.lengths_scaled.float()  # (B, 3)
         ang1 = data.angles_radians.float()  # (B, 3)
 
-        len0 = torch.randn_like(len1)  # N(0, 1) — appropriate after N^(1/3) normalisation
+        len0 = torch.empty_like(len1).uniform_(1.5, 5.0)  # Uniform(1.5, 5.0) — always positive, covers typical scaled lengths
         if self.informed_priors:
             ang0 = torch.empty_like(ang1).uniform_(torch.pi / 3, 2 * torch.pi / 3)  # Uniform(60°, 120°)
         else:
             ang0 = torch.randn_like(ang1)  # N(0, 1)
+
+        if self.optimal_transport:
+            B = len1.shape[0]
+            device = len1.device
+            lat_batch = torch.arange(B, device=device).repeat_interleave(3)  # (B*3,)
+            len1_aligned, lat_assignment = batched_ot_align(
+                source=len0.reshape(-1, 1),
+                target=len1.reshape(-1, 1),
+                batch=lat_batch,
+                pbc_aware=False,
+                return_assignment=True,
+            )
+            len1 = len1_aligned.reshape(B, 3)
+            ang1_aligned = torch.zeros_like(ang1)
+            ang1_aligned.scatter_(1, lat_assignment, ang1)
+            ang1 = ang1_aligned
 
         t_len_per_graph = t # B, 1
         t_len = t_len_per_graph
@@ -647,11 +663,11 @@ class XMatching():
         if self.informed_priors:
             data.pos = torch.rand_like(data.pos)                            # Uniform[0,1) — fractional coords on torus
             data.angles_radians = torch.empty(B, 3, device=device).uniform_(torch.pi / 3, 2 * torch.pi / 3)  # Uniform(60°, 120°)
-            data.lengths_scaled = torch.randn(B, 3, device=device)
+            data.lengths_scaled = torch.empty(B, 3, device=device).uniform_(1.5, 5.0)
         else:
             data.pos            = torch.randn_like(data.pos)                # N(0, 1)
             data.angles_radians = torch.randn(B, 3, device=device)         # N(0, 1)
-            data.lengths_scaled = torch.randn(B, 3, device=device) * n_scale   # N(0, 1) in normalised space
+            data.lengths_scaled = torch.randn(B, 3, device=device)  # N(0, 1) in normalised space
             
         identity = torch.eye(3, device=device).unsqueeze(0).expand(B, -1, -1)
         data.transformation_matrix = (identity + 0.1 * torch.randn(B, 3, 3, device=device)).float()   # (B, 3, 3)
