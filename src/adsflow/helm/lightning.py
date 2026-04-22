@@ -170,7 +170,7 @@ class LightFlowMatch(LightningModule, XMatching):
             data: PyG Data/Batch with all forge fields populated.
 
         Returns:
-            Dict with keys: pos, z, len, ang, M, ads_com, ads_rel_pos.
+            Dict with keys: pos, z, len, ang, M, ads_pos.
         """
         wrapper = PyGToTensorDict()
         x_prim, x_ads, t_prim, t_ads, f_prim, f_ads = wrapper.to_tensordict(data)
@@ -190,26 +190,24 @@ class LightFlowMatch(LightningModule, XMatching):
                 x_prim.data["supercell_lattice"],      # (B, 3, 3)
             ),
             x_ads=(
-                x_ads.data["ads_atomic_numbers"],      # (B, N, 1)
-                x_ads.data["ads_com"],                 # (B, 1, 3)
-                x_ads.data["ads_rel_pos"],             # (B, N, 3)
+                x_ads.data["ads_atomic_numbers"],      # (B, N)
+                x_ads.data["ads_pos"],                 # (B, N, 3)
                 x_ads.data["ads_pairwise_dist"],       # (B, N, D)
             ),
             t_prim=(t, t, t, t),
-            t_ads=(t, t),
+            t_ads=(t,),
             feats={"ads_binding_energy": f_prim.data["ads_binding_energy"]},
             prim_padding_mask=prim_padding_mask,
             ads_padding_mask=ads_padding_mask,
         )
 
         return {
-            "pos":         x_prim.to_sparse(pred_prim[1]),   # (N_prim, 3)
-            "z":           x_prim.to_sparse(pred_prim[0]),   # (N_prim, 118)
-            "len":         pred_prim[2].squeeze(1),          # (B, 3)
-            "ang":         pred_prim[3].squeeze(1),          # (B, 3)
-            "M":           pred_prim[4],                     # (B, 3, 3)
-            "ads_com":     pred_ads[0].squeeze(1),           # (B, 3)
-            "ads_rel_pos": x_ads.to_sparse(pred_ads[1]),     # (N_ads, 3)
+            "pos":     x_prim.to_sparse(pred_prim[1]),   # (N_prim, 3)
+            "z":       x_prim.to_sparse(pred_prim[0]),   # (N_prim, 118)
+            "len":     pred_prim[2].squeeze(1),          # (B, 3)
+            "ang":     pred_prim[3].squeeze(1),          # (B, 3)
+            "M":       pred_prim[4],                     # (B, 3, 3)
+            "ads_pos": x_ads.to_sparse(pred_ads[0]),     # (N_ads, 3)
         }
 
     def _transport_loss(self, input_graph: Data) -> torch.Tensor:
