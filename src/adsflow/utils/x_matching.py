@@ -269,11 +269,12 @@ class XMatching():
         len1 = data.lengths_scaled.float()  # (B, 3)
         ang1 = data.angles_radians.float()  # (B, 3)
 
-        len0 = torch.empty_like(len1).uniform_(1.5, 5.0)  # Uniform(1.5, 5.0) — always positive, covers typical scaled lengths
         if self.informed_priors:
             ang0 = torch.empty_like(ang1).uniform_(torch.pi / 3, 2 * torch.pi / 3)  # Uniform(60°, 120°)
+            len0 = torch.empty_like(len1).uniform_(1.5, 5.0)  # Uniform(1.5, 5.0) — always positive, covers typical scaled lengths
         else:
             ang0 = torch.randn_like(ang1)  # N(0, 1)
+            len0 = torch.randn_like(len1)  # N(0, 1)
 
         t_len_per_graph = t # B, 1
         t_len = t_len_per_graph
