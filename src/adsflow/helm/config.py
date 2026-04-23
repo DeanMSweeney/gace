@@ -391,7 +391,7 @@ class Config:
     Not applied to atom types (corruption-mask scheme; alignment has no effect).
     """
 
-    informed_priors: bool = True
+    informed_priors: bool = False
     """
     Whether to use informed priors for the noise x0 (forge variant only).
     """
