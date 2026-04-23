@@ -266,8 +266,7 @@ def forge_catalyst(
             frac     = opt_graph.pos_generated[prim_batch == b]           # (N_prim, 3)
             prim_pos = frac @ cell                                         # (N_prim, 3) Cartesian
 
-            ads_rel = opt_graph.ads_rel_pos_generated[ads_batch == b]     # (N_ads, 3)
-            ads_pos = opt_graph.ads_com_generated[b].unsqueeze(0) + ads_rel  # (N_ads, 3)
+            ads_pos = opt_graph.ads_pos_generated[ads_batch == b]     # (N_ads, 3)
 
             cell_np    = _to_numpy(cell)
             prim_pos_np = _to_numpy(prim_pos)
