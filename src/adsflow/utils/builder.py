@@ -279,7 +279,6 @@ def forge_catalyst(
                 pbc=True,
             )
 
-            print("PRIM POSITIONS:", prim_atoms.get_positions())
 
             # atomic_numbers_generated is already 1-indexed (sampler stores argmax + 1)
             # ads_atomic_numbers is 0-indexed (sampler shifts it down by 1 for internal use)
@@ -293,7 +292,6 @@ def forge_catalyst(
                 vacuum=15.0,
             )
 
-            print("CAT POSITIONS:", atoms.get_positions())
 
             cat_atoms_list.append(atoms)
             prim_atoms_list.append(prim_atoms)
