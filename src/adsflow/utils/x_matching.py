@@ -275,22 +275,6 @@ class XMatching():
         else:
             ang0 = torch.randn_like(ang1)  # N(0, 1)
 
-        if self.optimal_transport:
-            B = len1.shape[0]
-            device = len1.device
-            lat_batch = torch.arange(B, device=device).repeat_interleave(3)  # (B*3,)
-            len1_aligned, lat_assignment = batched_ot_align(
-                source=len0.reshape(-1, 1),
-                target=len1.reshape(-1, 1),
-                batch=lat_batch,
-                pbc_aware=False,
-                return_assignment=True,
-            )
-            len1 = len1_aligned.reshape(B, 3)
-            ang1_aligned = torch.zeros_like(ang1)
-            ang1_aligned.scatter_(1, lat_assignment, ang1)
-            ang1 = ang1_aligned
-
         t_len_per_graph = t # B, 1
         t_len = t_len_per_graph
 
