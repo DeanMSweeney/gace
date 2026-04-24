@@ -109,21 +109,21 @@ def batched_ot_align(
     """
     Per-graph optimal transport alignment of sparse atom tensors.
 
-    For each graph b, finds the permutation of target atoms that minimises total
-    L2 transport cost to source atoms. Source (noise) is never modified — only
-    the target (true structure) is permuted. This ensures x0 remains an
-    unmodified Gaussian draw at both train and inference time.
+    For each graph b, finds the permutation of source atoms that minimises total
+    L2 transport cost to target atoms. Target (data) is never modified — only
+    the source (noise) is permuted. This ensures x1 remains an
+    unmodified data draw at both train and inference time.
 
     Args:
-        source:    (N_total, D) noise tensor — used as reference, never permuted
-        target:    (N_total, D) true structure tensor — permuted to align with source
+        source:    (N_total, D) noise tensor — permuted to align with target
+        target:    (N_total, D) true structure tensor — used as reference, never permuted
         batch:     (N_total,) graph index for each atom
         pbc_aware: if True, applies minimum-image convention before computing
                    distances (use for fractional coordinates)
 
     Returns:
-        target_aligned: (N_total, D) target with rows permuted per-graph so that
-                        target_aligned[j] ≈ source[j] for every atom j
+        source_aligned: (N_total, D) source with rows permuted per-graph so that
+                        source_aligned[i] ≈ target[i] for every atom i
     """
     # Densify sparse atoms → (B, N_max, D) with boolean mask (True = real atom)
     target_dense, mask = to_dense_batch(target, batch)  # (B, N_max, D), (B, N_max)
@@ -149,16 +149,15 @@ def batched_ot_align(
     # assignment[b, i] = j  →  target atom i is matched to source atom j
     assignment = batch_linear_assignment(cost)  # (B, N_max)
 
-    # Scatter target into aligned positions:
-    #   target_aligned[b, assignment[b,i], :] = target[b, i, :]
-    # → target_aligned[j] holds the target atom matched to source[j]
-    # → target_aligned[j] ≈ source[j]
-    target_aligned_dense = torch.zeros_like(target_dense)
+    # Gather source into aligned positions:
+    #   source_aligned[b, i, :] = source[b, assignment[b,i], :]
+    # → source_aligned[i] holds the source atom matched to target[i]
+    # → source_aligned[i] ≈ target[i]
     idx = assignment.unsqueeze(-1).expand(B, N_max, D)
-    target_aligned_dense.scatter_(1, idx, target_dense)
+    source_aligned_dense = torch.gather(source_dense, 1, idx)
 
     # Return sparse (N_total, D), optionally also return the (B, N_max) assignment
     if return_assignment:
-        return target_aligned_dense[mask], assignment
-    return target_aligned_dense[mask]
+        return source_aligned_dense[mask], assignment
+    return source_aligned_dense[mask]
    

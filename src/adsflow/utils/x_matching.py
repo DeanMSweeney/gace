@@ -436,9 +436,9 @@ class XMatching():
                 x0 = torch.randn_like(x1, dtype=torch.float32)  # N(0, 1)
 
             if self.optimal_transport:
-                x1, data.prim_ot_assignment = batched_ot_align(
+                x0 = batched_ot_align(
                     source=x0, target=x1, batch=data.batch[self.primitive_mask],
-                    pbc_aware=True, return_assignment=True,
+                    pbc_aware=True, return_assignment=False,
                 )
 
             u_x = x1 - x0 
@@ -490,16 +490,10 @@ class XMatching():
         ads_pos0 = torch.randn_like(ads_pos1)                           # N(0,1) prior
 
         if self.optimal_transport:
-            ads_pos1, ads_assignment = batched_ot_align(
+            ads_pos0 = batched_ot_align(
                 source=ads_pos0, target=ads_pos1, batch=ads_batch,
-                pbc_aware=False, return_assignment=True,
+                pbc_aware=False, return_assignment=False,
             )
-            # Apply the same permutation to adsorbate atom types
-            z_dense, ads_mask = to_dense_batch(data.ads_atomic_numbers.float(), ads_batch)  # (B, N_max)
-            B_a, N_max_a = z_dense.shape
-            z_aligned = torch.zeros_like(z_dense)
-            z_aligned.scatter_(1, ads_assignment, z_dense)
-            data.ads_atomic_numbers = z_aligned[ads_mask].long()
 
         t_ads = t[ads_batch]  # (N_ads, 1)
         alpha_t_ads, alpha_t_ads_grad, _ = self._interpolant_schedule(
@@ -542,17 +536,6 @@ class XMatching():
         # shift atomic numbers to start from 0, not 1 
         # z1 only pertains to the primitive cell 
         z1 = (data.atomic_numbers.long() - 1).unsqueeze(1)  # (N_prim, 1)
-
-        # Apply the same OT permutation that was applied to positions so that
-        # atom type z1[i] stays associated with position x1[i] after reordering.
-        if self.optimal_transport and hasattr(data, "prim_ot_assignment"):
-            prim_batch = data.batch[self.primitive_mask]
-            z1_dense, prim_mask = to_dense_batch(z1.squeeze(1), prim_batch)  # (B, N_max)
-            B, N_max = z1_dense.shape
-            assignment = data.prim_ot_assignment  # (B, N_max)
-            z1_aligned = torch.zeros_like(z1_dense)
-            z1_aligned.scatter_(1, assignment, z1_dense)
-            z1 = z1_aligned[prim_mask].unsqueeze(1)  # (N_prim, 1)
 
         # Prior: random atomic number indices (much more efficient than one-hot)
         z0 = torch.randint(low=0, high=NUM_CLASSES, size=(z1.size(0), 1), device=device)  # N, 1
@@ -685,11 +668,11 @@ class XMatching():
                 pred = self._forge_forward(data)
 
             # Update continuous modalities
-            data.pos               = euler_step(data.pos,               pred["pos"],     t_curr, dt)
-            data.lengths_scaled    = euler_step(data.lengths_scaled,    pred["len"],     t_curr, dt)
-            data.angles_radians    = euler_step(data.angles_radians,    pred["ang"],     t_curr, dt)
-            data.transformation_matrix = euler_step(data.transformation_matrix, pred["M"], t_curr, dt)
-            data.ads_pos = euler_step(data.ads_pos, pred["ads_pos"], t_curr, dt)
+            data.pos               = euler_step(data.pos,               pred["pos"],     t_curr, dt, pbc_aware=True)
+            data.lengths_scaled    = euler_step(data.lengths_scaled,    pred["len"],     t_curr, dt, pbc_aware=False)
+            data.angles_radians    = euler_step(data.angles_radians,    pred["ang"],     t_curr, dt, pbc_aware=False)
+            data.transformation_matrix = euler_step(data.transformation_matrix, pred["M"], t_curr, dt, pbc_aware=False)
+            data.ads_pos = euler_step(data.ads_pos, pred["ads_pos"], t_curr, dt, pbc_aware=False)
 
             # Update discrete atom types (CTMC)
             data.atomic_numbers_hot = ctmc_step(data.atomic_numbers_hot, pred["z"], t_curr, dt)

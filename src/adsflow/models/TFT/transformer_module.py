@@ -106,8 +106,8 @@ class TransformerModule(nn.Module):
 
         self.input_dim = spatial_dim + atom_dim
         self.time_dim = 1
-        self.prim_cond_dim = 8  # atom_types, frac_coords, lengths, angles, T_matrix, supercell_lattice, posenc, conditions
-        self.ads_cond_dim = 5   # ads_atom_types, ads_pos, ads_pairwise_dist, posenc, conditions
+        self.prim_cond_dim = 9  # atom_types, frac_coords, cart_coords, lengths, angles, T_matrix, supercell_lattice, posenc, conditions
+        self.ads_cond_dim = 6   # ads_atom_types, ads_pos, ads_pairwise_dist, supercell_lattice, posenc, conditions
         self.comb_input_dim = self.input_dim + self.time_dim
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
@@ -128,6 +128,7 @@ class TransformerModule(nn.Module):
         # Embeddings for each the primitive cell
         self.atom_type_embed = nn.Embedding(atom_dim, hidden_dim)
         self.frac_coords_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
+        self.cart_coords_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
         self.lengths_scaled_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
         self.angles_radians_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
         self.transformation_matrix_embed = nn.Linear(9, hidden_dim, bias=False) # matrix is 3 x 3 = 9 total values
@@ -336,6 +337,7 @@ class TransformerModule(nn.Module):
             Tuple[
                 Float["b m v"],  # type: ignore - atom_types (soft one-hot simplex)
                 Float["b m 3"],  # type: ignore - frac_coords
+                Float["b m 3"],  # type: ignore - cart_coords
                 Float["b 1 3"],  # type: ignore - lengths_scaled
                 Float["b 1 3"],  # type: ignore - angles_radians
                 Float["b 3 3"],  # type: ignore - transformation_matrix
@@ -407,8 +409,8 @@ class TransformerModule(nn.Module):
             ``(pred_prim, pred_ads, pred_aux)``
         """
 
-        # primitive cell data at time t 
-        atom_types, frac_coords, lengths_scaled, angles_radians, transformation_matrix, supercell_lattice = x_prim
+        # primitive cell data at time t
+        atom_types, frac_coords, cart_coords, lengths_scaled, angles_radians, transformation_matrix, supercell_lattice = x_prim
         atom_types_t, frac_coords_t, lengths_scaled_t, angles_radians_t = t_prim
 
 
@@ -430,6 +432,7 @@ class TransformerModule(nn.Module):
         # ── Prim embeddings ──────────────────────────────────────────────────
         embed_atom_types = self.atom_type_embed(atom_types.argmax(dim=-1))  # (B, M, C)
         embed_frac_coords = self.frac_coords_embed(frac_coords)            # (B, M, C)
+        embed_cart_coords = self.cart_coords_embed(cart_coords)            # (B, M, C)
         embed_lengths_scaled = self.lengths_scaled_embed(lengths_scaled)    # (B, 1, C)
         embed_angles_radians = self.angles_radians_embed(angles_radians)    # (B, 1, C)
         # transformation_matrix: (B, 3, 3) → flatten to (B, 9) → embed → (B, C) → unsqueeze → (B, 1, C)
@@ -488,18 +491,20 @@ class TransformerModule(nn.Module):
             h_in_prim = torch.cat([
                 embed_atom_types,               # (B, M, C)
                 embed_frac_coords,              # (B, M, C)
+                embed_cart_coords,              # (B, M, C)
                 embed_lengths_scaled_bc,        # (B, M, C)
                 embed_angles_radians_bc,        # (B, M, C)
                 embed_transformation_matrix_bc, # (B, M, C)
                 embed_supercell_lattice_bc,     # (B, M, C)
                 embed_posenc_prim,              # (B, M, C)
                 embed_conditions_prim,          # (B, M, C)
-            ], dim=-1)  # (B, M, 8*C)
+            ], dim=-1)  # (B, M, 9*C)
             h_in_prim = self.combine_input_prim(h_in_prim)  # (B, M, C)
         else:
             h_in_prim = (
                 embed_atom_types             # (B, M, C)
                 + embed_frac_coords          # (B, M, C)
+                + embed_cart_coords          # (B, M, C)
                 + embed_lengths_scaled       # (B, 1, C) → broadcasts
                 + embed_angles_radians       # (B, 1, C) → broadcasts
                 + embed_transformation_matrix # (B, 1, C) → broadcasts
