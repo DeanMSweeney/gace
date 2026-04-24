@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from torch import Tensor
 
 
-def euler_step(x_t: Tensor, x1_pred: Tensor, t_scalar: float, dt: float) -> Tensor:
+def euler_step(x_t: Tensor, x1_pred: Tensor, t_scalar: float, dt: float, pbc_aware: bool = False) -> Tensor:
     """Endpoint-matching Euler step for a continuous modality.
 
     Computes the velocity as (x1_pred - x_t) / (1 - t) and advances by dt.
@@ -29,7 +29,8 @@ def euler_step(x_t: Tensor, x1_pred: Tensor, t_scalar: float, dt: float) -> Tens
         Updated state at time t + dt.
     """
     delta = x1_pred - x_t
-    delta = delta - torch.round(delta)
+    if pbc_aware:
+        delta = delta - torch.round(delta)
     velocity = delta / (1 - t_scalar + 1e-8)
     return x_t + velocity * dt
 
