@@ -184,6 +184,7 @@ class LightFlowMatch(LightningModule, XMatching):
             x_prim=(
                 x_prim.data["atomic_numbers_hot"],     # (B, M, 118)
                 x_prim.data["frac_coords"],            # (B, M, 3)
+                x_prim.data["cart_coords"],            # (B, M, 3)
                 x_prim.data["lengths_scaled"],         # (B, 1, 3)
                 x_prim.data["angles_radians"],         # (B, 1, 3)
                 x_prim.data["transformation_matrix"],  # (B, 3, 3)
