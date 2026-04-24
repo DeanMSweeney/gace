@@ -28,7 +28,9 @@ def euler_step(x_t: Tensor, x1_pred: Tensor, t_scalar: float, dt: float) -> Tens
     Returns:
         Updated state at time t + dt.
     """
-    velocity = (x1_pred - x_t) / (1 - t_scalar + 1e-8)
+    delta = x1_pred - x_t
+    delta = delta - torch.round(delta)
+    velocity = delta / (1 - t_scalar + 1e-8)
     return x_t + velocity * dt
 
 
