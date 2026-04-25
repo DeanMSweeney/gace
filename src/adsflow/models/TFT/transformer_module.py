@@ -541,6 +541,7 @@ class TransformerModule(nn.Module):
         padding_mask = torch.cat([prim_padding_mask, ads_padding_mask], dim=1)  # (B, M+N)
 
         pos_ids = torch.arange(total_seq_len, device=device).unsqueeze(0).repeat(batch_size, 1)
+        ads_pos_ids = pos_ids[:, prim_seq_len:]  # true positions of ads tokens in combined sequence
         attention_kwargs = {"pos_ids": pos_ids}
 
         if self.implementation == "transformer":
@@ -600,10 +601,16 @@ class TransformerModule(nn.Module):
 
             out_atom_types = self.out_atom_types(h_atom)
             out_frac_coords = self.out_frac_coords(h_frac_coords)
-            out_lengths_scaled = self.out_lengths_scaled(h_lengths_scaled.mean(-2, keepdim=True))
-            out_angles_radians = self.out_angles_radians(h_angles_radians.mean(-2, keepdim=True))
+            prim_mask_f = prim_real_mask.unsqueeze(-1).float()  # (B, M, 1)
+            prim_n = prim_mask_f.sum(-2, keepdim=True).clamp(min=1)
+            out_lengths_scaled = self.out_lengths_scaled(
+                (h_lengths_scaled * prim_mask_f).sum(-2, keepdim=True) / prim_n
+            )
+            out_angles_radians = self.out_angles_radians(
+                (h_angles_radians * prim_mask_f).sum(-2, keepdim=True) / prim_n
+            )
             out_transformation_matrix = self.out_transformation_matrix(
-                h_transformation_matrix.mean(-2)
+                (h_transformation_matrix * prim_mask_f).sum(-2) / prim_n.squeeze(-2)
             ).reshape(batch_size, 3, 3)  # (B, 9) → (B, 3, 3)
 
             # Ads cross-attention — single head for absolute positions
@@ -612,6 +619,7 @@ class TransformerModule(nn.Module):
                 h_in,
                 tgt_key_padding_mask=ads_padding_mask,
                 memory_key_padding_mask=padding_mask,
+                query_pos_ids=ads_pos_ids,
                 **attention_kwargs,
             )
             out_pos = self.out_pos(h_pos)  # (B, N, 3)
@@ -619,10 +627,16 @@ class TransformerModule(nn.Module):
         else:
             out_atom_types = self.out_atom_types(h_out_prim)
             out_frac_coords = self.out_frac_coords(h_out_prim)
-            out_lengths_scaled = self.out_lengths_scaled(h_out_prim.mean(-2, keepdim=True))
-            out_angles_radians = self.out_angles_radians(h_out_prim.mean(-2, keepdim=True))
+            prim_mask_f = prim_real_mask.unsqueeze(-1).float()  # (B, M, 1)
+            prim_n = prim_mask_f.sum(-2, keepdim=True).clamp(min=1)
+            out_lengths_scaled = self.out_lengths_scaled(
+                (h_out_prim * prim_mask_f).sum(-2, keepdim=True) / prim_n
+            )
+            out_angles_radians = self.out_angles_radians(
+                (h_out_prim * prim_mask_f).sum(-2, keepdim=True) / prim_n
+            )
             out_transformation_matrix = self.out_transformation_matrix(
-                h_out_prim.mean(-2)
+                (h_out_prim * prim_mask_f).sum(-2) / prim_n.squeeze(-2)
             ).reshape(batch_size, 3, 3)  # (B, 9) → (B, 3, 3)
 
             out_pos = self.out_pos(h_out_ads)  # (B, N, 3)
@@ -685,11 +699,15 @@ class TransformerModule(nn.Module):
             h_global_energy = self.global_energy_proj(h_global_energy)
             h_atomic_forces = self.atomic_forces_proj(h_atomic_forces)
 
-        h_global_property_pooled = h_global_property.mean(-2, keepdim=True)
+        combined_mask_f = combined_real_mask.unsqueeze(-1).float()  # (B, M+N, 1)
+        combined_n = combined_mask_f.sum(-2, keepdim=True).clamp(min=1)
+        h_global_property_pooled = (
+            (h_global_property * combined_mask_f).sum(-2, keepdim=True) / combined_n
+        )
         h_global_energy_pooled = (
-            h_global_energy.sum(-2, keepdim=True)
+            (h_global_energy * combined_mask_f).sum(-2, keepdim=True)
             if self.sum_pool_energy
-            else h_global_energy.mean(-2, keepdim=True)
+            else (h_global_energy * combined_mask_f).sum(-2, keepdim=True) / combined_n
         )
 
         global_property = self.global_property_head(h_global_property_pooled) * global_mask
