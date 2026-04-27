@@ -476,18 +476,20 @@ class XMatching():
         """
         Flow-match adsorbate absolute positions (forge variant only).
 
-        Reconstructs absolute Cartesian positions from stored COM + rel_pos,
-        then flows a single position tensor from N(0,1) to the true positions.
+        Path, loss, and integration all run in z-scored space (using
+        self.ads_pos_mean / self.ads_pos_std as per-axis stats). Denormalization
+        back to raw Å happens only at the very end of _sample_forge.
 
         Stores on data:
-            data.ads_pos        ← interpolated positions x_t (model input)
-            data.ads_pos_target ← true positions x_1 (supervision target)
+            data.ads_pos        ← interpolated positions x_t (normalized, model input)
+            data.ads_pos_target ← true positions x_1 (normalized, supervision target)
         """
         ads_batch = data.batch[self.adsorbate_mask]  # (N_ads,)
 
-        # Reconstruct absolute Cartesian positions: x = COM + rel_pos
-        ads_pos1 = data.ads_com[ads_batch] + data.ads_rel_pos.float()  # (N_ads, 3)
-        ads_pos0 = torch.randn_like(ads_pos1)                           # N(0,1) prior
+        # Read absolute Cartesian target and z-score with dataset stats
+        ads_pos1 = data.ads_pos.float()                                  # (N_ads, 3) raw Å
+        ads_pos1 = (ads_pos1 - self.ads_pos_mean) / self.ads_pos_std     # normalized
+        ads_pos0 = torch.randn_like(ads_pos1)                            # N(0,1) prior in normalized space
 
         if self.optimal_transport:
             ads_pos0 = batched_ot_align(
@@ -611,7 +613,7 @@ class XMatching():
         data.ads_atomic_numbers = data.ads_atomic_numbers.long() - 1
         N_ads = int(self.adsorbate_mask.sum().item())
 
-        if not build_from_truth: 
+        if not build_from_truth: # TOGGLED ON ONLY FOR TESTING THE BUILD PROCESS, NORMALLY OFF 
             if num_prim_atoms is not None:
                 ads_mask = (data.tags == 2)
                 new_prim_batch = torch.repeat_interleave(
@@ -689,7 +691,8 @@ class XMatching():
         data.angles_generated          = data.angles_radians
         data.transformation_matrix     = data.transformation_matrix.round().long()
         data.M_generated               = data.transformation_matrix
-        data.ads_pos_generated         = data.ref_ads_pos
+        # Denormalize adsorbate positions back to raw Å for output
+        data.ads_pos_generated         = data.ads_pos * self.ads_pos_std + self.ads_pos_mean
 
         return data
 
