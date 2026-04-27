@@ -598,15 +598,16 @@ class XMatching():
         """
 
         build_from_truth = True
+        num_prim_atoms = None
+
+        data = input_graph.clone()
+        device = data.pos.device
+
+        self.primitive_mask = (data.tags == 1)
+        self.adsorbate_mask = (data.tags == 2)
+        B = int(data.batch.max().item()) + 1
 
         if not build_from_truth: 
-            data = input_graph.clone()
-            device = data.pos.device
-
-            self.primitive_mask = (data.tags == 1)
-            self.adsorbate_mask = (data.tags == 2)
-            B = int(data.batch.max().item()) + 1
-
             if num_prim_atoms is not None:
                 ads_mask = (data.tags == 2)
                 new_prim_batch = torch.repeat_interleave(
@@ -657,7 +658,6 @@ class XMatching():
         for i in range(len(t) - 1):
             t_curr = t[i].item()
             dt     = (t[i + 1] - t[i]).item()
-
 
             # Rebuild derived lattice fields from current state
             # lengths_scaled is in normalised space — denormalise before geometry construction
