@@ -597,6 +597,8 @@ class XMatching():
             data with *_generated fields set for each modality.
         """
 
+        build_from_truth = True
+
         if not build_from_truth: 
             data = input_graph.clone()
             device = data.pos.device
