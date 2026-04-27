@@ -655,35 +655,36 @@ class XMatching():
         data.atomic_numbers_hot = F.one_hot(z0_idx, num_classes=NUM_CLASSES).float()  # (N_slab, 100)
 
         # ── Euler integration loop ────────────────────────────────────────────
-        for i in range(len(t) - 1):
-            t_curr = t[i].item()
-            dt     = (t[i + 1] - t[i]).item()
+        if not build_from_truth: 
+            for i in range(len(t) - 1):
+                t_curr = t[i].item()
+                dt     = (t[i + 1] - t[i]).item()
 
-            # Rebuild derived lattice fields from current state
-            # lengths_scaled is in normalised space — denormalise before geometry construction
-            C_t = lattice_params_to_matrix(
-                lengths=data.lengths_scaled * n_scale,  # back to Å
-                angles=data.angles_radians,
-            )  # (B, 3, 3)
-            data.cell             = C_t
-            data.supercell_lattice = torch.bmm(data.transformation_matrix, C_t)
+                # Rebuild derived lattice fields from current state
+                # lengths_scaled is in normalised space — denormalise before geometry construction
+                C_t = lattice_params_to_matrix(
+                    lengths=data.lengths_scaled * n_scale,  # back to Å
+                    angles=data.angles_radians,
+                )  # (B, 3, 3)
+                data.cell             = C_t
+                data.supercell_lattice = torch.bmm(data.transformation_matrix, C_t)
 
-            # Per-graph time for the model
-            data.t = torch.full((B, 1), t_curr, device=device, dtype=torch.float32)
+                # Per-graph time for the model
+                data.t = torch.full((B, 1), t_curr, device=device, dtype=torch.float32)
 
-            # Model forward
-            with torch.no_grad():
-                pred = self._forge_forward(data)
+                # Model forward
+                with torch.no_grad():
+                    pred = self._forge_forward(data)
 
-            # Update continuous modalities
-            data.pos               = euler_step(data.pos,               pred["pos"],     t_curr, dt, pbc_aware=True)
-            data.lengths_scaled    = euler_step(data.lengths_scaled,    pred["len"],     t_curr, dt, pbc_aware=False)
-            data.angles_radians    = euler_step(data.angles_radians,    pred["ang"],     t_curr, dt, pbc_aware=False)
-            data.transformation_matrix = euler_step(data.transformation_matrix, pred["M"], t_curr, dt, pbc_aware=False)
-            data.ads_pos = euler_step(data.ads_pos, pred["ads_pos"], t_curr, dt, pbc_aware=False)
+                # Update continuous modalities
+                data.pos               = euler_step(data.pos,               pred["pos"],     t_curr, dt, pbc_aware=True)
+                data.lengths_scaled    = euler_step(data.lengths_scaled,    pred["len"],     t_curr, dt, pbc_aware=False)
+                data.angles_radians    = euler_step(data.angles_radians,    pred["ang"],     t_curr, dt, pbc_aware=False)
+                data.transformation_matrix = euler_step(data.transformation_matrix, pred["M"], t_curr, dt, pbc_aware=False)
+                data.ads_pos = euler_step(data.ads_pos, pred["ads_pos"], t_curr, dt, pbc_aware=False)
 
-            # Update discrete atom types (CTMC)
-            data.atomic_numbers_hot = ctmc_step(data.atomic_numbers_hot, pred["z"], t_curr, dt)
+                # Update discrete atom types (CTMC)
+                data.atomic_numbers_hot = ctmc_step(data.atomic_numbers_hot, pred["z"], t_curr, dt)
 
         # ── Store generated outputs ───────────────────────────────────────────
         data.pos_generated             = data.pos
