@@ -596,53 +596,59 @@ class XMatching():
         Returns:
             data with *_generated fields set for each modality.
         """
-        data = input_graph.clone()
-        device = data.pos.device
 
-        self.primitive_mask = (data.tags == 1)
-        self.adsorbate_mask = (data.tags == 2)
-        B = int(data.batch.max().item()) + 1
+        if not build_from_truth: 
+            data = input_graph.clone()
+            device = data.pos.device
 
-        if num_prim_atoms is not None:
-            ads_mask = (data.tags == 2)
-            new_prim_batch = torch.repeat_interleave(
-                torch.arange(B, device=device), num_prim_atoms
-            )
-            new_prim_tags = torch.ones(
-                B * num_prim_atoms, dtype=data.tags.dtype, device=device
-            )
-            data.batch = torch.cat([new_prim_batch, data.batch[ads_mask]])
-            data.tags  = torch.cat([new_prim_tags,  data.tags[ads_mask]])
-            data.pos   = torch.zeros(B * num_prim_atoms, 3, device=device)
             self.primitive_mask = (data.tags == 1)
             self.adsorbate_mask = (data.tags == 2)
+            B = int(data.batch.max().item()) + 1
 
-        # Shift ads conditioning to 0-indexed (matches _build_atom_type_path)
-        data.ads_atomic_numbers = data.ads_atomic_numbers.long() - 1
-        N_ads = int(self.adsorbate_mask.sum().item())
-        data.ads_pos = torch.randn(N_ads, 3, device=device)             # N(0, 1)
+            if num_prim_atoms is not None:
+                ads_mask = (data.tags == 2)
+                new_prim_batch = torch.repeat_interleave(
+                    torch.arange(B, device=device), num_prim_atoms
+                )
+                new_prim_tags = torch.ones(
+                    B * num_prim_atoms, dtype=data.tags.dtype, device=device
+                )
+                data.batch = torch.cat([new_prim_batch, data.batch[ads_mask]])
+                data.tags  = torch.cat([new_prim_tags,  data.tags[ads_mask]])
+                data.pos   = torch.zeros(B * num_prim_atoms, 3, device=device)
+                self.primitive_mask = (data.tags == 1)
+                self.adsorbate_mask = (data.tags == 2)
+
+            # Shift ads conditioning to 0-indexed (matches _build_atom_type_path)
+            data.ads_atomic_numbers = data.ads_atomic_numbers.long() - 1
+            N_ads = int(self.adsorbate_mask.sum().item())
+            data.ads_pos = torch.randn(N_ads, 3, device=device)             # N(0, 1)
+
+            # N^(1/3) scale factor for length denormalisation — lengths_scaled is in normalised space
+            n_atoms = num_prim_atoms if num_prim_atoms is not None else int(self.primitive_mask.sum().item() / B)
+            n_scale = torch.full((B, 1), n_atoms ** (1 / 3), device=device, dtype=torch.float32)  # (B, 1)
+
+            # ── Initialise all generated modalities from prior (t = 0) ───────────
+            # Continuous
+            if self.informed_priors:
+                data.pos = torch.rand_like(data.pos)                            # Uniform[0,1) — fractional coords on torus
+                data.angles_radians = torch.empty(B, 3, device=device).uniform_(torch.pi / 3, 2 * torch.pi / 3)  # Uniform(60°, 120°)
+                data.lengths_scaled = torch.empty(B, 3, device=device).uniform_(1.5, 5.0)
+            else:
+                data.pos            = torch.randn_like(data.pos)                # N(0, 1)
+                data.angles_radians = torch.randn(B, 3, device=device)         # N(0, 1)
+                data.lengths_scaled = torch.randn(B, 3, device=device)  # N(0, 1) in normalised space
+                
+            identity = torch.eye(3, device=device).unsqueeze(0).expand(B, -1, -1)
+            data.transformation_matrix = (identity + 0.1 * torch.randn(B, 3, 3, device=device)).float()   # (B, 3, 3)
+
+            # Discrete: uniform random atom type
+            N_prim = int(self.primitive_mask.sum().item())
+            z0_idx = torch.randint(0, NUM_CLASSES, (N_prim,), device=device)
 
         # N^(1/3) scale factor for length denormalisation — lengths_scaled is in normalised space
         n_atoms = num_prim_atoms if num_prim_atoms is not None else int(self.primitive_mask.sum().item() / B)
-        n_scale = torch.full((B, 1), n_atoms ** (1 / 3), device=device, dtype=torch.float32)  # (B, 1)
-
-        # ── Initialise all generated modalities from prior (t = 0) ───────────
-        # Continuous
-        if self.informed_priors:
-            data.pos = torch.rand_like(data.pos)                            # Uniform[0,1) — fractional coords on torus
-            data.angles_radians = torch.empty(B, 3, device=device).uniform_(torch.pi / 3, 2 * torch.pi / 3)  # Uniform(60°, 120°)
-            data.lengths_scaled = torch.empty(B, 3, device=device).uniform_(1.5, 5.0)
-        else:
-            data.pos            = torch.randn_like(data.pos)                # N(0, 1)
-            data.angles_radians = torch.randn(B, 3, device=device)         # N(0, 1)
-            data.lengths_scaled = torch.randn(B, 3, device=device)  # N(0, 1) in normalised space
-            
-        identity = torch.eye(3, device=device).unsqueeze(0).expand(B, -1, -1)
-        data.transformation_matrix = (identity + 0.1 * torch.randn(B, 3, 3, device=device)).float()   # (B, 3, 3)
-
-        # Discrete: uniform random atom type
-        N_prim = int(self.primitive_mask.sum().item())
-        z0_idx = torch.randint(0, NUM_CLASSES, (N_prim,), device=device)
+        n_scale = torch.full((B, 1), n_atoms ** (1 / 3), device=device, dtype=torch.float32)  # (B, 1)    
         data.atomic_numbers_hot = F.one_hot(z0_idx, num_classes=NUM_CLASSES).float()  # (N_slab, 100)
 
         # ── Euler integration loop ────────────────────────────────────────────
