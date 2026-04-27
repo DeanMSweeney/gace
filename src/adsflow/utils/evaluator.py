@@ -13,15 +13,16 @@ from typing import Dict
 from adsflow.utils.invariance import pbc_aware_delta
 
 
-def check_validity(atoms: Atoms) -> dict:
+def check_validity(atoms: Atoms, covalent_radii_scale: float = 0.75) -> dict:
     """Check structural validity of a single ASE Atoms object.
 
     Runs two checks:
     - Volume: cell volume >= 0.1 Å³ (guards against degenerate cells)
-    - Distance: no pair closer than 50% of their summed covalent radii (guards against atom clashes)
+    - Distance: no pair closer than covalent_radii_scale * sum of covalent radii
 
     Args:
         atoms: ASE Atoms object to check, or None if build failed.
+        covalent_radii_scale: Fraction of summed covalent radii used as minimum allowed distance.
 
     Returns:
         dict with keys: vol_ok (bool), dist_ok (bool), is_valid (bool).
@@ -35,23 +36,26 @@ def check_validity(atoms: Atoms) -> dict:
     except Exception:
         vol_ok = False
 
-    # Atom clash check
+    # Atom clash check — catalyst atoms only (tags != 2)
     # Toggle method: 1 = ASE fixed cutoff  2 = ASE covalent radii
     DIST_METHOD = 2
     try:
-        if len(atoms) > 1:
+        cat_mask = atoms.get_tags() != 2
+        cat_atoms = atoms[cat_mask]
+        if len(cat_atoms) > 1:
             if DIST_METHOD == 1:
-                dists = atoms.get_all_distances(mic=True)
+                dists = cat_atoms.get_all_distances(mic=True)
                 np.fill_diagonal(dists, np.inf)
                 dist_ok = bool(dists.min() >= 0.5)
 
             elif DIST_METHOD == 2:
-                dists = atoms.get_all_distances(mic=True)
-                numbers = atoms.get_atomic_numbers()
-                radii = covalent_radii[numbers]               # (N,)
-                sum_radii = radii[:, None] + radii[None, :]   # (N, N)
+                dists = cat_atoms.get_all_distances(mic=True)
+                numbers = cat_atoms.get_atomic_numbers()
+                radii = covalent_radii[numbers]               # (N_cat,)
+                sum_radii = radii[:, None] + radii[None, :]   # (N_cat, N_cat)
+                sum_radii[sum_radii == 0.0] = np.inf
                 np.fill_diagonal(dists, np.inf)
-                dist_ok = bool(np.all(dists >= 0.50 * sum_radii))
+                dist_ok = bool(np.all(dists >= covalent_radii_scale * sum_radii))
         else:
             dist_ok = True
     except Exception:

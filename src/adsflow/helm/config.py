@@ -101,7 +101,7 @@ class OptimizerConfig:
     """Loss weight for catalyst atom-type cross-entropy (z_loss)"""
 
     lambda_ads: float = 1.0
-    """Loss weight for adsorbate position losses (ads_com_loss + ads_relp_loss)"""
+    """Loss weight for adsorbate position loss (ads_pos_loss)"""
 
     lambda_lat: float = 1.0
     """Loss weight for primitive-cell lattice parameter losses (len_loss + ang_loss)"""
@@ -199,6 +199,11 @@ class SamplerConfig:
     """
 
     # ==================== MLFF Relaxation ====================
+
+    covalent_radii_scale: float = 0.75
+    """Scale factor applied to summed covalent radii for the atom-clash distance check (DIST_METHOD=2).
+    A pair is flagged as clashing if its distance is below covalent_radii_scale * (r_i + r_j).
+    Lower values are more permissive; higher values are stricter."""
 
     run_mlff: bool = False
     """Whether to run MLFF relaxation after generation"""
@@ -378,13 +383,17 @@ class Config:
     """
 
     optimal_transport: bool = False
-    informed_priors: bool = True
     """
     Whether to apply optimal transport (Hungarian algorithm) to align noise x0
     with targets x1 before interpolation, minimising transport cost per modality.
     Applied to: catalyst positions, adsorbate relative positions, adsorbate COM,
     lattice lengths/angles, and transformation matrix M.
     Not applied to atom types (corruption-mask scheme; alignment has no effect).
+    """
+
+    informed_priors: bool = False
+    """
+    Whether to use informed priors for the noise x0 (forge variant only).
     """
 
     # ==================== Sampler Settings (for Inference) ====================

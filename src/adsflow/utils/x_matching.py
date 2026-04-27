@@ -3,6 +3,7 @@ from torch import Tensor
 from torch_scatter import scatter
 import torch.nn.functional as F
 from torch_geometric.data import Data
+from torch_geometric.utils import to_dense_batch
 from torchdiffeq import odeint
 from typing import Optional, Literal, Union, Tuple
 
@@ -99,8 +100,7 @@ class XMatching():
         ----------
         x_loss      : MAE on catalyst fractional coordinates (endpoint)
         z_loss      : cross-entropy on catalyst atomic numbers (adsorbate types are conditioned)
-        ads_com_loss: MAE on adsorbate centre-of-mass position
-        ads_relp_loss: MAE on adsorbate relative positions
+        ads_pos_loss: MAE on adsorbate absolute Cartesian positions
         len_loss    : MAE on primitive-cell lengths
         ang_loss    : MAE on primitive-cell angles
         M_loss      : MAE on supercell transformation matrix
@@ -134,8 +134,7 @@ class XMatching():
         # ────────────────────────────────────────────────────────────────────────────────────────────────
 
         # ── Adsorbate losses (endpoint) ─────────────────────────────────────────────────────────────────
-        ads_com_loss  = (pred["ads_com"]     - data.ads_com_target).abs().mean()
-        ads_relp_loss = (pred["ads_rel_pos"] - data.ads_rel_pos_target).abs().mean()
+        ads_pos_loss = (pred["ads_pos"] - data.ads_pos_target).abs().mean()
         # ────────────────────────────────────────────────────────────────────────────────────────────────
 
         lambda_x   = float(self.hparams.lambda_x)
@@ -147,20 +146,19 @@ class XMatching():
         total_loss = self.time_weight * (
               lambda_x   * x_loss
             + lambda_z   * z_loss
-            + lambda_ads * (ads_com_loss + ads_relp_loss)
+            + lambda_ads * ads_pos_loss
             + lambda_lat * (len_loss + ang_loss)
             + lambda_M   * M_loss
         )
 
         return {
-            "total_loss":    total_loss,
-            "x_loss":        x_loss,
-            "z_loss":        z_loss,
-            "ads_com_loss":  ads_com_loss,
-            "ads_relp_loss": ads_relp_loss,
-            "len_loss":      len_loss,
-            "ang_loss":      ang_loss,
-            "M_loss":        M_loss,
+            "total_loss":   total_loss,
+            "x_loss":       x_loss,
+            "z_loss":       z_loss,
+            "ads_pos_loss": ads_pos_loss,
+            "len_loss":     len_loss,
+            "ang_loss":     ang_loss,
+            "M_loss":       M_loss,
         }
 
     def path(
@@ -198,10 +196,12 @@ class XMatching():
                 data = self._build_lattice_path(data, t=t)
                 data = self._build_transformation_matrix_path(data, t=t)
                 data = self._build_ads_path(data, t=t)
-                data = self._build_atom_type_path(data, t=t)
 
-            # ── Positions ────────────────────────────────────────────────────
+            # ── Positions (before atom types so OT permutation is available) ─
             data = self._build_positions_path(data, t=t)
+
+            if self.variant == "forge":
+                data = self._build_atom_type_path(data, t=t)
 
             return data
 
@@ -269,11 +269,12 @@ class XMatching():
         len1 = data.lengths_scaled.float()  # (B, 3)
         ang1 = data.angles_radians.float()  # (B, 3)
 
-        len0 = torch.randn_like(len1)  # N(0, 1) — appropriate after N^(1/3) normalisation
         if self.informed_priors:
             ang0 = torch.empty_like(ang1).uniform_(torch.pi / 3, 2 * torch.pi / 3)  # Uniform(60°, 120°)
+            len0 = torch.empty_like(len1).uniform_(1.5, 5.0)  # Uniform(1.5, 5.0) — always positive, covers typical scaled lengths
         else:
             ang0 = torch.randn_like(ang1)  # N(0, 1)
+            len0 = torch.randn_like(len1)  # N(0, 1)
 
         t_len_per_graph = t # B, 1
         t_len = t_len_per_graph
@@ -435,7 +436,10 @@ class XMatching():
                 x0 = torch.randn_like(x1, dtype=torch.float32)  # N(0, 1)
 
             if self.optimal_transport:
-                x1 = batched_ot_align(source=x0, target=x1, batch=data.batch[self.primitive_mask], pbc_aware=True)
+                x0 = batched_ot_align(
+                    source=x0, target=x1, batch=data.batch[self.primitive_mask],
+                    pbc_aware=True, return_assignment=False,
+                )
 
             u_x = x1 - x0 
             u_x_n0 = torch.round(u_x)
@@ -470,63 +474,45 @@ class XMatching():
 
     def _build_ads_path(self, data: Data, t: Tensor, cosine_schd_freq: Tensor=1) -> Data:
         """
-        Flow-match adsorbate positions (forge variant only).
+        Flow-match adsorbate absolute positions (forge variant only).
 
-        x0 = random noise, Hungarian-aligned to x1 for permutation invariance.
-        x1 = true adsorbate positions.
-        xt = (1-t)*x0 + t*x1   (stays on simplex by convexity).
-        Adsorbate atom types are conditioned (fixed to their true value).
+        Path, loss, and integration all run in z-scored space (using
+        self.ads_pos_mean / self.ads_pos_std as per-axis stats). Denormalization
+        back to raw Å happens only at the very end of _sample_forge.
 
         Stores on data:
-            data.pos_noisy  ← argmax(xt)  (integer, for embedding)
-            data.pos        ← same as above (replaces clean labels)
+            data.ads_pos        ← interpolated positions x_t (normalized, model input)
+            data.ads_pos_target ← true positions x_1 (normalized, supervision target)
         """
+        ads_batch = data.batch[self.adsorbate_mask]  # (N_ads,)
 
-        # pyg_converter stores ads_com as (1, 3) per graph → batches to (B, 3)
-        adsCOM1 = data.ads_com.float()       # (B, 3)
-        adsRELP1 = data.ads_rel_pos.float()  # (N_ads_total, 3)
-
-        adsCOM0 = torch.randn_like(adsCOM1)   # N(0, 1)
-        adsRELP0 = torch.randn_like(adsRELP1)  # N(0, 1)
+        # Read absolute Cartesian target and z-score with dataset stats
+        ads_pos1 = data.ads_pos.float()                                  # (N_ads, 3) raw Å
+        ads_pos1 = (ads_pos1 - self.ads_pos_mean) / self.ads_pos_std     # normalized
+        ads_pos0 = torch.randn_like(ads_pos1)                            # N(0,1) prior in normalized space
 
         if self.optimal_transport:
-            adsRELP1 = batched_ot_align(source=adsRELP0, target=adsRELP1, batch=data.batch[self.adsorbate_mask], pbc_aware=False)
+            ads_pos0 = batched_ot_align(
+                source=ads_pos0, target=ads_pos1, batch=ads_batch,
+                pbc_aware=False, return_assignment=False,
+            )
 
-        t_COM_per_graph = t
-        t_COM = t_COM_per_graph # B, 1
-        alpha_t_COM, alpha_t_COM_grad, alpha_t_COM_loss_coeff = self._interpolant_schedule(
-            t=t_COM,
+        t_ads = t[ads_batch]  # (N_ads, 1)
+        alpha_t_ads, alpha_t_ads_grad, _ = self._interpolant_schedule(
+            t=t_ads,
             schedule_type=self.schedule_type,
             x_matching=self.x_matching,
-            v=cosine_schd_freq, 
+            v=cosine_schd_freq,
         )
 
-        t_RELP_per_graph = t # B, 1
-        t_RELP = t_RELP_per_graph[data.batch[self.adsorbate_mask]] # N_ads, 1
-        alpha_t_RELP, alpha_t_RELP_grad, alpha_t_RELP_loss_coeff = self._interpolant_schedule(
-            t=t_RELP,
-            schedule_type=self.schedule_type,
-            x_matching=self.x_matching,
-            v=cosine_schd_freq, 
-        )
+        u_ads = ads_pos1 - ads_pos0
+        ads_pos_t = ads_pos0 + alpha_t_ads * u_ads
 
-        u_COM = adsCOM1 - adsCOM0
-        u_RELP = adsRELP1 - adsRELP0
-
-        # interpolation 
-        adsCOM_t = adsCOM0 + alpha_t_COM * u_COM
-        adsRELP_t = adsRELP0 + alpha_t_RELP * u_RELP
-
-        data.ads_com = adsCOM_t
-        data.ads_rel_pos = adsRELP_t
-        data.ads_com_target = adsCOM1
-        data.ads_rel_pos_target = adsRELP1
+        data.ads_pos = ads_pos_t
+        data.ads_pos_target = ads_pos1
 
         if self.x_matching == "flow":
-            data.u_ads_com = alpha_t_COM_grad * u_COM
-            data.u_ads_rel_pos = alpha_t_RELP_grad * u_RELP
-        
-        # See atom type path for adsorbate atom types 
+            data.u_ads_pos = alpha_t_ads_grad * u_ads
 
         return data
 
@@ -551,16 +537,10 @@ class XMatching():
 
         # shift atomic numbers to start from 0, not 1 
         # z1 only pertains to the primitive cell 
-        z1 = (data.atomic_numbers.long() - 1).unsqueeze(1) # N, 1
+        z1 = (data.atomic_numbers.long() - 1).unsqueeze(1)  # (N_prim, 1)
 
         # Prior: random atomic number indices (much more efficient than one-hot)
         z0 = torch.randint(low=0, high=NUM_CLASSES, size=(z1.size(0), 1), device=device)  # N, 1
-
-        # Hungarian alignment is intentionally skipped for atom types.
-        # The corruption-mask scheme (zt = z0 * corrupt + z1 * (1-corrupt)) means
-        # the model sees either the true type or a random one — the specific random
-        # value in z0 doesn't affect training. Additionally, global cross-graph
-        # atom matching is semantically incorrect.
 
         # Convert to one-hot after alignment
         # F.one_hot expects (N,) input, so squeeze the (N, 1) tensors
@@ -618,6 +598,10 @@ class XMatching():
         Returns:
             data with *_generated fields set for each modality.
         """
+
+        build_from_truth = True
+        num_prim_atoms = None
+
         data = input_graph.clone()
         device = data.pos.device
 
@@ -625,97 +609,90 @@ class XMatching():
         self.adsorbate_mask = (data.tags == 2)
         B = int(data.batch.max().item()) + 1
 
-        if num_prim_atoms is not None:
-            ads_mask = (data.tags == 2)
-            new_prim_batch = torch.repeat_interleave(
-                torch.arange(B, device=device), num_prim_atoms
-            )
-            new_prim_tags = torch.ones(
-                B * num_prim_atoms, dtype=data.tags.dtype, device=device
-            )
-            data.batch = torch.cat([new_prim_batch, data.batch[ads_mask]])
-            data.tags  = torch.cat([new_prim_tags,  data.tags[ads_mask]])
-            data.pos   = torch.zeros(B * num_prim_atoms, 3, device=device)
-            self.primitive_mask = (data.tags == 1)
-            self.adsorbate_mask = (data.tags == 2)
-
         # Shift ads conditioning to 0-indexed (matches _build_atom_type_path)
         data.ads_atomic_numbers = data.ads_atomic_numbers.long() - 1
         N_ads = int(self.adsorbate_mask.sum().item())
-        if self.informed_priors:
-            _COM_MEAN = torch.tensor([ 0.0149, -0.6210,  0.9004], device=device, dtype=torch.float32)
-            _COM_STD  = torch.tensor([ 8.0432,  8.7759,  9.7387], device=device, dtype=torch.float32)
-            data.ads_com = _COM_MEAN + _COM_STD * torch.randn(B, 3, device=device)  # (B, 3) Cartesian Å
-            _RELP_STD = torch.tensor([1.3098, 1.3619, 1.4047], device=device, dtype=torch.float32)
-            data.ads_rel_pos = _RELP_STD * torch.randn(N_ads, 3, device=device)  # (N_ads, 3)
-        else:
-            data.ads_com     = torch.randn_like(data.ads_com)               # N(0, 1)
-            data.ads_rel_pos = torch.randn(N_ads, 3, device=device)         # N(0, 1)
+
+        if not build_from_truth: # TOGGLED ON ONLY FOR TESTING THE BUILD PROCESS, NORMALLY OFF 
+            if num_prim_atoms is not None:
+                ads_mask = (data.tags == 2)
+                new_prim_batch = torch.repeat_interleave(
+                    torch.arange(B, device=device), num_prim_atoms
+                )
+                new_prim_tags = torch.ones(
+                    B * num_prim_atoms, dtype=data.tags.dtype, device=device
+                )
+                data.batch = torch.cat([new_prim_batch, data.batch[ads_mask]])
+                data.tags  = torch.cat([new_prim_tags,  data.tags[ads_mask]])
+                data.pos   = torch.zeros(B * num_prim_atoms, 3, device=device)
+                self.primitive_mask = (data.tags == 1)
+                self.adsorbate_mask = (data.tags == 2)
+
+            # ── Initialise all generated modalities from prior (t = 0) ───────────
+            # Continuous
+            if self.informed_priors:
+                data.pos = torch.rand_like(data.pos)                            # Uniform[0,1) — fractional coords on torus
+                data.angles_radians = torch.empty(B, 3, device=device).uniform_(torch.pi / 3, 2 * torch.pi / 3)  # Uniform(60°, 120°)
+                data.lengths_scaled = torch.empty(B, 3, device=device).uniform_(1.5, 5.0)
+            else:
+                data.pos            = torch.randn_like(data.pos)                # N(0, 1)
+                data.angles_radians = torch.randn(B, 3, device=device)         # N(0, 1)
+                data.lengths_scaled = torch.randn(B, 3, device=device)  # N(0, 1) in normalised space
+        
+            data.ads_pos = torch.randn(N_ads, 3, device=device)             # N(0, 1)
+            identity = torch.eye(3, device=device).unsqueeze(0).expand(B, -1, -1)
+            data.transformation_matrix = (identity + 0.1 * torch.randn(B, 3, 3, device=device)).float()   # (B, 3, 3)
+
+            # Discrete: uniform random atom type
+            N_prim = int(self.primitive_mask.sum().item())
+            z0_idx = torch.randint(0, NUM_CLASSES, (N_prim,), device=device)
+            data.atomic_numbers_hot = F.one_hot(z0_idx, num_classes=NUM_CLASSES).float()  # (N_slab, 100)
 
         # N^(1/3) scale factor for length denormalisation — lengths_scaled is in normalised space
         n_atoms = num_prim_atoms if num_prim_atoms is not None else int(self.primitive_mask.sum().item() / B)
-        n_scale = torch.full((B, 1), n_atoms ** (1 / 3), device=device, dtype=torch.float32)  # (B, 1)
-
-        # ── Initialise all generated modalities from prior (t = 0) ───────────
-        # Continuous
-        if self.informed_priors:
-            data.pos = torch.rand_like(data.pos)                            # Uniform[0,1) — fractional coords on torus
-            data.angles_radians = torch.empty(B, 3, device=device).uniform_(torch.pi / 3, 2 * torch.pi / 3)  # Uniform(60°, 120°)
-        else:
-            data.pos            = torch.randn_like(data.pos)                # N(0, 1)
-            data.angles_radians = torch.randn(B, 3, device=device)         # N(0, 1)
-        data.lengths_scaled = torch.randn(B, 3, device=device)             # N(0, 1) in normalised space
-        identity = torch.eye(3, device=device).unsqueeze(0).expand(B, -1, -1)
-        data.transformation_matrix = (identity + 0.1 * torch.randn(B, 3, 3, device=device)).float()   # (B, 3, 3)
-
-        # Discrete: uniform random atom type
-        N_prim = int(self.primitive_mask.sum().item())
-        z0_idx = torch.randint(0, NUM_CLASSES, (N_prim,), device=device)
-        data.atomic_numbers_hot = F.one_hot(z0_idx, num_classes=NUM_CLASSES).float()  # (N_slab, 100)
+        n_scale = torch.full((B, 1), n_atoms ** (1 / 3), device=device, dtype=torch.float32)  # (B, 1)    
 
         # ── Euler integration loop ────────────────────────────────────────────
-        for i in range(len(t) - 1):
-            t_curr = t[i].item()
-            dt     = (t[i + 1] - t[i]).item()
+        if not build_from_truth: 
+            for i in range(len(t) - 1):
+                t_curr = t[i].item()
+                dt     = (t[i + 1] - t[i]).item()
 
+                # Rebuild derived lattice fields from current state
+                # lengths_scaled is in normalised space — denormalise before geometry construction
+                C_t = lattice_params_to_matrix(
+                    lengths=data.lengths_scaled * n_scale,  # back to Å
+                    angles=data.angles_radians,
+                )  # (B, 3, 3)
+                data.cell             = C_t
+                data.supercell_lattice = torch.bmm(data.transformation_matrix, C_t)
 
-            # Rebuild derived lattice fields from current state
-            # lengths_scaled is in normalised space — denormalise before geometry construction
-            C_t = lattice_params_to_matrix(
-                lengths=data.lengths_scaled * n_scale,  # back to Å
-                angles=data.angles_radians,
-            )  # (B, 3, 3)
-            data.cell             = C_t
-            data.supercell_lattice = torch.bmm(data.transformation_matrix, C_t)
+                # Per-graph time for the model
+                data.t = torch.full((B, 1), t_curr, device=device, dtype=torch.float32)
 
-            # Per-graph time for the model
-            data.t = torch.full((B, 1), t_curr, device=device, dtype=torch.float32)
+                # Model forward
+                with torch.no_grad():
+                    pred = self._forge_forward(data)
 
-            # Model forward
-            with torch.no_grad():
-                pred = self._forge_forward(data)
+                # Update continuous modalities
+                data.pos               = euler_step(data.pos,               pred["pos"],     t_curr, dt, pbc_aware=True)
+                data.lengths_scaled    = euler_step(data.lengths_scaled,    pred["len"],     t_curr, dt, pbc_aware=False)
+                data.angles_radians    = euler_step(data.angles_radians,    pred["ang"],     t_curr, dt, pbc_aware=False)
+                data.transformation_matrix = euler_step(data.transformation_matrix, pred["M"], t_curr, dt, pbc_aware=False)
+                data.ads_pos = euler_step(data.ads_pos, pred["ads_pos"], t_curr, dt, pbc_aware=False)
 
-            # Update continuous modalities
-            data.pos               = euler_step(data.pos,               pred["pos"],     t_curr, dt)
-            data.lengths_scaled    = euler_step(data.lengths_scaled,    pred["len"],     t_curr, dt)
-            data.angles_radians    = euler_step(data.angles_radians,    pred["ang"],     t_curr, dt)
-            data.transformation_matrix = euler_step(data.transformation_matrix, pred["M"], t_curr, dt)
-            data.ads_com     = euler_step(data.ads_com,     pred["ads_com"],     t_curr, dt)
-            data.ads_rel_pos = euler_step(data.ads_rel_pos, pred["ads_rel_pos"], t_curr, dt)
-
-            # Update discrete atom types (CTMC)
-            data.atomic_numbers_hot = ctmc_step(data.atomic_numbers_hot, pred["z"], t_curr, dt)
+                # Update discrete atom types (CTMC)
+                data.atomic_numbers_hot = ctmc_step(data.atomic_numbers_hot, pred["z"], t_curr, dt)
 
         # ── Store generated outputs ───────────────────────────────────────────
         data.pos_generated             = data.pos
-        data.atomic_numbers_generated  = data.atomic_numbers_hot.argmax(dim=-1) + 1  # 1-indexed
+        data.atomic_numbers_generated  = data.atomic_numbers_hot.argmax(dim=-1) + 1 if not build_from_truth else  data.atomic_numbers  # 1-indexed
         data.lengths_generated         = data.lengths_scaled * n_scale  # denormalise back to Å
         data.angles_generated          = data.angles_radians
         data.transformation_matrix     = data.transformation_matrix.round().long()
         data.M_generated               = data.transformation_matrix
-        data.ads_com_generated         = data.ads_com
-        data.ads_rel_pos_generated     = data.ads_rel_pos
-
+        # Denormalize adsorbate positions back to raw Å for output
+        data.ads_pos_generated         = data.ads_pos * self.ads_pos_std + self.ads_pos_mean
 
         return data
 

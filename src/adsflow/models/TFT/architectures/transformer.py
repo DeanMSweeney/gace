@@ -213,6 +213,7 @@ class ModernTransformerDecoderBlock(nn.Module):
         x: torch.Tensor,
         memory: Optional[torch.Tensor] = None,
         pos_ids: Optional[torch.Tensor] = None,
+        query_pos_ids: Optional[torch.Tensor] = None,
         tgt_key_padding_mask: Optional[torch.Tensor] = None,
         memory_key_padding_mask: Optional[torch.Tensor] = None,
         attn_mask: Optional[torch.Tensor] = None,
@@ -223,8 +224,13 @@ class ModernTransformerDecoderBlock(nn.Module):
             x: Input tensor of shape [batch_size, seq_len, dim]
             memory: Optional memory tensor for cross-attention
                 Shape: [batch_size, seq_len, dim]
-            pos_ids: Position ids for rotary embeddings
+            pos_ids: Position ids for rotary embeddings (memory / combined sequence)
                 Shape: [batch_size, seq_len]
+            query_pos_ids: Optional override for query token positions. When provided,
+                used for self-attention pos_ids and as query_pos_ids in cross-attention,
+                so that query tokens whose true positions differ from the front of pos_ids
+                (e.g. adsorbate tokens offset by prim_seq_len) are rotated correctly.
+                Shape: [batch_size, query_seq_len]
             tgt_key_padding_mask: Boolean mask for target padding tokens (True means ignore)
                 Shape: [batch_size, seq_len]
             memory_key_padding_mask: Boolean mask for memory padding tokens (True means ignore)
@@ -235,9 +241,10 @@ class ModernTransformerDecoderBlock(nn.Module):
         Returns:
             Output tensor of shape [batch_size, seq_len, dim]
         """
+        sa_pos_ids = query_pos_ids if query_pos_ids is not None else pos_ids
         h = x + self.self_attention(
             self.self_attention_norm(x),
-            pos_ids=pos_ids,
+            pos_ids=sa_pos_ids,
             padding_mask=tgt_key_padding_mask,
             attn_mask=attn_mask,
         )
@@ -245,6 +252,7 @@ class ModernTransformerDecoderBlock(nn.Module):
             self.cross_attention_norm(h),
             memory=memory,
             pos_ids=pos_ids,
+            query_pos_ids=query_pos_ids,
             padding_mask=memory_key_padding_mask,
             attn_mask=attn_mask,
         )

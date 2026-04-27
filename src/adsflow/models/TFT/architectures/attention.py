@@ -149,6 +149,7 @@ class ModernAttention(nn.Module):
         x: torch.Tensor,
         memory: Optional[torch.Tensor] = None,
         pos_ids: Optional[torch.Tensor] = None,
+        query_pos_ids: Optional[torch.Tensor] = None,
         padding_mask: Optional[torch.Tensor] = None,
         attn_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
@@ -187,7 +188,8 @@ class ModernAttention(nn.Module):
         if self.rotary_emb is not None:
             assert pos_ids is not None, "pos_ids must be provided when using RoPE."
             # NOTE: RoPE expects its inputs to be of shape (B, Seq_Len, H, Head_Dim)
-            q = self.rotary_emb(q, input_pos=pos_ids[:, :seq_len])
+            q_pos = query_pos_ids if query_pos_ids is not None else pos_ids
+            q = self.rotary_emb(q, input_pos=q_pos[:, :seq_len])
             k = self.rotary_emb(k, input_pos=pos_ids[:, :mem_len])
 
         # Transpose for attention calculation: (B, H, Seq_Len, Head_Dim)
