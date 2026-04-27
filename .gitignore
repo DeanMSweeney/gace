@@ -45,6 +45,7 @@ plots/
 *_files/
 mlff_checkpoint_cache/ 
 catflow/
+factorized/
 poscar*/
 analysis/
 .claude/CLAUDE.md
