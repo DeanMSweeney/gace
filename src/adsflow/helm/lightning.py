@@ -95,6 +95,7 @@ class LightFlowMatch(LightningModule, XMatching):
             num_generated_samples: int=1,
             covalent_radii_scale: float=0.75,
             condition_on_binding_E: bool=True,
+            standardize_ads_pos: bool=False,
             ads_pos_mean: list = [0.02587131, -0.69517581, 0.91811687],
             ads_pos_std: list = [8.21663071, 9.02733422, 9.86882174],
             **kwargs,
@@ -142,6 +143,7 @@ class LightFlowMatch(LightningModule, XMatching):
         self.target_binding_E = target_binding_E
         self.num_generated_samples = num_generated_samples
         self.condition_on_binding_E = condition_on_binding_E
+        self.standardize_ads_pos = standardize_ads_pos
 
         # Adsorbate position normalization stats (per-axis), computed offline over training set.
         # Path, loss, and Euler integration run in normalized space; denormalize only at sampling output.

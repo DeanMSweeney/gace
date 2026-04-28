@@ -396,6 +396,14 @@ class Config:
     Whether to use informed priors for the noise x0 (forge variant only).
     """
 
+    standardize_ads_pos: bool = False
+    """
+    Whether to standardize adsorbate positions by subtracting the mean and dividing by
+    the standard deviation before flow matching.
+    - True: adsorbate positions are z-score normalized (zero mean, unit variance)
+    - False: adsorbate positions are used as-is (default)
+    """
+
     condition_on_binding_E: bool = True
     """
     Whether to condition the model on the target adsorption binding energy.
