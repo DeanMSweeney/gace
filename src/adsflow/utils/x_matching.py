@@ -599,7 +599,7 @@ class XMatching():
             data with *_generated fields set for each modality.
         """
 
-        #build_from_truth = True
+        build_from_truth = False
         #num_prim_atoms = None
 
         data = input_graph.clone()
