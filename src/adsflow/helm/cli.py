@@ -223,6 +223,7 @@ def main(cfg: Config) -> None:
         optimal_transport=cfg.optimal_transport,
         informed_priors=cfg.informed_priors,
         condition_on_binding_E=cfg.condition_on_binding_E,
+        standardize_ads_pos=cfg.standardize_ads_pos,
         mode=cfg.mode,
         track_grad_norms=cfg.track_grad_norms,
         x_matching=cfg.x_matching,

@@ -486,10 +486,11 @@ class XMatching():
         """
         ads_batch = data.batch[self.adsorbate_mask]  # (N_ads,)
 
-        # Read absolute Cartesian target and z-score with dataset stats
+        # Read absolute Cartesian target; optionally z-score with dataset stats
         ads_pos1 = data.ads_pos.float()                                  # (N_ads, 3) raw Å
-        ads_pos1 = (ads_pos1 - self.ads_pos_mean) / self.ads_pos_std     # normalized
-        ads_pos0 = torch.randn_like(ads_pos1)                            # N(0,1) prior in normalized space
+        if self.standardize_ads_pos:
+            ads_pos1 = (ads_pos1 - self.ads_pos_mean) / self.ads_pos_std
+        ads_pos0 = torch.randn_like(ads_pos1)                            # N(0,1) prior
 
         if self.optimal_transport:
             ads_pos0 = batched_ot_align(
@@ -691,8 +692,11 @@ class XMatching():
         data.angles_generated          = data.angles_radians
         data.transformation_matrix     = data.transformation_matrix.round().long()
         data.M_generated               = data.transformation_matrix
-        # Denormalize adsorbate positions back to raw Å for output
-        data.ads_pos_generated         = data.ads_pos * self.ads_pos_std + self.ads_pos_mean
+        # Denormalize adsorbate positions back to raw Å for output (only if standardized)
+        if self.standardize_ads_pos:
+            data.ads_pos_generated = data.ads_pos * self.ads_pos_std + self.ads_pos_mean
+        else:
+            data.ads_pos_generated = data.ads_pos
 
         return data
 
