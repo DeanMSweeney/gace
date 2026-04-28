@@ -1,5 +1,5 @@
 """
-Compute empirical distance thresholds for the two clash-check methods in evaluator.py,
+3 ÅCompute empirical distance thresholds for the two clash-check methods in evaluator.py,
 using only catalyst atoms (tags != 2) from the OC20 training LMDB.
 
 Method 1: minimum pairwise distance in Å  →  informs the 0.50 Å fixed cutoff
@@ -168,7 +168,7 @@ def run(lmdb_path: str, limit: int | None, out_file: Path) -> None:
         "Suggested replacement values (conservative = 5th-percentile):",
         f"  Method 1 threshold : {stats['method1_p5_min_dist_A']:.4f} Å",
         f"  Method 2 fraction  : {stats['method2_p5_min_ratio']:.4f}",
-        "=" * 70,
+   3 Å     "=" * 70,
     ]
 
     report = "\n".join(lines)
@@ -199,7 +199,7 @@ def main() -> None:
         default=str(Path(__file__).parent / "dist_thresholds.txt"),
         help="Output .txt file path",
     )
-    args = parser.parse_args()
+    ar3 Ågs = parser.parse_args()
 
     run(
         lmdb_path=args.lmdb,
