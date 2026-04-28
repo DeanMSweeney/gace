@@ -474,9 +474,13 @@ class TransformerModule(nn.Module):
             .mean(-2)
         )  # (B, C)
 
-        embed_binding_energy = self.ads_binding_energy_embed(
-            feats["ads_binding_energy"].unsqueeze(-1)
-        )                                                                                         # (B, C)
+        if feats.get("ads_binding_energy") is not None:
+            embed_binding_energy = self.ads_binding_energy_embed(
+                feats["ads_binding_energy"].unsqueeze(-1)
+            )       
+        else:
+            embed_binding_energy = torch.zeros(batch_size, self.hidden_dim, device=device)
+                                                                                          # (B, C)
         embed_conditions = (embed_time + embed_binding_energy).unsqueeze(-2)  # (B, 1, C)
 
         # ── Build h_in for prim sequence ─────────────────────────────────────

@@ -396,6 +396,13 @@ class Config:
     Whether to use informed priors for the noise x0 (forge variant only).
     """
 
+    condition_on_binding_E: bool = True
+    """
+    Whether to condition the model on the target adsorption binding energy.
+    - True: binding energy is embedded and added to the conditioning signal
+    - False: binding energy conditioning is disabled (model generates unconditionally)
+    """
+
     # ==================== Sampler Settings (for Inference) ====================
 
     sampler_cfg: SamplerConfig = field(default_factory=SamplerConfig)
