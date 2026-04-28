@@ -13,7 +13,7 @@ from typing import Dict
 from adsflow.utils.invariance import pbc_aware_delta
 
 
-def check_validity(atoms: Atoms, covalent_radii_scale: float = 0.75) -> dict:
+def check_validity(atoms: Atoms, covalent_radii_scale: float = 0.75, target_ads_dists: np.ndarray = None) -> dict:
     """Check structural validity of a single ASE Atoms object.
 
     Runs two checks:
@@ -28,151 +28,51 @@ def check_validity(atoms: Atoms, covalent_radii_scale: float = 0.75) -> dict:
         dict with keys: vol_ok (bool), dist_ok (bool), is_valid (bool).
     """
     if atoms is None:
-        return {"vol_ok": False, "dist_ok": False, "is_valid": False}
+        return {"vol_ok": False, "dist_ok": False, "ads_dist_ok": False, "ads_dist_mae": None, "ads_dist_me": None, "is_valid": False}
 
-    # Volume check
+    # Volume check # intertatomic distance check
     try:
         vol_ok = float(atoms.get_volume()) >= 0.1
-    except Exception:
-        vol_ok = False
+        tags = atoms.get_tags()
+        cat_mask = tags != 2 # N
+        ads_mask = tags == 2 # N 
 
-    # Atom clash check — catalyst atoms only (tags != 2)
-    # Toggle method: 1 = ASE fixed cutoff  2 = ASE covalent radii
-    DIST_METHOD = 2
-    try:
-        cat_mask = atoms.get_tags() != 2
         cat_atoms = atoms[cat_mask]
-        if len(cat_atoms) > 1:
-            if DIST_METHOD == 1:
-                dists = cat_atoms.get_all_distances(mic=True)
-                np.fill_diagonal(dists, np.inf)
-                dist_ok = bool(dists.min() >= 0.5)
+        ads_atoms = atoms[ads_mask]
+        dists = atoms.get_all_distances(mic=True) # N, N 
+        np.fill_diagonal(dists, np.inf) # N, N
 
-            elif DIST_METHOD == 2:
-                dists = cat_atoms.get_all_distances(mic=True)
-                numbers = cat_atoms.get_atomic_numbers()
-                radii = covalent_radii[numbers]               # (N_cat,)
-                sum_radii = radii[:, None] + radii[None, :]   # (N_cat, N_cat)
-                sum_radii[sum_radii == 0.0] = np.inf
-                np.fill_diagonal(dists, np.inf)
-                dist_ok = bool(np.all(dists >= covalent_radii_scale * sum_radii))
-        else:
-            dist_ok = True
+        # first adsorbate atoms
+        ads_idx = np.where(tags == 2)[0]
+        ads_dists = dists[ads_mask, :] # N_ads, N
+        ads_dist_ok = bool(ads_dists.min() >= 0.5) # scalar
+
+        # then catalyst atoms 
+        cat_idx = np.where(cat_mask)[0]
+        cat_dists = dists[np.ix_(cat_idx, cat_idx)] # N_cat, N_cat 
+        cat_atomic_numbers = cat_atoms.get_atomic_numbers()
+        atomic_radii = covalent_radii[cat_atomic_numbers]               # (N_cat,)
+        sum_atomic_radii = atomic_radii[:, None] + atomic_radii[None, :]   # (N_cat, N_cat)
+        sum_atomic_radii[sum_atomic_radii == 0.0] = np.inf
+        dist_ok = bool(np.all(cat_dists >= covalent_radii_scale * sum_atomic_radii))
+
+        # interatomic distance of adsorbate atoms
+        num_ads_atoms = ads_mask.sum()
+        generated_ads_interatomic_dist = dists[np.ix_(ads_idx, ads_idx)].copy()  # N_ads, N_ads
+        np.fill_diagonal(generated_ads_interatomic_dist, 0.0)  # undo inf from line 43; self-dist = 0
+        target_ads_interatomic_dist = np.asarray(target_ads_dists)[:num_ads_atoms, :num_ads_atoms]  # N_ads, N_ads
+        ads_dist_mae = float(np.abs(target_ads_interatomic_dist - generated_ads_interatomic_dist).mean())
+
     except Exception:
         dist_ok = False
+        vol_ok = False
+        ads_dist_ok = False
+        ads_dist_mae = None
 
     return {
         "vol_ok": vol_ok,
         "dist_ok": dist_ok,
-        "is_valid": vol_ok and dist_ok,
-    }
-
-
-def evaluate_forge_batch(atoms_list: list) -> dict:
-    """Evaluate structural validity across a batch of forge-generated structures.
-
-    Args:
-        atoms_list: List of ASE Atoms objects from build_forge_batch.
-
-    Returns:
-        dict with mean validity rates: vol_ok, dist_ok, is_valid (all floats in [0, 1]).
-    """
-    results = [check_validity(atoms) for atoms in atoms_list]
-
-    return {
-        "validity/vol_ok": float(np.mean([r["vol_ok"] for r in results])),
-        "validity/dist_ok": float(np.mean([r["dist_ok"] for r in results])),
-        "validity/is_valid": float(np.mean([r["is_valid"] for r in results])),
-    }
-
-def compute_eval_metrics(
-    data: Data,
-    threshold: float = 0.5,
-    threshold_min: float = 0.01,
-    threshold_step: float = 0.001,
-) -> Dict[str, float]:
-    """
-    Calculate evaluation metrics for predicted atomic structures.
-
-    Computes:
-    - MAE: Mean Absolute Error of atom positions
-    - ME: Mean Error (signed) of atom positions
-    - DwT: Distance within Threshold (% structures with MAE below threshold)
-    - ADwT: Average DwT across thresholds (robust to outliers)
-
-    All metrics are computed for both the full system and adsorbate atoms only.
-
-    Args:
-        data: Data object with pos_generated, pos_relaxed, cell, batch, fixed, tags
-        threshold: Maximum threshold in Angstroms (default: 0.5)
-        threshold_min: Minimum threshold in Angstroms (default: 0.01)
-        threshold_step: Step size for thresholds in Angstroms (default: 0.001)
-
-    Returns:
-        Dictionary containing all evaluation metrics
-    """
-    batch = data.batch
-    cell = data.cell
-    pos_target = data.pos_relaxed
-    pos_predicted = data.pos_generated
-    adsorbate_mask = (data.tags == 2)
-
-    # Calculate PBC-aware per-atom errors
-    per_atom_error = pbc_aware_delta(
-        delta=pos_predicted - pos_target,
-        cell=cell,
-        batch=batch,
-    )
-    per_atom_mae = per_atom_error.abs().mean(dim=1, keepdim=True)
-    per_atom_me = per_atom_error.mean(dim=1, keepdim=True)
-
-    # Adsorbate-specific errors
-    ads_atom_error = pbc_aware_delta(
-        delta=pos_predicted[adsorbate_mask] - pos_target[adsorbate_mask],
-        cell=cell,
-        batch=batch[adsorbate_mask],
-    )
-    ads_atom_mae = ads_atom_error.abs().mean(dim=1, keepdim=True)
-    ads_atom_me = ads_atom_error.mean(dim=1, keepdim=True)
-
-    # Calculate per-structure metrics
-    batch_ads = batch[adsorbate_mask]
-    num_structures = batch.max().item() + 1
-    mae_per_structure = []
-    me_per_structure = []
-    ads_mae_per_structure = []
-    ads_me_per_structure = []
-
-    for struct_idx in range(num_structures):
-        struct_mask = batch == struct_idx
-        ads_mask = batch_ads == struct_idx
-        if struct_mask.any():
-            mae_per_structure.append(per_atom_mae[struct_mask].mean().item())
-            me_per_structure.append(per_atom_me[struct_mask].mean().item())
-            ads_mae_per_structure.append(ads_atom_mae[ads_mask].mean().item())
-            ads_me_per_structure.append(ads_atom_me[ads_mask].mean().item())
-
-    mae_per_structure = torch.tensor(mae_per_structure)
-    me_per_structure = torch.tensor(me_per_structure)
-    ads_mae_per_structure = torch.tensor(ads_mae_per_structure)
-    ads_me_per_structure = torch.tensor(ads_me_per_structure)
-
-    # Calculate DwT and ADwT
-    thresholds = torch.arange(threshold_min, threshold + threshold_step, threshold_step)
-    dwt_values = []
-    ads_dwt_values = []
-
-    for thresh in thresholds:
-        dwt_values.append((mae_per_structure < thresh.item()).sum().item() / num_structures * 100.0)
-        ads_dwt_values.append((ads_mae_per_structure < thresh.item()).sum().item() / num_structures * 100.0)
-
-    return {
-        "generated_mae": mae_per_structure.mean().item(),
-        "generated_me": me_per_structure.mean().item(),
-        "generated_dwt": dwt_values[-1],
-        "generated_adwt": sum(dwt_values) / len(dwt_values),
-        "generated_ads_mae": ads_mae_per_structure.mean().item(),
-        "generated_ads_me": ads_me_per_structure.mean().item(),
-        "generated_ads_dwt": ads_dwt_values[-1],
-        "generated_ads_adwt": sum(ads_dwt_values) / len(ads_dwt_values),
+        "ads_dist_ok": ads_dist_ok,
+        "ads_dist_mae": ads_dist_mae,
+        "is_valid": vol_ok and dist_ok and ads_dist_ok,
     }
