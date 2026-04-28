@@ -13,12 +13,11 @@ from torch_geometric.data import Data
 from transformers import get_cosine_schedule_with_warmup, get_polynomial_decay_schedule_with_warmup
 
 from adsflow.utils.x_matching import XMatching
-from adsflow.utils.evaluator import compute_eval_metrics
 from adsflow.utils.relaxation import relax_struc
 from adsflow.utils.atoms import write_strucs
 from adsflow.utils.tft.wrapper import PyGToTensorDict
 from adsflow.utils.builder import forge_catalyst
-from adsflow.utils.evaluator import evaluate_forge_batch, check_validity
+from adsflow.utils.evaluator import check_validity
 import ase.io
 
 from typing import Optional, Literal, Union, Tuple
