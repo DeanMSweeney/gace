@@ -331,31 +331,24 @@ class LightFlowMatch(LightningModule, XMatching):
         t = torch.linspace(0., 1, self.num_integration_steps, device=data.pos.device, dtype=data.pos.dtype)
         opt_graph = self.sample(input_graph=data, t=t, ode_method=self.ode_method, num_prim_atoms=self.num_prim_atoms)
         
-        cat_atoms_list, prim_atoms_list = forge_catalyst(opt_graph, write_dir=None, batch_idx=batch_idx)
-        cat_validity  = [check_validity(atoms, self.covalent_radii_scale) for atoms in cat_atoms_list]
-        prim_validity = [check_validity(atoms, self.covalent_radii_scale) for atoms in prim_atoms_list]
+        cat_atoms_list, _ = forge_catalyst(opt_graph, write_dir=None, batch_idx=batch_idx)
+        target_ads_dists = opt_graph.ads_pairwise_dist.cpu().numpy()  # (N_ads, 15), batch size = 1
+        result = check_validity(cat_atoms_list[0], self.covalent_radii_scale, target_ads_dists=target_ads_dists)
 
-        if self.gen_POS:
+        if self.gen_POS and result["is_valid"] and cat_atoms_list[0] is not None:
             os.makedirs(self.gen_POS, exist_ok=True)
-            for b, (atoms, result) in enumerate(zip(cat_atoms_list, cat_validity)):
-                if result["is_valid"] and atoms is not None:
-                    ase.io.write(
-                        os.path.join(self.gen_POS, f'{batch_idx}_{b}.vasp'),
-                        atoms,
-                        format='vasp',
-                    )
+            ase.io.write(os.path.join(self.gen_POS, f'{batch_idx}_0.vasp'), cat_atoms_list[0], format='vasp')
 
-        for prefix, results, n in [
-            ("validity/cat",  cat_validity,  len(cat_atoms_list)),
-            ("validity/prim", prim_validity, len(prim_atoms_list)),
-        ]:
-            metrics = {
-                f"{prefix}/vol_ok":   float(np.mean([r["vol_ok"]   for r in results])),
-                f"{prefix}/dist_ok":  float(np.mean([r["dist_ok"]  for r in results])),
-                f"{prefix}/is_valid": float(np.mean([r["is_valid"] for r in results])),
-            }
-            for key, val in metrics.items():
-                self.log(key, val, on_step=False, on_epoch=True, batch_size=n)
+        metrics = {
+            "validity/cat/vol_ok":      float(result["vol_ok"]),
+            "validity/cat/dist_ok":     float(result["dist_ok"]),
+            "validity/cat/ads_dist_ok": float(result["ads_dist_ok"]),
+            "validity/cat/is_valid":    float(result["is_valid"]),
+        }
+        if result["ads_dist_mae"] is not None:
+            metrics["validity/cat/ads_dist_mae"] = result["ads_dist_mae"]
+        for key, val in metrics.items():
+            self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
 
         """
         opt_graph = relax_struc(
@@ -409,36 +402,32 @@ class LightFlowMatch(LightningModule, XMatching):
                 num_prim_atoms=self.num_prim_atoms,
             )
 
-            cat_atoms_list, prim_atoms_list = forge_catalyst(opt_graph, write_dir=None, batch_idx=batch_idx)
-            cat_validity  = [check_validity(atoms, self.covalent_radii_scale) for atoms in cat_atoms_list]
-            prim_validity = [check_validity(atoms, self.covalent_radii_scale) for atoms in prim_atoms_list]
+            cat_atoms_list, _ = forge_catalyst(opt_graph, write_dir=None, batch_idx=batch_idx)
+            target_ads_dists = opt_graph.ads_pairwise_dist.cpu().numpy()  # (N_ads, 15), batch size = 1
+            result = check_validity(cat_atoms_list[0], self.covalent_radii_scale, target_ads_dists=target_ads_dists)
 
-            for prefix, results, n in [
-                ("validity/cat",  cat_validity,  len(cat_atoms_list)),
-                ("validity/prim", prim_validity, len(prim_atoms_list)),
-            ]:
-                metrics = {
-                    f"{prefix}/vol_ok":   float(np.mean([r["vol_ok"]   for r in results])),
-                    f"{prefix}/dist_ok":  float(np.mean([r["dist_ok"]  for r in results])),
-                    f"{prefix}/is_valid": float(np.mean([r["is_valid"] for r in results])),
-                }
-                for key, val in metrics.items():
-                    self.log(key, val, on_step=False, on_epoch=True, batch_size=n)
+            metrics = {
+                "validity/cat/vol_ok":      float(result["vol_ok"]),
+                "validity/cat/dist_ok":     float(result["dist_ok"]),
+                "validity/cat/ads_dist_ok": float(result["ads_dist_ok"]),
+                "validity/cat/is_valid":    float(result["is_valid"]),
+            }
+            if result["ads_dist_mae"] is not None:
+                metrics["validity/cat/ads_dist_mae"] = result["ads_dist_mae"]
+            for key, val in metrics.items():
+                self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
 
-            if self.gen_POS:
+            if self.gen_POS and result["is_valid"] and cat_atoms_list[0] is not None:
                 os.makedirs(self.gen_POS, exist_ok=True)
-                for b, (atoms, result) in enumerate(zip(cat_atoms_list, cat_validity)):
-                    if atoms is not None and result["is_valid"]:
-                        ase.io.write(
-                            os.path.join(self.gen_POS, f'{batch_idx}_{sample_idx}_{b}.vasp'),
-                            atoms,
-                            format='vasp',
-                        )
+                ase.io.write(
+                    os.path.join(self.gen_POS, f'{batch_idx}_{sample_idx}_0.vasp'),
+                    cat_atoms_list[0],
+                    format='vasp',
+                )
 
             all_atoms.extend(cat_atoms_list)
 
         return all_atoms
-
     # ==================== Optimizer Configuration ====================
 
     def configure_optimizers(self):
