@@ -95,6 +95,7 @@ class LightFlowMatch(LightningModule, XMatching):
             target_binding_E: Optional[float]=None,
             num_generated_samples: int=1,
             covalent_radii_scale: float=0.75,
+            condition_on_binding_E: bool=True,
             ads_pos_mean: list = [0.02587131, -0.69517581, 0.91811687],
             ads_pos_std: list = [8.21663071, 9.02733422, 9.86882174],
             **kwargs,
@@ -141,6 +142,7 @@ class LightFlowMatch(LightningModule, XMatching):
         self.mlff_checkpoint = mlff_checkpoint
         self.target_binding_E = target_binding_E
         self.num_generated_samples = num_generated_samples
+        self.condition_on_binding_E = condition_on_binding_E
 
         # Adsorbate position normalization stats (per-axis), computed offline over training set.
         # Path, loss, and Euler integration run in normalized space; denormalize only at sampling output.
@@ -204,7 +206,7 @@ class LightFlowMatch(LightningModule, XMatching):
             ),
             t_prim=(t, t, t, t),
             t_ads=(t,),
-            feats={"ads_binding_energy": f_prim.data["ads_binding_energy"]},
+            feats={"ads_binding_energy": f_prim.data["ads_binding_energy"] if self.condition_on_binding_E else None},
             prim_padding_mask=prim_padding_mask,
             ads_padding_mask=ads_padding_mask,
         )
