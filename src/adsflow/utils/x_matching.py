@@ -477,19 +477,15 @@ class XMatching():
         Flow-match adsorbate absolute positions (forge variant only).
 
         Path, loss, and integration all run in z-scored space (using
-        self.ads_pos_mean / self.ads_pos_std as per-axis stats). Denormalization
-        back to raw Å happens only at the very end of _sample_forge.
-
         Stores on data:
-            data.ads_pos        ← interpolated positions x_t (normalized, model input)
-            data.ads_pos_target ← true positions x_1 (normalized, supervision target)
+            data.ads_pos        ← interpolated positions x_t (raw Å, model input)
+            data.ads_pos_target ← true positions x_1 (raw Å, supervision target)
         """
         ads_batch = data.batch[self.adsorbate_mask]  # (N_ads,)
 
-        # Read absolute Cartesian target and z-score with dataset stats
+        # Read absolute Cartesian target — keep in raw Å (no z-scoring)
         ads_pos1 = data.ads_pos.float()                                  # (N_ads, 3) raw Å
-        ads_pos1 = (ads_pos1 - self.ads_pos_mean) / self.ads_pos_std     # normalized
-        ads_pos0 = torch.randn_like(ads_pos1)                            # N(0,1) prior in normalized space
+        ads_pos0 = torch.randn_like(ads_pos1) * self.ads_pos_std + self.ads_pos_mean  # N(mean, std) prior in raw Å
 
         if self.optimal_transport:
             ads_pos0 = batched_ot_align(
@@ -639,7 +635,7 @@ class XMatching():
                 data.angles_radians = torch.randn(B, 3, device=device)         # N(0, 1)
                 data.lengths_scaled = torch.randn(B, 3, device=device)  # N(0, 1) in normalised space
         
-            data.ads_pos = torch.randn(N_ads, 3, device=device)             # N(0, 1)
+            data.ads_pos = torch.randn(N_ads, 3, device=device) * self.ads_pos_std + self.ads_pos_mean  # N(mean, std) raw Å
             identity = torch.eye(3, device=device).unsqueeze(0).expand(B, -1, -1)
             data.transformation_matrix = (identity + 0.1 * torch.randn(B, 3, 3, device=device)).float()   # (B, 3, 3)
 
@@ -691,8 +687,7 @@ class XMatching():
         data.angles_generated          = data.angles_radians
         data.transformation_matrix     = data.transformation_matrix.round().long()
         data.M_generated               = data.transformation_matrix
-        # Denormalize adsorbate positions back to raw Å for output
-        data.ads_pos_generated         = data.ads_pos * self.ads_pos_std + self.ads_pos_mean
+        data.ads_pos_generated         = data.ads_pos   # already raw Å
 
         return data
 

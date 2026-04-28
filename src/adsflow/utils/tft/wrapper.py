@@ -186,21 +186,14 @@ class PyGToTensorDict:
                 max_num_nodes=max_num_nodes,
             )  # (B, N_ads, 15)
         else:
-            # Node-level: positions (already prim-only after _build_positions_path)
-            sd["frac_coords"], _  = to_dense_batch(
-                data.pos,
-                atom_batch,
-                max_num_nodes=max_num_nodes,
-            ) # B, N, 3
-
-            # Node-level: Cartesian coords — frac @ cell, unified space with adsorbate
+            # Node-level: raw Cartesian coords (frac @ cell) — unified space with adsorbate
             cell_per_atom = data.cell[atom_batch]  # (N_prim, 3, 3)
             cart_sparse = torch.bmm(data.pos.unsqueeze(1), cell_per_atom).squeeze(1)  # (N_prim, 3)
-            sd["cart_coords"], _ = to_dense_batch(
+            sd["frac_coords"], _ = to_dense_batch(
                 cart_sparse,
                 atom_batch,
                 max_num_nodes=max_num_nodes,
-            )  # (B, N, 3)
+            )  # (B, N, 3) — raw Cartesian Å, named frac_coords for weight-loading compatibility
 
             # Node-level: atomic_numbers_hot
             sd["atomic_numbers_hot"], mask = to_dense_batch(
