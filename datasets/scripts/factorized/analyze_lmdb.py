@@ -116,6 +116,13 @@ def analyze_lmdb(dataset_path: str, n_samples: int = 10, out_file: str = "catflo
     angles_stats = AxisStats()
     total = len(dataset)
 
+    prim_counts: dict[int, int] = {}
+    ads_counts:  dict[int, int] = {}
+    max_prim, max_prim_idx = 0, -1
+    max_ads,  max_ads_idx  = 0, -1
+    min_prim, min_prim_idx = float("inf"), -1
+    min_ads,  min_ads_idx  = float("inf"), -1
+
     with open(out_path, "w") as f:
         f.write(header + "\n\n")
 
@@ -127,12 +134,44 @@ def analyze_lmdb(dataset_path: str, n_samples: int = 10, out_file: str = "catflo
             lengths_stats.update(sample.lengths_scaled)
             angles_stats.update(sample.angles_radians)
 
+            n_prim = int(sample.prim_natoms)
+            n_ads  = int(sample.ads_atomic_numbers.shape[0])
+            prim_counts[n_prim] = prim_counts.get(n_prim, 0) + 1
+            ads_counts[n_ads]   = ads_counts.get(n_ads,  0) + 1
+            if n_prim > max_prim:
+                max_prim, max_prim_idx = n_prim, i
+            if n_prim < min_prim:
+                min_prim, min_prim_idx = n_prim, i
+            if n_ads > max_ads:
+                max_ads, max_ads_idx = n_ads, i
+            if n_ads < min_ads:
+                min_ads, min_ads_idx = n_ads, i
+
             if i < n_samples:
                 block = format_sample(i, sample)
                 print(block)
                 f.write(block + "\n\n")
 
+        def _count_table(counts: dict[int, int], label: str, max_val: int, max_idx: int, min_val: int, min_idx: int) -> str:
+            lines = [
+                "=" * 70,
+                label,
+                "=" * 70,
+                f"  max = {max_val}  (sample idx {max_idx})",
+                f"  min = {min_val}  (sample idx {min_idx})",
+                "  Distribution:",
+            ]
+            for val in sorted(counts):
+                lines.append(f"    {val:>4} atoms: {counts[val]:>6} samples")
+            return "\n".join(lines)
+
+        atom_count_summary = "\n\n".join([
+            _count_table(prim_counts, "Primitive-cell atom counts (prim_natoms)", max_prim, max_prim_idx, min_prim, min_prim_idx),
+            _count_table(ads_counts,  "Adsorbate atom counts (n_ads)",            max_ads,  max_ads_idx,  min_ads,  min_ads_idx),
+        ])
+
         footer = "\n\n".join([
+            atom_count_summary,
             ads_pos_stats.summary("Adsorbate Cartesian positions (ads_pos)", entry_label="adsorbate atoms"),
             pos_stats.summary("Primitive-cell positions (pos)", entry_label="atoms"),
             lengths_stats.summary("Lattice lengths_scaled", axis_names=("a", "b", "c"), entry_label="samples"),
@@ -145,5 +184,5 @@ def analyze_lmdb(dataset_path: str, n_samples: int = 10, out_file: str = "catflo
 
 
 if __name__ == "__main__":
-    train_path = "/workspace/datasets/catflow/train/dataset_processed.lmdb"
-    analyze_lmdb(train_path, n_samples=10, out_file="catflow_analysis.txt")
+    train_path = "/workspace/datasets/factorized/train/dataset_processed.lmdb"
+    analyze_lmdb(train_path, n_samples=10, out_file="dataset_stats.txt")
