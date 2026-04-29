@@ -426,7 +426,7 @@ class TransformerModule(nn.Module):
         # ── Prim real-token mask ─────────────────────────────────────────────
         prim_real_mask = 1 - prim_padding_mask.int()  # (B, M)
         ads_real_mask = 1 - ads_padding_mask.int()     # (B, N)
-        combined_real_mask = torch.cat([prim_real_mask, ads_real_mask], dim=1)  # (B, M+N)
+        combined_real_mask = torch.cat([ads_real_mask, prim_real_mask], dim=1)  # (B, N+M)
         global_mask = combined_real_mask.any(-1, keepdim=True).unsqueeze(-1)  # (B, 1, 1)
 
         # ── Prim embeddings ──────────────────────────────────────────────────
@@ -458,8 +458,8 @@ class TransformerModule(nn.Module):
             embed_posenc = self.positional_encoding(batch_size=batch_size, seq_len=total_seq_len)
         else:
             embed_posenc = torch.zeros(batch_size, total_seq_len, self.hidden_dim, device=device)
-        embed_posenc_prim = embed_posenc[:, :prim_seq_len, :]  # (B, M, C)
-        embed_posenc_ads = embed_posenc[:, prim_seq_len:, :]   # (B, N, C)
+        embed_posenc_ads = embed_posenc[:, :ads_seq_len, :]    # (B, N, C)
+        embed_posenc_prim = embed_posenc[:, ads_seq_len:, :]   # (B, M, C)
 
         # ── Time embeddings (average prim + ads times) ───────────────────────
         prim_modals_t = torch.cat(
@@ -541,11 +541,12 @@ class TransformerModule(nn.Module):
         h_in_ads = h_in_ads * ads_real_mask.unsqueeze(-1)  # (B, N, C)
 
         # ── Concatenate prim + ads into single sequence ──────────────────────
-        h_in = torch.cat([h_in_prim, h_in_ads], dim=1)  # (B, M+N, C)
-        padding_mask = torch.cat([prim_padding_mask, ads_padding_mask], dim=1)  # (B, M+N)
+        h_in = torch.cat([h_in_ads, h_in_prim], dim=1)  # (B, N+M, C)
+        padding_mask = torch.cat([ads_padding_mask, prim_padding_mask], dim=1)  # (B, N+M)
 
-        pos_ids = torch.arange(total_seq_len, device=device).unsqueeze(0).repeat(batch_size, 1)
-        ads_pos_ids = pos_ids[:, prim_seq_len:]  # true positions of ads tokens in combined sequence
+        pos_ids = torch.arange(total_seq_len, device=device).unsqueeze(0).repeat(batch_size, 1) # [0, 1, 2, ..., N+M-1]
+        ads_pos_ids = pos_ids[:, :ads_seq_len]   # [0, 1, ..., N-1] - ads now leads — stable low position IDs
+        prim_pos_ids = pos_ids[:, ads_seq_len:]  # [N, N+1, ..., N+M-1] - prim follows ads
         attention_kwargs = {"pos_ids": pos_ids}
 
         if self.implementation == "transformer":
@@ -561,45 +562,50 @@ class TransformerModule(nn.Module):
         h_out = h_out * combined_real_mask.unsqueeze(-1)  # (B, M+N, C)
 
         # ── Split transformer output back into prim / ads ────────────────────
-        h_out_prim = h_out[:, :prim_seq_len, :]  # (B, M, C)
-        h_out_ads = h_out[:, prim_seq_len:, :]   # (B, N, C)
+        h_out_ads = h_out[:, :ads_seq_len, :]    # (B, N, C)
+        h_out_prim = h_out[:, ads_seq_len:, :]   # (B, M, C)
 
         # ── Cross-attention & output heads ────────────────────────────────────
         if self.cross_attention:
             # Prim cross-attention (query = prim output, memory = full sequence)
             h_atom = self.atom_types_cross_attention(
-                h_out_prim, 
+                h_out_prim,
                 h_in,
                 tgt_key_padding_mask=prim_padding_mask,
                 memory_key_padding_mask=padding_mask,
+                query_pos_ids=prim_pos_ids,
                 **attention_kwargs,
             )
             h_frac_coords = self.frac_coords_cross_attention(
-                h_out_prim, 
+                h_out_prim,
                 h_in,
                 tgt_key_padding_mask=prim_padding_mask,
                 memory_key_padding_mask=padding_mask,
+                query_pos_ids=prim_pos_ids,
                 **attention_kwargs,
             )
             h_lengths_scaled = self.lengths_scaled_cross_attention(
-                h_out_prim, 
+                h_out_prim,
                 h_in,
                 tgt_key_padding_mask=prim_padding_mask,
                 memory_key_padding_mask=padding_mask,
+                query_pos_ids=prim_pos_ids,
                 **attention_kwargs,
             )
             h_angles_radians = self.angles_radians_cross_attention(
-                h_out_prim, 
+                h_out_prim,
                 h_in,
                 tgt_key_padding_mask=prim_padding_mask,
                 memory_key_padding_mask=padding_mask,
+                query_pos_ids=prim_pos_ids,
                 **attention_kwargs,
             )
             h_transformation_matrix = self.transformation_matrix_cross_attention(
-                h_out_prim, 
+                h_out_prim,
                 h_in,
                 tgt_key_padding_mask=prim_padding_mask,
                 memory_key_padding_mask=padding_mask,
+                query_pos_ids=prim_pos_ids,
                 **attention_kwargs,
             )
 
