@@ -106,7 +106,7 @@ class LightFlowMatch(LightningModule, XMatching):
         self.save_hyperparameters(ignore=["model", "variant", "mode", "rtol", "atol", "ode_method", \
             "track_grad_norms", "in_POS", "gen_POS", "rlxd_POS", "config_vasp", "threshold", "x_matching", \
             "interpolant_schedule", "write_eval_metrics", "num_integration_steps", "run_mlff", "mlff_checkpoint", \
-            "accelerator", "seed", "num_prim_atoms", "optimal_transport"])
+            "accelerator", "seed", "num_prim_atoms", "optimal_transport", "ads_pos_mean", "ads_pos_std"])
 
         # Model and training configuration
         self.model = model  # Neural network (e.g., Equiformer)
