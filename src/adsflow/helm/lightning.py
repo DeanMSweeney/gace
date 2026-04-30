@@ -12,10 +12,10 @@ from lightning.pytorch import LightningModule
 from torch_geometric.data import Data
 from transformers import get_cosine_schedule_with_warmup, get_polynomial_decay_schedule_with_warmup
 
-from adsflow.utils.x_matching import XMatching
+from adsflow.utils.path import Flow
 from adsflow.utils.relaxation import relax_struc
 from adsflow.utils.atoms import write_strucs
-from adsflow.utils.tft.wrapper import PyGToTensorDict
+from adsflow.utils.tft.tft_wrapper import PyGToTensorDict
 from adsflow.utils.builder import forge_catalyst
 from adsflow.utils.evaluator import check_validity
 import ase.io
@@ -23,13 +23,13 @@ import ase.io
 from typing import Optional, Literal, Union, Tuple
 
 
-class LightFlowMatch(LightningModule, XMatching):
+class LightFlowMatch(LightningModule, Flow):
     """
     PyTorch Lightning module for training conditional flow matching models.
 
-    Combines LightningModule (for training infrastructure) with XMatching (for
-    interpolation paths and loss computation). Supports both "refine" and "forge"
-    variants for atomic structure relaxation.
+    Combines LightningModule (for training infrastructure) with Flow (for
+    interpolation paths and loss computation). Supports the "forge"
+    variant for de novo atomic structure generation.
 
     Args
     ---------
@@ -53,8 +53,6 @@ class LightFlowMatch(LightningModule, XMatching):
         Path to save initial structure files during testing
     gen_POS: str
         Path to save generated structure files during testing
-    rlxd_POS: str
-        Path to save relaxed (ground truth) structure files during testing
     config_vasp: bool
         Whether to configure VASP DFT input files during testing
     threshold: float
@@ -69,7 +67,7 @@ class LightFlowMatch(LightningModule, XMatching):
     def __init__(
             self,
             model,
-            variant: str="place",
+            variant: str="forge",
             mode: str="debug",
             rtol: float = 1e-7,
             atol: float = 1e-9,
@@ -77,7 +75,6 @@ class LightFlowMatch(LightningModule, XMatching):
             track_grad_norms: bool=False,
             in_POS=None,
             gen_POS=None,
-            rlxd_POS=None,
             config_vasp: bool=False,
             threshold: float=0.20,
             x_matching: Literal["flow", "endpoint"]="flow",
@@ -104,7 +101,7 @@ class LightFlowMatch(LightningModule, XMatching):
         super().__init__()
         # Save hyperparameters for logging and checkpointing (ignoring model-specific args)
         self.save_hyperparameters(ignore=["model", "variant", "mode", "rtol", "atol", "ode_method", \
-            "track_grad_norms", "in_POS", "gen_POS", "rlxd_POS", "config_vasp", "threshold", "x_matching", \
+            "track_grad_norms", "in_POS", "gen_POS", "config_vasp", "threshold", "x_matching", \
             "interpolant_schedule", "write_eval_metrics", "num_integration_steps", "run_mlff", "mlff_checkpoint", \
             "accelerator", "seed", "num_prim_atoms", "optimal_transport"])
 
@@ -123,7 +120,7 @@ class LightFlowMatch(LightningModule, XMatching):
         self.track_grad_norms = track_grad_norms
         self.in_POS = in_POS
         self.gen_POS = gen_POS
-        self.rlxd_POS = rlxd_POS
+
         self.config_vasp = config_vasp
         self.threshold = threshold
         self.covalent_radii_scale = covalent_radii_scale
@@ -155,26 +152,14 @@ class LightFlowMatch(LightningModule, XMatching):
         self.bad_iter, self.good_ter, self.iter = 0, 0, 0
        # ==============================================================================
        
-    def forward(self, data=None, **kwargs):
-        """
-        Forward pass through the model.
-
-        For the 'place' variant, accepts a single PyG Data object.
-        For the 'forge' variant, accepts keyword arguments (x_prim, x_ads, etc.)
-        that are passed directly to the transformer model.
-        """
-        if kwargs:
-            return self.model(**kwargs)
-        return self.model(data)
-
-    def _forge_forward(self, data: Data) -> dict:
+    def forward(self, data: Data) -> dict:
         """Run the forge model forward pass and return a flat prediction dict.
 
         Converts the PyG batch to dense tensors, calls the transformer, and
         unpacks outputs back to sparse form. Used both during training
-        (via _transport_loss) and sampling (via XMatching._sample_forge),
-        which can call this as `self._forge_forward(data)` because
-        LightFlowMatch inherits from XMatching.
+        (via _transport_loss) and sampling (via Flow.sample),
+        which calls this as `self(data)` because
+        LightFlowMatch inherits from Flow.
 
         Args:
             data: PyG Data/Batch with all forge fields populated.
@@ -190,7 +175,7 @@ class LightFlowMatch(LightningModule, XMatching):
 
         t = t_prim.data["t"].squeeze(-1)  # (B,)
 
-        pred_prim, pred_ads, _ = self(
+        pred_prim, pred_ads, _ = self.model(
             x_prim=(
                 x_prim.data["atomic_numbers_hot"],     # (B, M, 118)
                 x_prim.data["frac_coords"],            # (B, M, 3)
@@ -244,15 +229,11 @@ class LightFlowMatch(LightningModule, XMatching):
         data = self.path(input_graph=input_graph) 
 
         # Model predicts velocity field (or dict for forge with z_logits)
-        if self.variant =="place":
-            f = self(data)
-            losses = self.criterion(
-                input_graph=data,
-                pred=f,  # Model prediction
-            )
-        elif self.variant == "forge":
-            pred = self._forge_forward(data)
+        if self.variant == "forge":
+            pred = self(data)
             losses = self.criterion(input_graph=data, pred=pred)
+        else:
+            raise RuntimeError(f"Unknown variant: {self.variant}")
 
         return losses
     
@@ -415,6 +396,7 @@ class LightFlowMatch(LightningModule, XMatching):
             }
             if result["ads_dist_mae"] is not None:
                 metrics["validity/cat/ads_dist_mae"] = result["ads_dist_mae"]
+
             for key, val in metrics.items():
                 self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
 
