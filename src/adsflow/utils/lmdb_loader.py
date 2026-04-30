@@ -35,7 +35,6 @@ from fairchem.core.datasets._utils import rename_data_object_keys
 from fairchem.core.datasets.base_dataset import BaseDataset
 from fairchem.core.modules.transforms import DataTransforms
 
-from adsflow.utils.is2s_builders.pyg_converter import dict_to_pyg_data
 from adsflow.utils.factorized_builders.pyg_converter import catflow_dict_to_pyg_data
 
 if TYPE_CHECKING:
@@ -146,8 +145,7 @@ class LazyLmdbDataset(BaseDataset):
             if "primitive_slab" in loaded_data:
                 data = catflow_dict_to_pyg_data(loaded_data)
             else:
-                # OC20-style sample: flat numpy arrays
-                data = dict_to_pyg_data(loaded_data)
+                raise RuntimeError(f"Incompatible dataset")
         else:
             # already a PyG Data object, apply pyg2 transform
             data = pyg2_data_transform(loaded_data)
