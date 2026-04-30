@@ -311,7 +311,7 @@ class LightFlowMatch(LightningModule, Flow):
         """
         
         t = torch.linspace(0., 1, self.num_integration_steps, device=data.pos.device, dtype=data.pos.dtype)
-        opt_graph = self.sample(input_graph=data, t=t, ode_method=self.ode_method, num_prim_atoms=self.num_prim_atoms)
+        opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=self.num_prim_atoms)
         
         cat_atoms_list, _ = forge_catalyst(opt_graph, write_dir=None, batch_idx=batch_idx)
         target_ads_dists = opt_graph.ads_pairwise_dist.cpu().numpy()  # (N_ads, 15), batch size = 1
@@ -344,6 +344,7 @@ class LightFlowMatch(LightningModule, Flow):
                 in_POS=self.in_POS,
                 rlxd_POS=self.rlxd_POS,
             )
+        
         """
         
         return   
