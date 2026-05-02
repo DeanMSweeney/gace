@@ -7,7 +7,7 @@ from torch_geometric.utils import to_dense_batch
 from torchdiffeq import odeint
 from typing import Optional, Literal, Union, Tuple
 
-from adsflow.utils.invariance import pbc_aware_delta, batched_ot_align
+from adsflow.utils.invariance import pbc_aware_delta, batched_ot_align, global_ot_align
 from adsflow.utils.utils import adsorbate_neighborhood_mask
 from adsflow.utils.builder import lattice_params_to_matrix
 from adsflow.utils.euler import euler_step, ctmc_step
@@ -330,10 +330,7 @@ class Flow():
                 x0 = torch.randn_like(x1, dtype=torch.float32)  # N(0, 1)
 
             if self.optimal_transport:
-                x0 = batched_ot_align(
-                    source=x0, target=x1, batch=data.batch[self.primitive_mask],
-                    pbc_aware=True, return_assignment=False,
-                )
+                x0 = global_ot_align(source=x0, target=x1, pbc_aware=True)
 
             u_x = x1 - x0 
             u_x_n0 = torch.round(u_x)
@@ -387,10 +384,7 @@ class Flow():
         ads_pos0 = torch.randn_like(ads_pos1)                            # N(0,1) prior
 
         if self.optimal_transport:
-            ads_pos0 = batched_ot_align(
-                source=ads_pos0, target=ads_pos1, batch=ads_batch,
-                pbc_aware=False, return_assignment=False,
-            )
+            ads_pos0 = global_ot_align(source=ads_pos0, target=ads_pos1, pbc_aware=False)
 
         t_ads = t[ads_batch]  # (N_ads, 1)
         alpha_t_ads, alpha_t_ads_grad, _ = self._interpolant_schedule(
