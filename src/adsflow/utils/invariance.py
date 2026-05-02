@@ -12,6 +12,7 @@ from torch import Tensor
 from torch_geometric.utils import to_dense_batch
 from typing import Optional
 from torch_linear_assignment import batch_linear_assignment
+from scipy.optimize import linear_sum_assignment
 
 
 def pbc_aware_delta(
@@ -160,4 +161,39 @@ def batched_ot_align(
     if return_assignment:
         return source_aligned_dense[mask], assignment
     return source_aligned_dense[mask]
-   
+
+
+def global_ot_align(
+    source: Tensor,
+    target: Tensor,
+    pbc_aware: bool = False,
+) -> Tensor:
+    """
+    Cross-batch optimal transport alignment treating all atoms in the batch as one point cloud.
+
+    Finds the globally optimal permutation of all N_total source atoms to minimise
+    total L2 transport cost to N_total target atoms, ignoring graph boundaries.
+    This is valid because source is pure noise (no graph structure) — only the
+    target carries graph structure. After alignment, source[i] is still used as
+    the noise for target atom i within its original graph.
+
+    Compared to batched_ot_align, this can assign noise from one graph's slot to
+    another graph's atom position, giving straighter cross-batch trajectories.
+
+    Args:
+        source:    (N_total, D) noise tensor
+        target:    (N_total, D) data tensor
+        pbc_aware: if True, applies minimum-image convention before computing
+                   distances (use for fractional coordinates)
+
+    Returns:
+        source_aligned: (N_total, D) source permuted to minimise total transport cost to target
+    """
+    diff = source.unsqueeze(0) - target.unsqueeze(1)  # (N_total, N_total, D): diff[i,j] = src[j] - tgt[i]
+    if pbc_aware:
+        diff = diff - torch.round(diff)
+    cost = torch.linalg.norm(diff, dim=-1).cpu().numpy()  # (N_total, N_total)
+
+    _, col_indices = linear_sum_assignment(cost)  # col_indices[i] = j: target i matched to source j
+
+    return source[col_indices]
