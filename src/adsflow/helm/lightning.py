@@ -316,11 +316,12 @@ class LightFlowMatch(LightningModule, Flow):
         cat_atoms_list, _ = forge_catalyst(opt_graph, write_dir=None, batch_idx=batch_idx)
         target_ads_dists = opt_graph.ads_pairwise_dist.cpu().numpy()  # (N_ads, 15), batch size = 1
         result = check_validity(cat_atoms_list[0], self.covalent_radii_scale, target_ads_dists=target_ads_dists)
-
+        
+        """
         if self.gen_POS and result["is_valid"] and cat_atoms_list[0] is not None:
             os.makedirs(self.gen_POS, exist_ok=True)
             ase.io.write(os.path.join(self.gen_POS, f'{batch_idx}_0.vasp'), cat_atoms_list[0], format='vasp')
-
+        """
         metrics = {
             "validity/cat/vol_ok":      float(result["vol_ok"]),
             "validity/cat/dist_ok":     float(result["dist_ok"]),
