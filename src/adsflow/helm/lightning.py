@@ -318,7 +318,7 @@ class LightFlowMatch(LightningModule, Flow):
         num_graphs = int(opt_graph.batch.max().item()) + 1
 
         for b in range(num_graphs):
-            atoms, _ = forge_catalyst(opt_graph, b, prim_batch, ads_batch)
+            atoms = forge_catalyst(opt_graph, b, prim_batch, ads_batch)
             target_ads_dists = opt_graph.ads_pairwise_dist[ads_batch == b].cpu().numpy()  # (N_ads_b, 15)
             result = check_validity(atoms, self.covalent_radii_scale, target_ads_dists=target_ads_dists)
 
@@ -332,6 +332,14 @@ class LightFlowMatch(LightningModule, Flow):
                 metrics["validity/cat/ads_dist_mae"] = result["ads_dist_mae"]
             for key, val in metrics.items():
                 self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
+
+            if self.gen_POS and result["is_valid"] and atoms is not None:
+                os.makedirs(self.gen_POS, exist_ok=True)
+                ase.io.write(
+                    os.path.join(self.gen_POS, f'{batch_idx}_{b}.vasp'),
+                    atoms,
+                    format='vasp',
+                )
 
         """
         opt_graph = relax_struc(

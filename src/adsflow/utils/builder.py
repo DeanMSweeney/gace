@@ -1,7 +1,5 @@
-import os
 import numpy as np
 from ase import Atoms
-import ase.io
 from pymatgen.core import Structure, Lattice
 from pymatgen.core.periodic_table import DummySpecie, Element
 from pymatgen.io.ase import AseAtomsAdaptor
@@ -222,8 +220,6 @@ def forge_catalyst(
     b: int,
     prim_batch: torch.Tensor,
     ads_batch: torch.Tensor,
-    write_dir: Optional[str] = None,
-    batch_idx: Optional[int] = None,
 ) -> Tuple[Optional[Atoms], Optional[Atoms]]:
     """
     Build a full slab + adsorbate ASE Atoms object for graph index b in a forge batch.
@@ -236,8 +232,6 @@ def forge_catalyst(
         b:           Index of the graph within the batch to build.
         prim_batch:  Batch indices for primitive-cell atoms (opt_graph.batch[tags == 1]).
         ads_batch:   Batch indices for adsorbate atoms (opt_graph.batch[tags == 2]).
-        write_dir:   If given, write the structure as a VASP POSCAR to this directory.
-        batch_idx:   Batch index used to name POSCAR files (`{batch_idx}_{b}.vasp`).
 
     Returns:
         Tuple of (cat_atoms, prim_atoms): full supercell slab+adsorbate and primitive cell,
@@ -254,13 +248,6 @@ def forge_catalyst(
 
         ads_pos = opt_graph.ads_pos_generated[ads_batch == b]     # (N_ads, 3)
 
-        prim_atoms = Atoms(
-            numbers=_to_numpy(opt_graph.atomic_numbers_generated[prim_batch == b]),
-            positions=_to_numpy(prim_pos),
-            cell=_to_numpy(cell),
-            pbc=True,
-        )
-
         # atomic_numbers_generated is already 1-indexed (sampler stores argmax + 1)
         # ads_atomic_numbers is 0-indexed (sampler shifts it down by 1 for internal use)
         atoms = build_slab_adsorbate(
@@ -273,11 +260,7 @@ def forge_catalyst(
             vacuum=15.0,
         )
 
-        if write_dir is not None and batch_idx is not None:
-            os.makedirs(write_dir, exist_ok=True)
-            ase.io.write(os.path.join(write_dir, f"{batch_idx}_{b}.vasp"), atoms, format="vasp")
-
-        return atoms, prim_atoms
+        return atoms
 
     except Exception as e:
         print(f"[forge_catalyst] Failed to build graph {b}: {e}")
