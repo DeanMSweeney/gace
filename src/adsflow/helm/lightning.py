@@ -323,39 +323,41 @@ class LightFlowMatch(LightningModule, Flow):
             result = check_validity(atoms, self.covalent_radii_scale, target_ads_dists=target_ads_dists)
 
             metrics = {
-                "validity/cat/vol_ok":      float(result["vol_ok"]),
-                "validity/cat/dist_ok":     float(result["dist_ok"]),
-                "validity/cat/ads_dist_ok": float(result["ads_dist_ok"]),
-                "validity/cat/is_valid":    float(result["is_valid"]),
+                "vol_ok":      float(result["vol_ok"]),
+                "cat_dist_ok":     float(result["dist_ok"]),
+                "ads_dist_ok": float(result["ads_dist_ok"]),
+                "sample_is_valid":    float(result["is_valid"]),
+                "ads_dist_mae": float(result["ads_dist_mae"])
             }
-            if result["ads_dist_mae"] is not None:
-                metrics["validity/cat/ads_dist_mae"] = result["ads_dist_mae"]
+ 
             for key, val in metrics.items():
                 self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
 
-            if self.gen_POS and result["is_valid"] and atoms is not None:
-                os.makedirs(self.gen_POS, exist_ok=True)
-                ase.io.write(
-                    os.path.join(self.gen_POS, f'{batch_idx}_{b}.vasp'),
-                    atoms,
-                    format='vasp',
-                )
+            if result["is_valid"]: 
+                atoms_rlxd = relax_struc(
+                        atoms=atoms,
+                        run_mlff=self.run_mlff,
+                        config_vasp=self.config_vasp,
+                        mlff_checkpoint=self.mlff_checkpoint,
+                        accelerator=self.accelerator,
+                        seed=self.seed,
+                    )
 
-        """
-        opt_graph = relax_struc(
-                opt_graph,
-                run_mlff=self.run_mlff,
-                config_vasp=self.config_vasp,
-                mlff_checkpoint=self.mlff_checkpoint,
-                accelerator=self.accelerator,
-                seed=self.seed,
-                gen_POS=self.gen_POS,
-                in_POS=self.in_POS,
-                rlxd_POS=self.rlxd_POS,
-            )
-        
-        """
-        
+                if self.gen_POS:
+                    os.makedirs(self.gen_POS, exist_ok=True)
+                    ase.io.write(
+                        os.path.join(self.gen_POS, f'{batch_idx}_{b}.vasp'),
+                        atoms,
+                        format='vasp',
+                    )
+
+                if self.rlxd_POS and self.run_mlff:
+                    os.makedirs(self.rlxd_POS, exist_ok=True)
+                    ase.io.write(
+                        os.path.join(self.rlxd_POS, f'{batch_idx}_{b}.vasp'),
+                        atoms_rlxd,
+                        format='vasp',
+                    )
         return   
 
     def predict_step(self, data: Data, batch_idx: int):
