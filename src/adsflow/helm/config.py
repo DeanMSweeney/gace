@@ -172,6 +172,10 @@ class SamplerConfig:
 
     # ==================== MLFF Relaxation ====================
 
+    refine_final: bool = False
+    """Whether to run a final refinement forward pass at t=1 after the Euler loop.
+    Uses the model's endpoint prediction directly rather than the Euler-integrated state."""
+
     run_mlff: bool = False
     """Whether to run MLFF relaxation after generation"""
 
