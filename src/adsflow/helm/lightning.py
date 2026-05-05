@@ -89,6 +89,7 @@ class LightFlowMatch(LightningModule, Flow):
             accelerator: str="gpu",
             seed: int=42,
             num_prim_atoms: Optional[int]=3,
+            refine_final: bool=False,
             target_binding_E: Optional[float]=None,
             num_generated_samples: int=1,
             covalent_radii_scale: float=0.75,
@@ -138,6 +139,7 @@ class LightFlowMatch(LightningModule, Flow):
         self.accelerator = accelerator
         self.seed = seed
         self.num_prim_atoms = num_prim_atoms
+        self.refine_final = refine_final
         self.mlff_checkpoint = mlff_checkpoint
         self.target_binding_E = target_binding_E
         self.num_generated_samples = num_generated_samples
@@ -313,7 +315,7 @@ class LightFlowMatch(LightningModule, Flow):
         """
         
         t = torch.linspace(0., 1, self.num_integration_steps, device=data.pos.device, dtype=data.pos.dtype)
-        opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=self.num_prim_atoms)
+        opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=self.num_prim_atoms, refine_final=self.refine_final)
 
         prim_batch = opt_graph.batch[opt_graph.tags == 1]
         ads_batch  = opt_graph.batch[opt_graph.tags == 2]
@@ -396,6 +398,7 @@ class LightFlowMatch(LightningModule, Flow):
                 t=t,
                 ode_method=self.ode_method,
                 num_prim_atoms=self.num_prim_atoms,
+                refine_final=self.refine_final,
             )
 
             prim_batch = opt_graph.batch[opt_graph.tags == 1]
