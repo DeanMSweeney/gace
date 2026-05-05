@@ -120,6 +120,7 @@ class LightFlowMatch(LightningModule, Flow):
         self.track_grad_norms = track_grad_norms
         self.in_POS = in_POS
         self.gen_POS = gen_POS
+        self.rlxd_POS = rlxd_POS
 
         self.config_vasp = config_vasp
         self.threshold = threshold
