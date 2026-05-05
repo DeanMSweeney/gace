@@ -142,15 +142,12 @@ def relax_w_mlff(
 
 
 def relax_struc(
-    opt_graph: Data,
+    atoms: Atoms,
     run_mlff: bool = False,
     config_vasp: bool = False,
     mlff_checkpoint: Optional[str] = None,
     accelerator: str = "gpu",
     seed: int = 42,
-    gen_POS: Optional[str] = None,
-    in_POS: Optional[str] = None,
-    rlxd_POS: Optional[str] = None,
 ) -> Data:
     """
     Post-generation relaxation step.
@@ -180,7 +177,6 @@ def relax_struc(
                 cpu=(accelerator == "cpu"),
                 seed=seed,
             )
-            atoms = data_to_atoms(opt_graph, pos_type=opt_graph.pos_generated)
             atoms_relaxed, _, _ = relax_w_mlff(
                 atoms=atoms,
                 calculator=calculator,
@@ -188,19 +184,7 @@ def relax_struc(
                 steps=200,
                 optimizer="BFGS",
             )
-        mlff_relaxed_pos = torch.tensor(
-            atoms_relaxed.get_positions(),
-            device=opt_graph.pos.device,
-            dtype=opt_graph.pos.dtype,
-        )
-        opt_graph.pos_generated = mlff_relaxed_pos
+    else:
+        return None
 
-    elif config_vasp:
-        config_DFT(
-            data=opt_graph,
-            gen_POS=gen_POS,
-            in_POS=in_POS,
-            rlxd_POS=rlxd_POS,
-        )
-
-    return opt_graph
+    return atom_relaxed

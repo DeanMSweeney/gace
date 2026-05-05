@@ -162,6 +162,9 @@ class SamplerConfig:
     gen_POS: Optional[str] = None
     """Output path for saving generated (model-predicted) structures during testing"""
 
+    rlxd_POS: Optional[str] = None
+    """Output path for saving relaxed structures (model-predicted) structures during testing"""
+
     config_vasp: bool = False
     """Whether to generate VASP DFT input files for generated structures
     Creates INCAR, KPOINTS, POTCAR files for DFT verification workflow
@@ -172,7 +175,7 @@ class SamplerConfig:
     run_mlff: bool = False
     """Whether to run MLFF relaxation after generation"""
 
-    mlff_checkpoint: str = "EquiformerV2-153M-S2EF-OC20-All+MD"
+    mlff_checkpoint: str = "EquiformerV2-31M-S2EF-OC20-All+MD"
     """Path to MLFF checkpoint for relaxation"""
 
     # ==================== Evaluation Criteria ================
