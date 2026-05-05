@@ -84,10 +84,6 @@ def main(cfg: Config) -> None:
     if cfg.mode == "eval":
         cfg.precision = 32 
     
-    if cfg.sampler_cfg.run_mlff:
-        declare(">>> Configured for MLFF relaxation on generated samples, setting batch size to 1 ⛷️")
-        cfg.batch_size = 1
-
     # === Reproducibility & Performance Setup ===
     # Seed RNG for reproducibility across multi-GPU training
     pl.seed_everything(cfg.seed, workers=True)
