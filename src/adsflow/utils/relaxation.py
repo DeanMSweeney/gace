@@ -3,7 +3,7 @@ import logging
 import os
 import shutil
 import subprocess
-import sys  # Add this line
+import sys  
 
 import torch
 from torch import Tensor
@@ -188,4 +188,4 @@ def relax_struc(
     else:
         return None
 
-    return atom_relaxed
+    return atoms_relaxed
