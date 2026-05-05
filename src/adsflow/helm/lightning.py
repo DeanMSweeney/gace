@@ -75,6 +75,7 @@ class LightFlowMatch(LightningModule, Flow):
             track_grad_norms: bool=False,
             in_POS=None,
             gen_POS=None,
+            rlxd_POS=None,
             config_vasp: bool=False,
             threshold: float=0.20,
             x_matching: Literal["flow", "endpoint"]="flow",
