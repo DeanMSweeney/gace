@@ -264,7 +264,7 @@ def forge_catalyst(
 
     except Exception as e:
         print(f"[forge_catalyst] Failed to build graph {b}: {e}")
-        return None, None
+        return None
 
 
 def build_graph_from_atoms(
