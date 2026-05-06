@@ -334,7 +334,7 @@ class Flow():
 
             u_x = x1 - x0
 
-            if self.operate_on_torus:
+            if not self.operate_on_torus:
                 u_x = u_x - torch.round(u_x)
 
             # Sample per-graph interpolation time
