@@ -21,6 +21,7 @@ out-claude.txt
 selected_frames-old.parquet
 selected_frames.parquet
 .DS_Store
+tea_debug.log
 
 
 # Folders
