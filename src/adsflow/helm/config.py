@@ -374,6 +374,13 @@ class Config:
     Whether to use informed priors for the noise x0 (forge variant only).
     """
 
+    operate_on_torus: bool = False
+    """
+    Whether to apply the minimum image convention (MIC) to the velocity u_x
+    for catalyst fractional coordinates. When True, u_x is wrapped to [-0.5, 0.5)
+    by subtracting round(u_x), ensuring the shortest path on the periodic torus.
+    """
+
     standardize_ads_pos: bool = False
     """
     Whether to standardize adsorbate positions by subtracting the mean and dividing by
