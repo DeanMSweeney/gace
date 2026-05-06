@@ -179,7 +179,7 @@ class SamplerConfig:
     run_mlff: bool = False
     """Whether to run MLFF relaxation after generation"""
 
-    mlff_checkpoint: str = "EquiformerV2-31M-S2EF-OC20-All+MD"
+    mlff_checkpoint: str = "PaiNN-S2EF-OC20-All"
     """Path to MLFF checkpoint for relaxation"""
 
     # ==================== Evaluation Criteria ================
