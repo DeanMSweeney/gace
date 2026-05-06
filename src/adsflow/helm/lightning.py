@@ -323,21 +323,8 @@ class LightFlowMatch(LightningModule, Flow):
 
         for b in range(num_graphs):
             atoms = forge_catalyst(opt_graph, b, prim_batch, ads_batch)
-            target_ads_dists = opt_graph.ads_pairwise_dist[ads_batch == b].cpu().numpy()  # (N_ads_b, 15)
-            result = check_validity(atoms, self.covalent_radii_scale, target_ads_dists=target_ads_dists)
 
-            metrics = {
-                "vol_ok":      float(result["vol_ok"]),
-                "cat_dist_ok":     float(result["dist_ok"]),
-                "ads_dist_ok": float(result["ads_dist_ok"]),
-                "sample_is_valid":    float(result["is_valid"]),
-                "ads_dist_mae": float(result["ads_dist_mae"])
-            }
- 
-            for key, val in metrics.items():
-                self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
-
-            if result["is_valid"]: 
+            if atoms is not None: 
                 atoms_rlxd = relax_struc(
                         atoms=atoms,
                         run_mlff=self.run_mlff,
@@ -346,8 +333,22 @@ class LightFlowMatch(LightningModule, Flow):
                         accelerator=self.accelerator,
                         seed=self.seed,
                     )
+                
+                target_ads_dists = opt_graph.ads_pairwise_dist[ads_batch == b].cpu().numpy()  # (N_ads_b, 15)
+                result = check_validity(atoms_rlxd, self.covalent_radii_scale, target_ads_dists=target_ads_dists)
 
-                if self.gen_POS:
+                metrics = {
+                    "vol_ok":      float(result["vol_ok"]),
+                    "cat_dist_ok":     float(result["dist_ok"]),
+                    "ads_dist_ok": float(result["ads_dist_ok"]),
+                    "sample_is_valid":    float(result["is_valid"]),
+                    "ads_dist_mae": float(result["ads_dist_mae"])
+                }
+ 
+            for key, val in metrics.items():
+                self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
+
+                if self.gen_POS and result["is_valid"]:
                     os.makedirs(self.gen_POS, exist_ok=True)
                     ase.io.write(
                         os.path.join(self.gen_POS, f'{batch_idx}_{b}.vasp'),
@@ -355,7 +356,7 @@ class LightFlowMatch(LightningModule, Flow):
                         format='vasp',
                     )
 
-                if self.rlxd_POS and self.run_mlff:
+                if self.rlxd_POS and self.run_mlff and result["is_valid"]:
                     os.makedirs(self.rlxd_POS, exist_ok=True)
                     ase.io.write(
                         os.path.join(self.rlxd_POS, f'{batch_idx}_{b}.vasp'),
