@@ -3,7 +3,6 @@
 from functools import partial
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
-from fairchem.core.models.scn.smearing import GaussianSmearing
 
 import torch
 import torch.nn as nn
@@ -107,7 +106,7 @@ class TransformerModule(nn.Module):
         self.input_dim = spatial_dim + atom_dim
         self.time_dim = 1
         self.prim_cond_dim = 9   # atom_types, frac_coords, lengths, angles, T_matrix, supercell_lattice, posenc, conditions, type
-        self.ads_cond_dim = 6    # ads_atom_types, ads_pos, ads_pairwise_dist, posenc, conditions, type
+        self.ads_cond_dim = 6    # ads_atom_types, ads_pos, ads_ref_centered_pos, posenc, conditions, type
         self.comb_input_dim = self.input_dim + self.time_dim
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
@@ -135,8 +134,7 @@ class TransformerModule(nn.Module):
 
         # Embeddings for the adsorbate
         self.pos_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)       # absolute positions (B, N,  3) → (B, N,  C)
-        self.ads_pairwise_rbf = GaussianSmearing(0.0, rbf_max, num_rbf, 2.0)
-        self.ads_pairwise_dist_embed = nn.Linear(num_rbf, hidden_dim, bias=False)  # (B, N,  num_rbf) → (B, N,  C)
+        self.ads_ref_centered_pos_embed = nn.Linear(3, hidden_dim, bias=False)  # (B, N, 3) → (B, N, C)
 
         # type embedding: 0 -> slab, 1 -> adsorbate
         self.type_embed = nn.Embedding(2, hidden_dim)
@@ -349,7 +347,7 @@ class TransformerModule(nn.Module):
             Tuple[
                 Int["b n"],      # type: ignore - ads_atom_types (integer indices, conditioning)
                 Float["b n 3"],  # type: ignore - ads_pos (absolute Cartesian positions)
-                Float["b n k"],  # type: ignore - ads_pairwise_dist (K neighbours)
+                Float["b n 3"],  # type: ignore - ads_ref_centered_pos
             ]
             | List[torch.Tensor]
         ),
@@ -415,7 +413,7 @@ class TransformerModule(nn.Module):
 
 
         # adsorbate data at time t
-        ads_atom_types, ads_pos, ads_pairwise_dist = x_ads
+        ads_atom_types, ads_pos, ads_ref_centered_pos = x_ads
         ads_pos_t, = t_ads
 
         device = prim_padding_mask.device
@@ -448,13 +446,9 @@ class TransformerModule(nn.Module):
         ).unsqueeze(1)  # (B, 1, C)
 
         # ── Ads embeddings ───────────────────────────────────────────────────
-        embed_ads_atom_types = self.atom_type_embed(ads_atom_types)  # (B, N, , C) — shared table
-        embed_ads_pos = self.pos_embed(ads_pos)                    # (B, N,  C)
-        # ads_pairwise_dist: (B, N,  K_neighbors) raw distances → Gaussian smearing → sum over neighbors → project
-        smeared = self.ads_pairwise_rbf(ads_pairwise_dist.reshape(-1, 1))    # (B*N*K_neighbors, num_rbf)
-        smeared = smeared.reshape(*ads_pairwise_dist.shape, -1)              # (B, N,  K_neighbors, num_rbf)
-        smeared = smeared.sum(-2)                                            # (B, N,  num_rbf) — pool over neighbors
-        embed_ads_pairwise_dist = self.ads_pairwise_dist_embed(smeared)      # (B, N,  C)
+        embed_ads_atom_types = self.atom_type_embed(ads_atom_types)                    # (B, N, C) — shared table
+        embed_ads_pos = self.pos_embed(ads_pos)                                      # (B, N, C)
+        embed_ads_ref_centered_pos = self.ads_ref_centered_pos_embed(ads_ref_centered_pos)  # (B, N, C)
 
         # ── Positional encoding (over combined seq) ──────────────────────────
         if self.add_sinusoid_posenc:
@@ -530,22 +524,22 @@ class TransformerModule(nn.Module):
             embed_conditions_ads = embed_conditions.expand(-1, ads_seq_len, -1)
 
             h_in_ads = torch.cat([
-                embed_ads_atom_types,       # (B, N,  C)
-                embed_ads_pos,              # (B, N,  C)
-                embed_ads_pairwise_dist,    # (B, N,  C)
-                embed_posenc_ads,           # (B, N,  C)
-                embed_conditions_ads,       # (B, N,  C)
-                embed_ads_type_ids,         # (B, N,  C)
-            ], dim=-1)  # (B, N,  5*C)
+                embed_ads_atom_types,           # (B, N, C)
+                embed_ads_pos,                  # (B, N, C)
+                embed_ads_ref_centered_pos,     # (B, N, C)
+                embed_posenc_ads,               # (B, N, C)
+                embed_conditions_ads,           # (B, N, C)
+                embed_ads_type_ids,             # (B, N, C)
+            ], dim=-1)  # (B, N, 6*C)
             h_in_ads = self.combine_input_ads(h_in_ads)  # (B, N,  C)
         else:
             h_in_ads = (
-                embed_ads_atom_types        # (B, N,  C)
-                + embed_ads_pos             # (B, N,  C)
-                + embed_ads_pairwise_dist   # (B, N,  C)
-                + embed_posenc_ads          # (B, N,  C)
-                + embed_conditions          # (B, 1, C) → broadcasts
-                + embed_ads_type_ids        # (B, N,  C)
+                embed_ads_atom_types            # (B, N, C)
+                + embed_ads_pos                 # (B, N, C)
+                + embed_ads_ref_centered_pos    # (B, N, C)
+                + embed_posenc_ads              # (B, N, C)
+                + embed_conditions              # (B, 1, C) → broadcasts
+                + embed_ads_type_ids            # (B, N, C)
             )
         h_in_ads = h_in_ads * ads_real_mask.unsqueeze(-1)  # (B, N,  C)
 
@@ -764,7 +758,7 @@ class TransformerModule(nn.Module):
             Tuple[
                 Int["b n"],      # type: ignore - ads_atom_types (integer indices, conditioning)
                 Float["b n 3"],  # type: ignore - ads_pos (absolute Cartesian positions)
-                Float["b n k"],  # type: ignore - ads_pairwise_dist (K neighbours)
+                Float["b n 3"],  # type: ignore - ads_ref_centered_pos
             ]
             | List[torch.Tensor]
         ),

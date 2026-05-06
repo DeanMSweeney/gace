@@ -191,7 +191,7 @@ class LightFlowMatch(LightningModule, Flow):
             x_ads=(
                 x_ads.data["ads_atomic_numbers"],      # (B, N)
                 x_ads.data["ads_pos"],                 # (B, N, 3)
-                x_ads.data["ads_pairwise_dist"],       # (B, N, D)
+                x_ads.data["ads_ref_centered_pos"],    # (B, N, 3)
             ),
             t_prim=(t, t, t, t),
             t_ads=(t,),

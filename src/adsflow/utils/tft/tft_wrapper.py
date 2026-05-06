@@ -174,11 +174,11 @@ class PyGToTensorDict:
                 max_num_nodes=max_num_nodes,
             )  # (B, N_ads)
 
-            sd["ads_pairwise_dist"], _ = to_dense_batch(
-                data.ads_pairwise_dist,
+            sd["ads_ref_centered_pos"], _ = to_dense_batch(
+                data.ads_ref_centered_pos,
                 atom_batch,
                 max_num_nodes=max_num_nodes,
-            )  # (B, N_ads, 15)
+            )  # (B, N_ads, 3)
         else:
             # Node-level: positions (already prim-only after _build_positions_path)
             sd["frac_coords"], _  = to_dense_batch(
