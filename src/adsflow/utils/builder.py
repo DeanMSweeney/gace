@@ -292,8 +292,6 @@ def build_graph_from_atoms(
     N_ads = len(ads_z_np)
 
     ads_pos_t = torch.from_numpy(ads_pos_np)
-    ads_com   = ads_pos_t.mean(dim=0)              # (3,)
-    ads_rel_pos = ads_pos_t - ads_com              # (N_ads, 3)
     ads_pairwise_dist = compute_ads_pairwise_distances(ads_pos_t)  # (N_ads, 15)
 
     tags = torch.cat([
@@ -305,13 +303,10 @@ def build_graph_from_atoms(
         num_nodes=num_prim_atoms + N_ads,
         pos=torch.zeros(num_prim_atoms, 3),
         tags=tags,
-        # Adsorbate conditioning (fixed throughout sampling)
         ads_atomic_numbers=torch.from_numpy(ads_z_np),
-        ads_pairwise_dist=ads_pairwise_dist,
-        ads_com=ads_com.unsqueeze(0),              # (1, 3) → batches to (B, 3)
-        ads_rel_pos=ads_rel_pos,                   # (N_ads, 3)
+        ref_ads_pos=ads_pos_t,                     # (N_ads, 3) — centered on-the-fly in sample()
+        ads_pairwise_dist=ads_pairwise_dist,       # (N_ads, 15) — used in validity check
         ads_binding_energy=torch.tensor(binding_energy, dtype=torch.float32),
-        # Placeholder lattice / geometry (overwritten from noise in _sample_forge)
         lengths_scaled=torch.zeros(1, 3),
         angles_radians=torch.zeros(1, 3),
         transformation_matrix=torch.eye(3, dtype=torch.long).unsqueeze(0),  # (1, 3, 3)

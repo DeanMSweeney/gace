@@ -136,3 +136,31 @@ def adsorbate_center_of_mass(
 
     com = com / weight_sum
     return com
+
+
+def random_so3_rotation(ref_pos: Tensor, ads_batch: Tensor, B: int) -> Tensor:
+    """Center ref_pos by its per-graph centroid and apply a random SO(3) rotation.
+
+    Rotation matrices are sampled uniformly (Haar measure) via QR decomposition
+    of a random Gaussian matrix, with det fixed to +1 (proper rotations only).
+
+    Args:
+        ref_pos:   (N_ads, 3) reference adsorbate positions in Cartesian Å.
+        ads_batch: (N_ads,) graph index for each adsorbate atom.
+        B:         Number of graphs in the batch.
+
+    Returns:
+        (N_ads, 3) centered and randomly rotated positions.
+    """
+    from torch_scatter import scatter
+
+    com = scatter(ref_pos, ads_batch, dim=0, dim_size=B, reduce="mean")  # (B, 3)
+    centered = ref_pos - com[ads_batch]                                   # (N_ads, 3)
+
+    M = torch.randn(B, 3, 3, device=ref_pos.device)
+    Q, _ = torch.linalg.qr(M)
+    sign = torch.linalg.det(Q).sign().unsqueeze(-1).unsqueeze(-1)        # (B, 1, 1)
+    R = Q * sign                                                          # (B, 3, 3)
+
+    R_per_atom = R[ads_batch]                                             # (N_ads, 3, 3)
+    return torch.bmm(R_per_atom, centered.unsqueeze(-1)).squeeze(-1)     # (N_ads, 3)

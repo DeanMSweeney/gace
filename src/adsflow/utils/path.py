@@ -8,7 +8,7 @@ from torchdiffeq import odeint
 from typing import Optional, Literal, Union, Tuple
 
 from adsflow.utils.invariance import pbc_aware_delta, batched_ot_align, global_ot_align
-from adsflow.utils.utils import adsorbate_neighborhood_mask
+from adsflow.utils.utils import adsorbate_neighborhood_mask, random_so3_rotation
 from adsflow.utils.builder import lattice_params_to_matrix
 from adsflow.utils.euler import euler_step, ctmc_step
 
@@ -404,6 +404,13 @@ class Flow():
         if self.x_matching == "flow":
             data.u_ads_pos = alpha_t_ads_grad * u_ads
 
+        # Center ref_ads_pos and apply random SO(3) rotation each training step.
+        # Stored as ads_ref_centered_pos — conditioning signal, distinct from ads_pos.
+        B = t.shape[0]
+        data.ads_ref_centered_pos = random_so3_rotation(
+            data.ref_ads_pos.float(), ads_batch, B
+        )  # (N_ads, 3)
+
         return data
 
     def _build_atom_type_path(self, data: Data, t: Tensor, cosine_schd_freq: Tensor=1) -> Data:
@@ -481,7 +488,7 @@ class Flow():
 
         Args:
             input_graph: PyG Data/Batch. Adsorbate conditioning fields
-                (ads_atomic_numbers, ads_pairwise_dist, ads_binding_energy) are
+                (ads_atomic_numbers, ads_ref_centered_pos, ads_binding_energy) are
                 used as-is; all generated modalities are re-initialised from prior.
             t: 1-D tensor of monotonically increasing time points in [0, 1].
                 The loop takes len(t)-1 Euler steps.
@@ -499,6 +506,12 @@ class Flow():
         self.primitive_mask = (data.tags == 1)
         self.adsorbate_mask = (data.tags == 2)
         B = int(data.batch.max().item()) + 1
+
+        # Center ref_ads_pos for conditioning (no rotation at inference)
+        ads_batch = data.batch[self.adsorbate_mask]
+        ref_ads_pos = data.ref_ads_pos.float()
+        com = scatter(ref_ads_pos, ads_batch, dim=0, dim_size=B, reduce="mean")  # (B, 3)
+        data.ads_ref_centered_pos = ref_ads_pos - com[ads_batch]                 # (N_ads, 3)
 
         # Shift ads conditioning to 0-indexed (matches _build_atom_type_path)
         data.ads_atomic_numbers = data.ads_atomic_numbers.long() - 1
