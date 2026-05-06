@@ -332,10 +332,10 @@ class Flow():
             if self.optimal_transport:
                 x0 = global_ot_align(source=x0, target=x1, pbc_aware=True)
 
-            u_x = x1 - x0 
-            
-            #u_x_n0 = torch.round(u_x)
-            #u_x = u_x - u_x_n0
+            u_x = x1 - x0
+
+            if self.operate_on_torus:
+                u_x = u_x - torch.round(u_x)
 
             # Sample per-graph interpolation time
             t_x_per_graph = t # B, 1 

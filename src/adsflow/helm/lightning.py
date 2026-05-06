@@ -82,6 +82,7 @@ class LightFlowMatch(LightningModule, Flow):
             schedule_type: Literal["linear", "cosine"]="linear",
             optimal_transport: bool=False,
             informed_priors: bool=True,
+            operate_on_torus: bool=False,
             write_eval_metrics: bool=False,
             num_integration_steps: int=1,
             run_mlff: bool=False,
@@ -133,6 +134,7 @@ class LightFlowMatch(LightningModule, Flow):
         self.schedule_type = schedule_type  # "linear" or "cosine"
         self.optimal_transport = optimal_transport
         self.informed_priors = informed_priors
+        self.operate_on_torus = operate_on_torus
         self.write_eval_metrics = write_eval_metrics
         self.num_integration_steps = num_integration_steps
         self.run_mlff = run_mlff
