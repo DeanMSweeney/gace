@@ -475,7 +475,7 @@ class Flow():
             self,
             input_graph: Data,
             t: torch.Tensor,  # Time points, e.g. linspace(0, 1, n_steps)
-            num_prim_atoms: Optional[int] = None,
+            num_prim_atoms: Optional[Union[int, torch.Tensor]] = None,
             refine_final: bool = False,
     ) -> Data:
         """Generate structures for the forge variant via a custom Euler loop.
@@ -519,16 +519,13 @@ class Flow():
 
         if not build_from_truth: # TOGGLED ON ONLY FOR TESTING THE BUILD PROCESS, NORMALLY OFF 
             if num_prim_atoms is not None:
+                total_prim = int(num_prim_atoms.sum().item())
                 ads_mask = (data.tags == 2)
-                new_prim_batch = torch.repeat_interleave(
-                    torch.arange(B, device=device), num_prim_atoms
-                )
-                new_prim_tags = torch.ones(
-                    B * num_prim_atoms, dtype=data.tags.dtype, device=device
-                )
+                new_prim_batch = torch.repeat_interleave(torch.arange(B, device=device), num_prim_atoms)
+                new_prim_tags = torch.ones(total_prim, dtype=data.tags.dtype, device=device)
                 data.batch = torch.cat([new_prim_batch, data.batch[ads_mask]])
                 data.tags  = torch.cat([new_prim_tags,  data.tags[ads_mask]])
-                data.pos   = torch.zeros(B * num_prim_atoms, 3, device=device)
+                data.pos   = torch.zeros(total_prim, 3, device=device)
                 self.primitive_mask = (data.tags == 1)
                 self.adsorbate_mask = (data.tags == 2)
 

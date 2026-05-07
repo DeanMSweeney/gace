@@ -1,4 +1,5 @@
 import contextlib
+import json
 import logging
 import os
 import numpy as np
@@ -16,7 +17,7 @@ from adsflow.utils.path import Flow
 from adsflow.utils.relaxation import relax_struc
 from adsflow.utils.atoms import write_strucs
 from adsflow.utils.tft.tft_wrapper import PyGToTensorDict
-from adsflow.utils.builder import forge_catalyst
+from adsflow.utils.builder import forge_catalyst, sample_prim_atom_counts
 from adsflow.utils.evaluator import check_validity
 import ase.io
 
@@ -89,7 +90,7 @@ class LightFlowMatch(LightningModule, Flow):
             mlff_checkpoint: Optional[str]=None,
             accelerator: str="gpu",
             seed: int=42,
-            num_prim_atoms: Optional[int]=3,
+            num_prim_atoms: Optional[int]=None,
             refine_final: bool=False,
             target_binding_E: Optional[float]=None,
             num_generated_samples: int=1,
@@ -152,6 +153,11 @@ class LightFlowMatch(LightningModule, Flow):
         # Path, loss, and Euler integration run in normalized space; denormalize only at sampling output.
         self.register_buffer("ads_pos_mean", torch.tensor(ads_pos_mean, dtype=torch.float32))
         self.register_buffer("ads_pos_std", torch.tensor(ads_pos_std, dtype=torch.float32))
+
+        _hist_path = os.path.join(os.path.dirname(__file__), "primitive_atom_distribution.json")
+        with open(_hist_path) as f:
+            hist = json.load(f)["prim_slab_num_atoms_hist"]
+        self.register_buffer("prim_atoms_hist", torch.tensor(hist, dtype=torch.float32))
 
         # Diagnostic mode: detailed loss analysis for model development
         self._write_f_u = False
@@ -317,7 +323,9 @@ class LightFlowMatch(LightningModule, Flow):
         """
         
         t = torch.linspace(0., 1, self.num_integration_steps, device=data.pos.device, dtype=data.pos.dtype)
-        opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=self.num_prim_atoms, refine_final=self.refine_final)
+        B = int(data.batch.max().item()) + 1
+        counts = sample_prim_atom_counts(B, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
+        opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts, refine_final=self.refine_final)
 
         prim_batch = opt_graph.batch[opt_graph.tags == 1]
         ads_batch  = opt_graph.batch[opt_graph.tags == 2]
@@ -398,13 +406,15 @@ class LightFlowMatch(LightningModule, Flow):
             device=data.pos.device, dtype=torch.float32,
         )
 
+        B = int(data.batch.max().item()) + 1
         all_atoms = []
         for sample_idx in range(self.num_generated_samples):
+            counts = sample_prim_atom_counts(B, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
             opt_graph = self.sample(
                 input_graph=data,
                 t=t,
                 ode_method=self.ode_method,
-                num_prim_atoms=self.num_prim_atoms,
+                num_prim_atoms=counts,
                 refine_final=self.refine_final,
             )
 

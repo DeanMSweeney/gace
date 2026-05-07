@@ -183,7 +183,9 @@ def main(cfg: Config) -> None:
     # --- Evaluation Mode ---
     # Load test dataset for model evaluation
     elif cfg.mode == "eval" and cfg.oc20_test:
+        n = cfg.sampler_cfg.get("num_prim_atoms", None)
         declare(f">>> Activated Evaluation mode with OC20-test: {cfg.oc20_test} 🦉")
+        declare(f">>> Primitive atom count: {'fixed at ' + str(n) if n is not None else 'sampling from histogram'} 🧙🏽‍♀️")
         ptst = {"src": cfg.oc20_test}
         test_set = LazyLmdbDataset(ptst)
         test_set = Subset(test_set, indices=range(100))
@@ -197,7 +199,9 @@ def main(cfg: Config) -> None:
     # --- Generation Mode ---
     # Build Data object from adsorbate molecule POSCAR + target binding energy
     elif cfg.mode == "generate" and cfg.sampler_cfg.in_POS:
+        n = cfg.sampler_cfg.get("num_prim_atoms", None)
         declare(">>> Activated Generation mode with user adsorbate input")
+        declare(f">>> Primitive atom count: {'fixed at ' + str(n) if n is not None else 'sampled from histogram'}")
         mol_atoms = ase.io.read(cfg.sampler_cfg.in_POS)
         initial_graph = build_graph_from_atoms(
             mol_atoms=mol_atoms,

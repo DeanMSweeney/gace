@@ -267,6 +267,21 @@ def forge_catalyst(
         return None
 
 
+def sample_prim_atom_counts(
+    B: int,
+    device: torch.device,
+    hist: Optional[torch.Tensor] = None,
+    num_prim_atoms: Optional[int] = None,
+) -> torch.Tensor:
+    """Sample per-graph primitive atom counts.
+
+    num_prim_atoms takes priority over hist if both are set.
+    """
+    if num_prim_atoms is not None:
+        return torch.full((B,), num_prim_atoms, dtype=torch.long, device=device)
+    return torch.multinomial(hist.expand(B, -1), num_samples=1).squeeze(1)
+
+
 def build_graph_from_atoms(
     mol_atoms: Atoms,
     binding_energy: float,
