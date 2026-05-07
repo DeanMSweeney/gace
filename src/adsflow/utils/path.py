@@ -613,6 +613,7 @@ class Flow():
         data.angles_generated          = data.angles_radians
         data.transformation_matrix     = data.transformation_matrix.round().long()
         data.M_generated               = data.transformation_matrix
+
         
         # Denormalize adsorbate positions back to raw Å for output (only if standardized)
         if self.standardize_ads_pos:
