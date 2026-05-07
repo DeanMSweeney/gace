@@ -148,7 +148,7 @@ class SamplerConfig:
     """Target adsorption binding energy (eV) for structure generation.
     Passed to the model as a conditioning signal during forge sampling."""
 
-    num_prim_atoms: Optional[int] = 3
+    num_prim_atoms: Optional[int] = None
     """Number of primitive atoms per graph to use during forge sampling.
     If None, uses the atom count from the data. Set to e.g. 3 to force smaller unit cells."""
 
@@ -384,7 +384,7 @@ class Config:
     standardize_ads_pos: bool = False
     """
     Whether to standardize adsorbate positions by subtracting the mean and dividing by
-    the standard deviation before flow matching.
+    the standard deviation before flow matching. 
     - True: adsorbate positions are z-score normalized (zero mean, unit variance)
     - False: adsorbate positions are used as-is (default)
     """
