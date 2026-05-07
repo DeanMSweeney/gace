@@ -336,6 +336,7 @@ class LightFlowMatch(LightningModule, Flow):
                         seed=self.seed,
                     )
                 
+                atoms_rlxd = atoms_rlxd if self.run_mlff else atoms
                 target_ads_dists = opt_graph.ads_pairwise_dist[ads_batch == b].cpu().numpy()  # (N_ads_b, 15)
                 result = check_validity(atoms_rlxd, self.covalent_radii_scale, target_ads_dists=target_ads_dists)
 
@@ -344,11 +345,13 @@ class LightFlowMatch(LightningModule, Flow):
                     "cat_dist_ok":     float(result["dist_ok"]),
                     "ads_dist_ok": float(result["ads_dist_ok"]),
                     "sample_is_valid":    float(result["is_valid"]),
-                    "ads_dist_mae": float(result["ads_dist_mae"])
                 }
+
+                if result["ads_dist_mae"] is not None: 
+                    metrics["ads_dist_mae"] = float(result["ads_dist_mae"])
  
-            for key, val in metrics.items():
-                self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
+                for key, val in metrics.items():
+                    self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
 
                 if self.gen_POS and result["is_valid"]:
                     os.makedirs(self.gen_POS, exist_ok=True)
@@ -365,6 +368,7 @@ class LightFlowMatch(LightningModule, Flow):
                         atoms_rlxd,
                         format='vasp',
                     )
+
         return   
 
     def predict_step(self, data: Data, batch_idx: int):
