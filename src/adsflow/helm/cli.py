@@ -186,7 +186,7 @@ def main(cfg: Config) -> None:
         declare(f">>> Activated Evaluation mode with OC20-test: {cfg.oc20_test} 🦉")
         ptst = {"src": cfg.oc20_test}
         test_set = LazyLmdbDataset(ptst)
-        test_set = Subset(test_set, indices=range(10))
+        test_set = Subset(test_set, indices=range(100))
         test_loader = DataLoader(
             dataset=test_set,
             batch_size=cfg.batch_size,
