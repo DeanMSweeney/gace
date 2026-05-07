@@ -50,4 +50,5 @@ poscar*/
 analysis/
 .claude/CLAUDE.md
 generated_samples/
+datasets/factorized
 *strucs*/
