@@ -395,12 +395,9 @@ class LightFlowMatch(LightningModule, Flow):
         Returns:
             List of ASE Atoms objects (one per graph in the batch).
         """
-        # Override binding energy from config if provided
         if self.target_binding_E is not None:
-            B = int(data.batch.max().item()) + 1
-            data.ads_binding_energy = torch.full(
-                (B,), self.target_binding_E,
-                device=data.pos.device, dtype=torch.float32,
+            data.ads_binding_energy = torch.tensor(
+                [self.target_binding_E], device=data.pos.device, dtype=torch.float32,
             )
 
         t = torch.linspace(
@@ -408,62 +405,65 @@ class LightFlowMatch(LightningModule, Flow):
             device=data.pos.device, dtype=torch.float32,
         )
 
-        B = int(data.batch.max().item()) + 1
         all_atoms = []
-        for sample_idx in tqdm(range(self.num_generated_samples)):
-            counts = sample_prim_atom_counts(B, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
+        all_metrics = []
+        for sample_idx in range(self.num_generated_samples):
+            counts = sample_prim_atom_counts(1, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
             opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts, refine_final=self.refine_final)
 
             prim_batch = opt_graph.batch[opt_graph.tags == 1]
             ads_batch  = opt_graph.batch[opt_graph.tags == 2]
-            num_graphs = int(opt_graph.batch.max().item()) + 1
 
-            for b in range(num_graphs):
-                atoms = forge_catalyst(opt_graph, b, prim_batch, ads_batch)
+            atoms = forge_catalyst(opt_graph, 0, prim_batch, ads_batch)
 
-                if atoms is not None:
-                    atoms_rlxd = relax_struc(
-                        atoms=atoms,
-                        run_mlff=self.run_mlff,
-                        config_vasp=self.config_vasp,
-                        mlff_checkpoint=self.mlff_checkpoint,
-                        accelerator=self.accelerator,
-                        seed=self.seed,
+            if atoms is not None:
+                atoms_rlxd = relax_struc(
+                    atoms=atoms,
+                    run_mlff=self.run_mlff,
+                    config_vasp=self.config_vasp,
+                    mlff_checkpoint=self.mlff_checkpoint,
+                    accelerator=self.accelerator,
+                    seed=self.seed,
+                )
+
+                atoms_rlxd = atoms_rlxd if self.run_mlff else atoms
+                target_ads_dists = opt_graph.ads_pairwise_dist[ads_batch == 0].cpu().numpy()
+                result = check_validity(atoms_rlxd, self.covalent_radii_scale, target_ads_dists=target_ads_dists)
+
+                metrics = {
+                    "vol_ok":          float(result["vol_ok"]),
+                    "cat_dist_ok":     float(result["cat_dist_ok"]),
+                    "ads_dist_ok":     float(result["ads_dist_ok"]),
+                    "sample_is_valid": float(result["is_valid"]),
+                }
+                if result["ads_dist_mae"] is not None:
+                    metrics["ads_dist_mae"] = float(result["ads_dist_mae"])
+
+                all_metrics.append(metrics)
+
+                if self.gen_POS and result["is_valid"]:
+                    os.makedirs(self.gen_POS, exist_ok=True)
+                    ase.io.write(
+                        os.path.join(self.gen_POS, f'{batch_idx}_{sample_idx}.vasp'),
+                        atoms,
+                        format='vasp',
                     )
 
-                    atoms_rlxd = atoms_rlxd if self.run_mlff else atoms
-                    target_ads_dists = opt_graph.ads_pairwise_dist[ads_batch == b].cpu().numpy()
-                    result = check_validity(atoms_rlxd, self.covalent_radii_scale, target_ads_dists=target_ads_dists)
+                if self.rlxd_POS and self.run_mlff and result["is_valid"]:
+                    os.makedirs(self.rlxd_POS, exist_ok=True)
+                    ase.io.write(
+                        os.path.join(self.rlxd_POS, f'{batch_idx}_{sample_idx}.vasp'),
+                        atoms_rlxd,
+                        format='vasp',
+                    )
 
-                    metrics = {
-                        "vol_ok":          float(result["vol_ok"]),
-                        "cat_dist_ok":     float(result["cat_dist_ok"]),
-                        "ads_dist_ok":     float(result["ads_dist_ok"]),
-                        "sample_is_valid": float(result["is_valid"]),
-                    }
-                    if result["ads_dist_mae"] is not None:
-                        metrics["ads_dist_mae"] = float(result["ads_dist_mae"])
+            all_atoms.append(atoms)
 
-                    for key, val in metrics.items():
-                        self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
-
-                    if self.gen_POS and result["is_valid"]:
-                        os.makedirs(self.gen_POS, exist_ok=True)
-                        ase.io.write(
-                            os.path.join(self.gen_POS, f'{batch_idx}_{sample_idx}_{b}.vasp'),
-                            atoms,
-                            format='vasp',
-                        )
-
-                    if self.rlxd_POS and self.run_mlff and result["is_valid"]:
-                        os.makedirs(self.rlxd_POS, exist_ok=True)
-                        ase.io.write(
-                            os.path.join(self.rlxd_POS, f'{batch_idx}_{sample_idx}_{b}.vasp'),
-                            atoms_rlxd,
-                            format='vasp',
-                        )
-
-                all_atoms.append(atoms)
+        if all_metrics:
+            keys = all_metrics[0].keys()
+            avgs = {k: np.mean([m[k] for m in all_metrics if k in m]) for k in keys}
+            print(f"[predict batch={batch_idx} avg over {len(all_metrics)} samples] " +
+                  " ".join(f"{k}={v:.4f}" for k, v in avgs.items()))
 
         return all_atoms
 
