@@ -159,10 +159,10 @@ class SamplerConfig:
     path for saving during testing (POSCAR format).
     """
 
-    gen_POS: Optional[str] = None
+    gen_POS: Optional[str] = "gen_strucs/" 
     """Output path for saving generated (model-predicted) structures during testing"""
 
-    rlxd_POS: Optional[str] = None
+    rlxd_POS: Optional[str] = "rlxd_strucs/"
     """Output path for saving relaxed structures (model-predicted) structures during testing"""
 
     config_vasp: bool = False
