@@ -201,7 +201,7 @@ def main(cfg: Config) -> None:
     elif cfg.mode == "generate" and cfg.sampler_cfg.in_POS:
         n = cfg.sampler_cfg.get("num_prim_atoms", None)
         declare(">>> Activated Generation mode with user adsorbate input")
-        declare(f">>> Primitive atom count: {'fixed at ' + str(n) if n is not None else 'sampled from histogram'}")
+        declare(f">>> Primitive atom count: {'fixed at ' + str(n) if n is not None else 'sampling from histogram'} 🧙🏽‍♀️")
         mol_atoms = ase.io.read(cfg.sampler_cfg.in_POS)
         initial_graph = build_graph_from_atoms(
             mol_atoms=mol_atoms,
