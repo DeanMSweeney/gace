@@ -118,6 +118,7 @@ def analyze_lmdb(dataset_path: str, n_samples: int = 10, out_file: str = "catflo
 
     prim_counts: dict[int, int] = {}
     ads_counts:  dict[int, int] = {}
+    prim_element_counts: dict[int, int] = {}
     max_prim, max_prim_idx = 0, -1
     max_ads,  max_ads_idx  = 0, -1
     min_prim, min_prim_idx = float("inf"), -1
@@ -138,6 +139,8 @@ def analyze_lmdb(dataset_path: str, n_samples: int = 10, out_file: str = "catflo
             n_ads  = int(sample.ads_atomic_numbers.shape[0])
             prim_counts[n_prim] = prim_counts.get(n_prim, 0) + 1
             ads_counts[n_ads]   = ads_counts.get(n_ads,  0) + 1
+            for z in set(int(z) for z in sample.atomic_numbers.tolist()):
+                prim_element_counts[z] = prim_element_counts.get(z, 0) + 1
             if n_prim > max_prim:
                 max_prim, max_prim_idx = n_prim, i
             if n_prim < min_prim:
@@ -170,8 +173,31 @@ def analyze_lmdb(dataset_path: str, n_samples: int = 10, out_file: str = "catflo
             _count_table(ads_counts,  "Adsorbate atom counts (n_ads)",            max_ads,  max_ads_idx,  min_ads,  min_ads_idx),
         ])
 
+        _SYMBOLS = [
+            "", "H","He","Li","Be","B","C","N","O","F","Ne","Na","Mg","Al","Si","P","S","Cl","Ar",
+            "K","Ca","Sc","Ti","V","Cr","Mn","Fe","Co","Ni","Cu","Zn","Ga","Ge","As","Se","Br","Kr",
+            "Rb","Sr","Y","Zr","Nb","Mo","Tc","Ru","Rh","Pd","Ag","Cd","In","Sn","Sb","Te","I","Xe",
+            "Cs","Ba","La","Ce","Pr","Nd","Pm","Sm","Eu","Gd","Tb","Dy","Ho","Er","Tm","Yb","Lu",
+            "Hf","Ta","W","Re","Os","Ir","Pt","Au","Hg","Tl","Pb","Bi","Po","At","Rn",
+            "Fr","Ra","Ac","Th","Pa","U","Np","Pu",
+        ]
+
+        def _element_table(counts: dict[int, int]) -> str:
+            lines = [
+                "=" * 70,
+                "Primitive-cell element presence (graphs containing element)",
+                "=" * 70,
+                f"  Unique elements: {len(counts)}",
+                "  Count by element (sorted by count desc):",
+            ]
+            for z, cnt in sorted(counts.items(), key=lambda kv: -kv[1]):
+                sym = _SYMBOLS[z] if z < len(_SYMBOLS) else "?"
+                lines.append(f"    Z={z:>3}  {sym:<4}  {cnt:>10} graphs")
+            return "\n".join(lines)
+
         footer = "\n\n".join([
             atom_count_summary,
+            _element_table(prim_element_counts),
             ads_pos_stats.summary("Adsorbate Cartesian positions (ads_pos)", entry_label="adsorbate atoms"),
             pos_stats.summary("Primitive-cell positions (pos)", entry_label="atoms"),
             lengths_stats.summary("Lattice lengths_scaled", axis_names=("a", "b", "c"), entry_label="samples"),
