@@ -408,15 +408,9 @@ class LightFlowMatch(LightningModule, Flow):
 
         B = int(data.batch.max().item()) + 1
         all_atoms = []
-        for sample_idx in range(self.num_generated_samples):
+        for sample_idx in tqdm(range(self.num_generated_samples)):
             counts = sample_prim_atom_counts(B, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
-            opt_graph = self.sample(
-                input_graph=data,
-                t=t,
-                ode_method=self.ode_method,
-                num_prim_atoms=counts,
-                refine_final=self.refine_final,
-            )
+            opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts, refine_final=self.refine_final)
 
             prim_batch = opt_graph.batch[opt_graph.tags == 1]
             ads_batch  = opt_graph.batch[opt_graph.tags == 2]
