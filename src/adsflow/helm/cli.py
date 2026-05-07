@@ -81,7 +81,7 @@ def main(cfg: Config) -> None:
     defaults_cfg = OmegaConf.create(asdict(defaults))
     cfg = OmegaConf.merge(defaults_cfg, cfg)
 
-    if cfg.mode == "eval":
+    if cfg.mode == "eval" or cfg.mode == "generate":
         cfg.precision = 32 
     
     # === Reproducibility & Performance Setup ===
