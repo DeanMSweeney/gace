@@ -380,12 +380,12 @@ class LightFlowMatch(LightningModule, Flow):
                     )
 
                 if batch_idx == 2 and b == 13: 
-                    print(opt_graph.data.ref_ads_pos[ads_batch == b])
-                    print(opt_graph.data.ads_atomic_number[ads_batch == b])
+                    print(opt_graph.ref_ads_pos[ads_batch == b])
+                    print(opt_graph.ads_atomic_number[ads_batch == b])
                 
                 if batch_idx == 3 and b == 3: 
-                    print(opt_graph.data.ref_ads_pos[ads_batch == b])
-                    print(opt_graph.data.ads_atomic_number[ads_batch == b])
+                    print(opt_graph.ref_ads_pos[ads_batch == b])
+                    print(opt_graph.ads_atomic_number[ads_batch == b])
 
         return   
 
