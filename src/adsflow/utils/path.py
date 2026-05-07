@@ -550,8 +550,7 @@ class Flow():
             data.atomic_numbers_hot = F.one_hot(z0_idx, num_classes=NUM_CLASSES).float()  # (N_slab, 100)
 
         # N^(1/3) scale factor for length denormalisation — lengths_scaled is in normalised space
-        n_atoms = num_prim_atoms if num_prim_atoms is not None else int(self.primitive_mask.sum().item() / B)
-        n_scale = torch.full((B, 1), n_atoms ** (1 / 3), device=device, dtype=torch.float32)  # (B, 1)    
+        n_scale = (num_prim_atoms.float() ** (1 / 3)).unsqueeze(1)  # (B, 1)
 
         # ── Euler integration loop ────────────────────────────────────────────
         if not build_from_truth: 
