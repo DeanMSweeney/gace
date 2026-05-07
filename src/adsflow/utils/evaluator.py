@@ -25,10 +25,10 @@ def check_validity(atoms: Atoms, covalent_radii_scale: float = 0.75, target_ads_
         covalent_radii_scale: Fraction of summed covalent radii used as minimum allowed distance.
 
     Returns:
-        dict with keys: vol_ok (bool), dist_ok (bool), is_valid (bool).
+        dict with keys: vol_ok (bool), cat_dist_ok (bool), ads_dist_ok (bool), is_valid (bool).
     """
     if atoms is None:
-        return {"vol_ok": False, "dist_ok": False, "ads_dist_ok": False, "ads_dist_mae": None, "ads_dist_me": None, "is_valid": False}
+        return {"vol_ok": False, "cat_dist_ok": False, "ads_dist_ok": False, "ads_dist_mae": None, "ads_dist_me": None, "is_valid": False}
 
     # Volume check # intertatomic distance check
     try:
@@ -74,7 +74,7 @@ def check_validity(atoms: Atoms, covalent_radii_scale: float = 0.75, target_ads_
         "cat_dist_ok": cat_dist_ok,
         "ads_dist_ok": ads_dist_ok,
         "ads_dist_mae": ads_dist_mae,
-        "is_valid": vol_ok and dist_ok and ads_dist_ok,
+        "is_valid": vol_ok and cat_dist_ok and ads_dist_ok,
     }
 
 
