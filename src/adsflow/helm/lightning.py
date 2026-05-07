@@ -13,6 +13,8 @@ from lightning.pytorch import LightningModule
 from torch_geometric.data import Data
 from transformers import get_cosine_schedule_with_warmup, get_polynomial_decay_schedule_with_warmup
 
+from tqdm import tqdm
+
 from adsflow.utils.path import Flow
 from adsflow.utils.relaxation import relax_struc
 from adsflow.utils.atoms import write_strucs
