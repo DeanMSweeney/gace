@@ -1,5 +1,4 @@
 # AdsFlow
-![Concept Art](concept_art.png)
 
 AdsFlow is a **conditional flow matching** model for generating catalyst slab + adsorbate structures de novo. It learns a velocity field that transports from Gaussian noise to real DFT-relaxed structures, conditioned on binding energy and spacegroup.
 
