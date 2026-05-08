@@ -159,7 +159,7 @@ class LightFlowMatch(LightningModule, Flow):
         _hist_path = os.path.join(os.path.dirname(__file__), "primitive_atom_distribution.json")
         with open(_hist_path) as f:
             hist = json.load(f)["prim_slab_num_atoms_hist"]
-        self.register_buffer("prim_atoms_hist", torch.tensor(hist, dtype=torch.float32))
+        self.prim_atoms_hist = torch.tensor(hist, dtype=torch.float32)
 
         # Diagnostic mode: detailed loss analysis for model development
         self._write_f_u = False
