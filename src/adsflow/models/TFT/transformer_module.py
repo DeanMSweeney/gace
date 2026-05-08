@@ -3,7 +3,6 @@
 from functools import partial
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
-from fairchem.core.models.scn.smearing import GaussianSmearing
 
 import torch
 import torch.nn as nn
@@ -106,8 +105,8 @@ class TransformerModule(nn.Module):
 
         self.input_dim = spatial_dim + atom_dim
         self.time_dim = 1
-        self.prim_cond_dim = 9  # atom_types, frac_coords, cart_coords, lengths, angles, T_matrix, supercell_lattice, posenc, conditions
-        self.ads_cond_dim = 6   # ads_atom_types, ads_pos, ads_pairwise_dist, supercell_lattice, posenc, conditions
+        self.prim_cond_dim = 9   # atom_types, frac_coords, lengths, angles, T_matrix, supercell_lattice, posenc, conditions, type
+        self.ads_cond_dim = 6    # ads_atom_types, ads_pos, ads_ref_centered_pos, posenc, conditions, type
         self.comb_input_dim = self.input_dim + self.time_dim
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
@@ -126,19 +125,19 @@ class TransformerModule(nn.Module):
         self.custom_weight_init = custom_weight_init
 
         # Embeddings for each the primitive cell
-        self.atom_type_embed = nn.Embedding(atom_dim, hidden_dim)
+        self.atom_type_embed = nn.Embedding(atom_dim, hidden_dim)  # shared with adsorbate
         self.frac_coords_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
-        self.cart_coords_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
         self.lengths_scaled_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
         self.angles_radians_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
         self.transformation_matrix_embed = nn.Linear(9, hidden_dim, bias=False) # matrix is 3 x 3 = 9 total values
         self.supercell_lattice_embed = nn.Linear(9, hidden_dim, bias=False)      # S @ L, also 3 x 3 = 9
 
         # Embeddings for the adsorbate
-        self.ads_atom_type = nn.Embedding(atom_dim, hidden_dim)
-        self.pos_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)       # absolute positions (B, N, 3) → (B, N, C)
-        self.ads_pairwise_rbf = GaussianSmearing(0.0, rbf_max, num_rbf, 2.0)
-        self.ads_pairwise_dist_embed = nn.Linear(num_rbf, hidden_dim, bias=False)  # (B, N, num_rbf) → (B, N, C)
+        self.pos_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)       # absolute positions (B, N,  3) → (B, N,  C)
+        self.ads_ref_centered_pos_embed = nn.Linear(3, hidden_dim, bias=False)  # (B, N, 3) → (B, N, C)
+
+        # type embedding: 0 -> slab, 1 -> adsorbate
+        self.type_embed = nn.Embedding(2, hidden_dim)
 
         if self.add_sinusoid_posenc:
             self.positional_encoding = SinusoidEncoding(
@@ -337,7 +336,6 @@ class TransformerModule(nn.Module):
             Tuple[
                 Float["b m v"],  # type: ignore - atom_types (soft one-hot simplex)
                 Float["b m 3"],  # type: ignore - frac_coords
-                Float["b m 3"],  # type: ignore - cart_coords
                 Float["b 1 3"],  # type: ignore - lengths_scaled
                 Float["b 1 3"],  # type: ignore - angles_radians
                 Float["b 3 3"],  # type: ignore - transformation_matrix
@@ -349,7 +347,7 @@ class TransformerModule(nn.Module):
             Tuple[
                 Int["b n"],      # type: ignore - ads_atom_types (integer indices, conditioning)
                 Float["b n 3"],  # type: ignore - ads_pos (absolute Cartesian positions)
-                Float["b n k"],  # type: ignore - ads_pairwise_dist (K neighbours)
+                Float["b n 3"],  # type: ignore - ads_ref_centered_pos
             ]
             | List[torch.Tensor]
         ),
@@ -410,12 +408,12 @@ class TransformerModule(nn.Module):
         """
 
         # primitive cell data at time t
-        atom_types, frac_coords, cart_coords, lengths_scaled, angles_radians, transformation_matrix, supercell_lattice = x_prim
+        atom_types, frac_coords, lengths_scaled, angles_radians, transformation_matrix, supercell_lattice = x_prim
         atom_types_t, frac_coords_t, lengths_scaled_t, angles_radians_t = t_prim
 
 
         # adsorbate data at time t
-        ads_atom_types, ads_pos, ads_pairwise_dist = x_ads
+        ads_atom_types, ads_pos, ads_ref_centered_pos = x_ads
         ads_pos_t, = t_ads
 
         device = prim_padding_mask.device
@@ -423,6 +421,10 @@ class TransformerModule(nn.Module):
         _, ads_seq_len = ads_padding_mask.shape
         total_seq_len = prim_seq_len + ads_seq_len
 
+        # Create type embeddings: 0 = slab, 1 = adsorbate
+        prim_type_ids = torch.zeros(batch_size, prim_seq_len, device=device, dtype=torch.long)  # (B, M)
+        ads_type_ids  = torch.ones(batch_size, ads_seq_len,  device=device, dtype=torch.long)   # (B, N)
+        
         # ── Prim real-token mask ─────────────────────────────────────────────
         prim_real_mask = 1 - prim_padding_mask.int()  # (B, M)
         ads_real_mask = 1 - ads_padding_mask.int()     # (B, N)
@@ -430,9 +432,8 @@ class TransformerModule(nn.Module):
         global_mask = combined_real_mask.any(-1, keepdim=True).unsqueeze(-1)  # (B, 1, 1)
 
         # ── Prim embeddings ──────────────────────────────────────────────────
-        embed_atom_types = self.atom_type_embed(atom_types.argmax(dim=-1))  # (B, M, C)
-        embed_frac_coords = self.frac_coords_embed(frac_coords)            # (B, M, C)
-        embed_cart_coords = self.cart_coords_embed(cart_coords)            # (B, M, C)
+        embed_atom_types = self.atom_type_embed(atom_types.argmax(dim=-1))  # (B, M,  C)
+        embed_frac_coords = self.frac_coords_embed(frac_coords)             # (B, M,  C)
         embed_lengths_scaled = self.lengths_scaled_embed(lengths_scaled)    # (B, 1, C)
         embed_angles_radians = self.angles_radians_embed(angles_radians)    # (B, 1, C)
         # transformation_matrix: (B, 3, 3) → flatten to (B, 9) → embed → (B, C) → unsqueeze → (B, 1, C)
@@ -445,13 +446,9 @@ class TransformerModule(nn.Module):
         ).unsqueeze(1)  # (B, 1, C)
 
         # ── Ads embeddings ───────────────────────────────────────────────────
-        embed_ads_atom_types = self.ads_atom_type(ads_atom_types)  # (B, N, C)
-        embed_ads_pos = self.pos_embed(ads_pos)                    # (B, N, C)
-        # ads_pairwise_dist: (B, N, K_neighbors) raw distances → Gaussian smearing → sum over neighbors → project
-        smeared = self.ads_pairwise_rbf(ads_pairwise_dist.reshape(-1, 1))    # (B*N*K_neighbors, num_rbf)
-        smeared = smeared.reshape(*ads_pairwise_dist.shape, -1)              # (B, N, K_neighbors, num_rbf)
-        smeared = smeared.sum(-2)                                            # (B, N, num_rbf) — pool over neighbors
-        embed_ads_pairwise_dist = self.ads_pairwise_dist_embed(smeared)      # (B, N, C)
+        embed_ads_atom_types = self.atom_type_embed(ads_atom_types)                    # (B, N, C) — shared table
+        embed_ads_pos = self.pos_embed(ads_pos)                                      # (B, N, C)
+        embed_ads_ref_centered_pos = self.ads_ref_centered_pos_embed(ads_ref_centered_pos)  # (B, N, C)
 
         # ── Positional encoding (over combined seq) ──────────────────────────
         if self.add_sinusoid_posenc:
@@ -459,7 +456,11 @@ class TransformerModule(nn.Module):
         else:
             embed_posenc = torch.zeros(batch_size, total_seq_len, self.hidden_dim, device=device)
         embed_posenc_prim = embed_posenc[:, :prim_seq_len, :]  # (B, M, C)
-        embed_posenc_ads = embed_posenc[:, prim_seq_len:, :]   # (B, N, C)
+        embed_posenc_ads = embed_posenc[:, prim_seq_len:, :]   # (B, N,  C)
+
+        # Embed type ids (prim = 0, ads = 1)
+        embed_prim_type_ids = self.type_embed(prim_type_ids)  # (B, M, C)
+        embed_ads_type_ids  = self.type_embed(ads_type_ids)   # (B, N, C)
 
         # ── Time embeddings (average prim + ads times) ───────────────────────
         prim_modals_t = torch.cat(
@@ -474,9 +475,13 @@ class TransformerModule(nn.Module):
             .mean(-2)
         )  # (B, C)
 
-        embed_binding_energy = self.ads_binding_energy_embed(
-            feats["ads_binding_energy"].unsqueeze(-1)
-        )                                                                                         # (B, C)
+        if feats.get("ads_binding_energy") is not None:
+            embed_binding_energy = self.ads_binding_energy_embed(
+                feats["ads_binding_energy"].unsqueeze(-1)
+            )       
+        else:
+            embed_binding_energy = torch.zeros(batch_size, self.hidden_dim, device=device)
+                                                                                          # (B, C)
         embed_conditions = (embed_time + embed_binding_energy).unsqueeze(-2)  # (B, 1, C)
 
         # ── Build h_in for prim sequence ─────────────────────────────────────
@@ -489,28 +494,28 @@ class TransformerModule(nn.Module):
             embed_conditions_prim = embed_conditions.expand(-1, prim_seq_len, -1)
 
             h_in_prim = torch.cat([
-                embed_atom_types,               # (B, M, C)
-                embed_frac_coords,              # (B, M, C)
-                embed_cart_coords,              # (B, M, C)
-                embed_lengths_scaled_bc,        # (B, M, C)
-                embed_angles_radians_bc,        # (B, M, C)
-                embed_transformation_matrix_bc, # (B, M, C)
-                embed_supercell_lattice_bc,     # (B, M, C)
-                embed_posenc_prim,              # (B, M, C)
-                embed_conditions_prim,          # (B, M, C)
-            ], dim=-1)  # (B, M, 9*C)
+                embed_atom_types,               # (B, M,  C)
+                embed_frac_coords,              # (B, M,  C)
+                embed_lengths_scaled_bc,        # (B, M,  C)
+                embed_angles_radians_bc,        # (B, M,  C)
+                embed_transformation_matrix_bc, # (B, M,  C)
+                embed_supercell_lattice_bc,     # (B, M,  C)
+                embed_posenc_prim,              # (B, M,  C)
+                embed_conditions_prim,          # (B, M,  C)
+                embed_prim_type_ids,            # (B, M,  C)
+            ], dim=-1)  # (B, M,  9*C)
             h_in_prim = self.combine_input_prim(h_in_prim)  # (B, M, C)
         else:
             h_in_prim = (
-                embed_atom_types             # (B, M, C)
-                + embed_frac_coords          # (B, M, C)
-                + embed_cart_coords          # (B, M, C)
-                + embed_lengths_scaled       # (B, 1, C) → broadcasts
-                + embed_angles_radians       # (B, 1, C) → broadcasts
+                embed_atom_types              # (B, M,  C)
+                + embed_frac_coords           # (B, M,  C)
+                + embed_lengths_scaled        # (B, 1, C) → broadcasts
+                + embed_angles_radians        # (B, 1, C) → broadcasts
                 + embed_transformation_matrix # (B, 1, C) → broadcasts
-                + embed_supercell_lattice    # (B, 1, C) → broadcasts
-                + embed_posenc_prim          # (B, M, C)
-                + embed_conditions           # (B, 1, C) → broadcasts
+                + embed_supercell_lattice     # (B, 1, C) → broadcasts
+                + embed_posenc_prim           # (B, M,  C)
+                + embed_conditions            # (B, 1, C) → broadcasts
+                + embed_prim_type_ids         # (B, M,  C)
             )
         h_in_prim = h_in_prim * prim_real_mask.unsqueeze(-1)  # (B, M, C)
 
@@ -519,25 +524,27 @@ class TransformerModule(nn.Module):
             embed_conditions_ads = embed_conditions.expand(-1, ads_seq_len, -1)
 
             h_in_ads = torch.cat([
-                embed_ads_atom_types,       # (B, N, C)
-                embed_ads_pos,              # (B, N, C)
-                embed_ads_pairwise_dist,    # (B, N, C)
-                embed_posenc_ads,           # (B, N, C)
-                embed_conditions_ads,       # (B, N, C)
-            ], dim=-1)  # (B, N, 5*C)
-            h_in_ads = self.combine_input_ads(h_in_ads)  # (B, N, C)
+                embed_ads_atom_types,           # (B, N, C)
+                embed_ads_pos,                  # (B, N, C)
+                embed_ads_ref_centered_pos,     # (B, N, C)
+                embed_posenc_ads,               # (B, N, C)
+                embed_conditions_ads,           # (B, N, C)
+                embed_ads_type_ids,             # (B, N, C)
+            ], dim=-1)  # (B, N, 6*C)
+            h_in_ads = self.combine_input_ads(h_in_ads)  # (B, N,  C)
         else:
             h_in_ads = (
-                embed_ads_atom_types        # (B, N, C)
-                + embed_ads_pos             # (B, N, C)
-                + embed_ads_pairwise_dist   # (B, N, C)
-                + embed_posenc_ads          # (B, N, C)
-                + embed_conditions          # (B, 1, C) → broadcasts
+                embed_ads_atom_types            # (B, N, C)
+                + embed_ads_pos                 # (B, N, C)
+                + embed_ads_ref_centered_pos    # (B, N, C)
+                + embed_posenc_ads              # (B, N, C)
+                + embed_conditions              # (B, 1, C) → broadcasts
+                + embed_ads_type_ids            # (B, N, C)
             )
-        h_in_ads = h_in_ads * ads_real_mask.unsqueeze(-1)  # (B, N, C)
+        h_in_ads = h_in_ads * ads_real_mask.unsqueeze(-1)  # (B, N,  C)
 
         # ── Concatenate prim + ads into single sequence ──────────────────────
-        h_in = torch.cat([h_in_prim, h_in_ads], dim=1)  # (B, M+N, C)
+        h_in = torch.cat([h_in_prim, h_in_ads], dim=1)  # (B, M+N,  C)
         padding_mask = torch.cat([prim_padding_mask, ads_padding_mask], dim=1)  # (B, M+N)
 
         pos_ids = torch.arange(total_seq_len, device=device).unsqueeze(0).repeat(batch_size, 1)
@@ -554,45 +561,45 @@ class TransformerModule(nn.Module):
         else:
             raise ValueError(f"Invalid implementation: {self.implementation}")
 
-        h_out = h_out * combined_real_mask.unsqueeze(-1)  # (B, M+N, C)
+        h_out = h_out * combined_real_mask.unsqueeze(-1)  # (B, M+N,  C)
 
         # ── Split transformer output back into prim / ads ────────────────────
         h_out_prim = h_out[:, :prim_seq_len, :]  # (B, M, C)
-        h_out_ads = h_out[:, prim_seq_len:, :]   # (B, N, C)
+        h_out_ads = h_out[:, prim_seq_len:, :]   # (B, N,  C)
 
         # ── Cross-attention & output heads ────────────────────────────────────
         if self.cross_attention:
             # Prim cross-attention (query = prim output, memory = full sequence)
             h_atom = self.atom_types_cross_attention(
-                h_out_prim, 
+                h_out_prim,
                 h_in,
                 tgt_key_padding_mask=prim_padding_mask,
                 memory_key_padding_mask=padding_mask,
                 **attention_kwargs,
             )
             h_frac_coords = self.frac_coords_cross_attention(
-                h_out_prim, 
+                h_out_prim,
                 h_in,
                 tgt_key_padding_mask=prim_padding_mask,
                 memory_key_padding_mask=padding_mask,
                 **attention_kwargs,
             )
             h_lengths_scaled = self.lengths_scaled_cross_attention(
-                h_out_prim, 
+                h_out_prim,
                 h_in,
                 tgt_key_padding_mask=prim_padding_mask,
                 memory_key_padding_mask=padding_mask,
                 **attention_kwargs,
             )
             h_angles_radians = self.angles_radians_cross_attention(
-                h_out_prim, 
+                h_out_prim,
                 h_in,
                 tgt_key_padding_mask=prim_padding_mask,
                 memory_key_padding_mask=padding_mask,
                 **attention_kwargs,
             )
             h_transformation_matrix = self.transformation_matrix_cross_attention(
-                h_out_prim, 
+                h_out_prim,
                 h_in,
                 tgt_key_padding_mask=prim_padding_mask,
                 memory_key_padding_mask=padding_mask,
@@ -622,7 +629,7 @@ class TransformerModule(nn.Module):
                 query_pos_ids=ads_pos_ids,
                 **attention_kwargs,
             )
-            out_pos = self.out_pos(h_pos)  # (B, N, 3)
+            out_pos = self.out_pos(h_pos)  # (B, N,  3)
 
         else:
             out_atom_types = self.out_atom_types(h_out_prim)
@@ -639,7 +646,7 @@ class TransformerModule(nn.Module):
                 (h_out_prim * prim_mask_f).sum(-2) / prim_n.squeeze(-2)
             ).reshape(batch_size, 3, 3)  # (B, 9) → (B, 3, 3)
 
-            out_pos = self.out_pos(h_out_ads)  # (B, N, 3)
+            out_pos = self.out_pos(h_out_ads)  # (B, N,  3)
 
         # ── Auxiliary tasks (operate on full combined sequence) ───────────────
         h_global_property = h_aux
@@ -699,7 +706,7 @@ class TransformerModule(nn.Module):
             h_global_energy = self.global_energy_proj(h_global_energy)
             h_atomic_forces = self.atomic_forces_proj(h_atomic_forces)
 
-        combined_mask_f = combined_real_mask.unsqueeze(-1).float()  # (B, M+N, 1)
+        combined_mask_f = combined_real_mask.unsqueeze(-1).float()  # (B, M+N,  1)
         combined_n = combined_mask_f.sum(-2, keepdim=True).clamp(min=1)
         h_global_property_pooled = (
             (h_global_property * combined_mask_f).sum(-2, keepdim=True) / combined_n
@@ -723,12 +730,12 @@ class TransformerModule(nn.Module):
             out_transformation_matrix * global_mask,          # (B, 1, 3)
         )
         pred_ads = (
-            out_pos * ads_real_mask.unsqueeze(-1),   # (B, N, 3)
+            out_pos * ads_real_mask.unsqueeze(-1),   # (B, N,  3)
         )
         pred_aux_outputs = (
             global_property,   # (B, 1, P)
             global_energy,     # (B, 1, 1)
-            atomic_forces,     # (B, M+N, 3)
+            atomic_forces,     # (B, M+N,  3)
         )
 
         return pred_prim, pred_ads, pred_aux_outputs
@@ -751,7 +758,7 @@ class TransformerModule(nn.Module):
             Tuple[
                 Int["b n"],      # type: ignore - ads_atom_types (integer indices, conditioning)
                 Float["b n 3"],  # type: ignore - ads_pos (absolute Cartesian positions)
-                Float["b n k"],  # type: ignore - ads_pairwise_dist (K neighbours)
+                Float["b n 3"],  # type: ignore - ads_ref_centered_pos
             ]
             | List[torch.Tensor]
         ),

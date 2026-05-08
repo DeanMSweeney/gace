@@ -1,9 +1,14 @@
 """
 Compute empirical distance thresholds for the two clash-check methods in evaluator.py,
-using only catalyst atoms (tags != 2) from the OC20 training LMDB.
+using OC20 training LMDB data.
 
 Method 1: minimum pairwise distance in Å  →  informs the 0.50 Å fixed cutoff
 Method 2: minimum (dist / sum_covalent_radii) ratio  →  informs the 0.50 fraction
+
+Three atom-pair groups are analysed:
+  • catalyst–catalyst  (tags != 2 vs tags != 2)
+  • surface–adsorbate  (tags != 2 vs tags == 2)
+  • adsorbate–adsorbate (tags == 2 vs tags == 2)
 
 Outputs a summary to stdout and writes results/dist_thresholds.txt.
 
@@ -43,10 +48,14 @@ def _to_np(x):
         return np.array(x, dtype=np.float64)
 
 
-def process_structure(data) -> tuple[float | None, float | None]:
+def process_structure(data) -> tuple[
+    float | None, float | None,   # cat–cat   min_dist, min_ratio
+    float | None, float | None,   # surf–ads  min_dist, min_ratio
+    float | None, float | None,   # ads–ads   min_dist, min_ratio
+]:
     """
-    Return (min_dist_method1, min_ratio_method2) for catalyst atoms only.
-    Returns (None, None) if the structure has fewer than 2 catalyst atoms.
+    Return per-structure minimum distances and covalent-ratio distances for three
+    atom-pair groups.  Any component is None when the relevant subset is too small.
     """
     try:
         tags    = _to_np(data.tags).astype(int).flatten()
@@ -54,32 +63,75 @@ def process_structure(data) -> tuple[float | None, float | None]:
         numbers = _to_np(data.atomic_numbers).astype(int).flatten()
         cell    = _to_np(data.cell).reshape(3, 3)
     except AttributeError:
-        return None, None
+        return None, None, None, None, None, None
 
     cat_mask = tags != 2
-    if cat_mask.sum() < 2:
-        return None, None
+    ads_mask = tags == 2
+    n_cat = int(cat_mask.sum())
+    n_ads = int(ads_mask.sum())
 
-    atoms = Atoms(
-        numbers=numbers[cat_mask],
-        positions=pos[cat_mask],
-        cell=cell,
-        pbc=True,
-    )
+    if n_cat < 2 and n_ads < 2:
+        return None, None, None, None, None, None
 
-    dists = atoms.get_all_distances(mic=True)
-    np.fill_diagonal(dists, np.inf)
+    # Build full Atoms object so MIC distances cover all pairs in one pass.
+    atoms = Atoms(numbers=numbers, positions=pos, cell=cell, pbc=True)
+    all_dists = atoms.get_all_distances(mic=True)
 
-    min_dist = float(dists.min())
+    all_radii  = covalent_radii[numbers]
+    sum_radii  = all_radii[:, None] + all_radii[None, :]
+    sum_radii[sum_radii == 0.0] = np.inf
 
-    radii     = covalent_radii[numbers[cat_mask]]
-    sum_radii = radii[:, None] + radii[None, :]
-    sum_radii[sum_radii == 0.0] = np.inf  # undefined covalent radius → skip pair
-    # leave sum_radii diagonal finite: inf/finite = inf, avoiding inf/inf = nan
-    ratio     = dists / sum_radii
-    min_ratio = float(ratio.min())
+    cat_idx = np.where(cat_mask)[0]
+    ads_idx = np.where(ads_mask)[0]
 
-    return min_dist, min_ratio
+    # ── catalyst–catalyst ──────────────────────────────────────────────────
+    cat_min_dist = cat_min_ratio = None
+    if n_cat >= 2:
+        d = all_dists[np.ix_(cat_idx, cat_idx)].copy()
+        np.fill_diagonal(d, np.inf)
+        cat_min_dist  = float(d.min())
+        cat_min_ratio = float((d / sum_radii[np.ix_(cat_idx, cat_idx)]).min())
+
+    # ── surface–adsorbate (cross distances, no diagonal to mask) ──────────
+    surf_ads_min_dist = surf_ads_min_ratio = None
+    if n_cat >= 1 and n_ads >= 1:
+        d = all_dists[np.ix_(cat_idx, ads_idx)]
+        surf_ads_min_dist  = float(d.min())
+        surf_ads_min_ratio = float((d / sum_radii[np.ix_(cat_idx, ads_idx)]).min())
+
+    # ── adsorbate–adsorbate ───────────────────────────────────────────────
+    ads_min_dist = ads_min_ratio = None
+    if n_ads >= 2:
+        d = all_dists[np.ix_(ads_idx, ads_idx)].copy()
+        np.fill_diagonal(d, np.inf)
+        ads_min_dist  = float(d.min())
+        ads_min_ratio = float((d / sum_radii[np.ix_(ads_idx, ads_idx)]).min())
+
+    return cat_min_dist, cat_min_ratio, surf_ads_min_dist, surf_ads_min_ratio, ads_min_dist, ads_min_ratio
+
+
+def _stats_block(label: str, arr_dist: np.ndarray, arr_ratio: np.ndarray) -> list[str]:
+    def _fmt_dist(arr: np.ndarray, metric: str) -> list[str]:
+        return [
+            f"  mean of per-structure min {metric}  : {arr.mean():.4f}",
+            f"  median of per-structure min {metric}: {np.median(arr):.4f}",
+            f"  5th-percentile                   : {np.percentile(arr, 5):.4f}",
+            f"  1st-percentile                   : {np.percentile(arr, 1):.4f}",
+            f"  global minimum                   : {arr.min():.4f}",
+        ]
+
+    lines = [
+        "",
+        f"{label}",
+        f"  Structures with valid pairs: {len(arr_dist)}",
+        "",
+        f"  METHOD 1 — raw minimum pairwise distance (Å)",
+        *_fmt_dist(arr_dist, "dist (Å)"),
+        "",
+        f"  METHOD 2 — minimum (dist / sum_covalent_radii) ratio",
+        *_fmt_dist(arr_ratio, "ratio   "),
+    ]
+    return lines
 
 
 def run(lmdb_path: str, limit: int | None, out_file: Path) -> None:
@@ -99,8 +151,12 @@ def run(lmdb_path: str, limit: int | None, out_file: Path) -> None:
     n_scan = n_total if limit is None else min(limit, n_total)
     print(f"Scanning {n_scan} / {n_total} entries from {lmdb_path}")
 
-    min_dists_m1: list[float] = []
-    min_ratios_m2: list[float] = []
+    cat_dists:      list[float] = []
+    cat_ratios:     list[float] = []
+    surf_ads_dists: list[float] = []
+    surf_ads_ratios: list[float] = []
+    ads_dists:      list[float] = []
+    ads_ratios:     list[float] = []
     n_skipped = 0
 
     with env.begin() as txn:
@@ -111,63 +167,40 @@ def run(lmdb_path: str, limit: int | None, out_file: Path) -> None:
                 continue
 
             data = pickle.loads(raw)
-            m1, m2 = process_structure(data)
+            cd, cr, sad, sar, ad, ar = process_structure(data)
 
-            if m1 is None:
+            if cd is None and sad is None and ad is None:
                 n_skipped += 1
                 continue
 
-            min_dists_m1.append(m1)
-            min_ratios_m2.append(m2)
+            if cd  is not None: cat_dists.append(cd);       cat_ratios.append(cr)
+            if sad is not None: surf_ads_dists.append(sad); surf_ads_ratios.append(sar)
+            if ad  is not None: ads_dists.append(ad);       ads_ratios.append(ar)
 
     env.close()
 
-    n_valid = len(min_dists_m1)
-    print(f"\nValid structures : {n_valid}  |  Skipped : {n_skipped}")
+    print(f"\nValid structures : {len(cat_dists)}  |  Skipped : {n_skipped}")
 
-    arr_m1 = np.array(min_dists_m1)
-    arr_m2 = np.array(min_ratios_m2)
-
-    stats = {
-        "method1_mean_min_dist_A":   float(arr_m1.mean()),
-        "method1_median_min_dist_A": float(np.median(arr_m1)),
-        "method1_p5_min_dist_A":     float(np.percentile(arr_m1, 5)),
-        "method1_p1_min_dist_A":     float(np.percentile(arr_m1, 1)),
-        "method1_min_of_mins_A":     float(arr_m1.min()),
-        "method2_mean_min_ratio":    float(arr_m2.mean()),
-        "method2_median_min_ratio":  float(np.median(arr_m2)),
-        "method2_p5_min_ratio":      float(np.percentile(arr_m2, 5)),
-        "method2_p1_min_ratio":      float(np.percentile(arr_m2, 1)),
-        "method2_min_of_mins_ratio": float(arr_m2.min()),
-    }
+    arr_cat_d  = np.array(cat_dists)
+    arr_cat_r  = np.array(cat_ratios)
+    arr_sad_d  = np.array(surf_ads_dists)
+    arr_sad_r  = np.array(surf_ads_ratios)
+    arr_ads_d  = np.array(ads_dists)
+    arr_ads_r  = np.array(ads_ratios)
 
     lines = [
         "=" * 70,
-        "OC20 Catalyst-Atom Distance Threshold Analysis",
+        "OC20 Distance Threshold Analysis",
         f"LMDB            : {lmdb_path}",
-        f"Structures used : {n_valid}",
         f"Structures limit: {limit if limit is not None else 'all'}",
         "=" * 70,
+        *_stats_block("CATALYST–CATALYST  (tags != 2 vs tags != 2)", arr_cat_d, arr_cat_r),
+        *_stats_block("SURFACE–ADSORBATE  (tags != 2 vs tags == 2)", arr_sad_d, arr_sad_r),
+        *_stats_block("ADSORBATE–ADSORBATE (tags == 2 vs tags == 2)", arr_ads_d, arr_ads_r),
         "",
-        "METHOD 1 — raw minimum pairwise distance (Å)",
-        "  (replaces the fixed '0.50 Å' cutoff in evaluator.py DIST_METHOD=1)",
-        f"  mean of per-structure min dist  : {stats['method1_mean_min_dist_A']:.4f} Å",
-        f"  median of per-structure min dist: {stats['method1_median_min_dist_A']:.4f} Å",
-        f"  5th-percentile                  : {stats['method1_p5_min_dist_A']:.4f} Å",
-        f"  1st-percentile                  : {stats['method1_p1_min_dist_A']:.4f} Å",
-        f"  global minimum                  : {stats['method1_min_of_mins_A']:.4f} Å",
-        "",
-        "METHOD 2 — minimum (dist / sum_covalent_radii) ratio",
-        "  (replaces the '0.50' fraction in evaluator.py DIST_METHOD=2)",
-        f"  mean of per-structure min ratio  : {stats['method2_mean_min_ratio']:.4f}",
-        f"  median of per-structure min ratio: {stats['method2_median_min_ratio']:.4f}",
-        f"  5th-percentile                   : {stats['method2_p5_min_ratio']:.4f}",
-        f"  1st-percentile                   : {stats['method2_p1_min_ratio']:.4f}",
-        f"  global minimum                   : {stats['method2_min_of_mins_ratio']:.4f}",
-        "",
-        "Suggested replacement values (conservative = 5th-percentile):",
-        f"  Method 1 threshold : {stats['method1_p5_min_dist_A']:.4f} Å",
-        f"  Method 2 fraction  : {stats['method2_p5_min_ratio']:.4f}",
+        "Suggested thresholds (conservative = 5th-percentile of catalyst–catalyst):",
+        f"  Method 1 threshold : {np.percentile(arr_cat_d, 5):.4f} Å",
+        f"  Method 2 fraction  : {np.percentile(arr_cat_r, 5):.4f}",
         "=" * 70,
     ]
 
@@ -181,7 +214,7 @@ def run(lmdb_path: str, limit: int | None, out_file: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Compute empirical distance thresholds from OC20 catalyst atoms."
+        description="Compute empirical distance thresholds from OC20 atoms."
     )
     parser.add_argument(
         "--lmdb",

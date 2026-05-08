@@ -1,6 +1,6 @@
 ======================================================================
 CatFlow LMDB Analysis
-Dataset path : /workspace/datasets/catflow/train/dataset_processed.lmdb
+Dataset path : /workspace/datasets/factorized/train/dataset_processed.lmdb
 Total samples: 455492
 Dumping first: 10 samples
 ======================================================================
@@ -275,6 +275,217 @@ Sample 9
   tags                     : Tensor(5,)  [1, 1, 1, 1, 2]
   transformation_matrix    : Tensor(1, 3, 3)  [[[-3, 0, 0], [2, 2, -2], [-4, -4, 0]]]
 
+
+======================================================================
+Primitive-cell atom counts (prim_natoms)
+======================================================================
+  max = 224  (sample idx 291739)
+  min = 1  (sample idx 95)
+  Distribution:
+       1 atoms:   5263 samples
+       2 atoms:  27547 samples
+       3 atoms:  15660 samples
+       4 atoms:  57648 samples
+       5 atoms:  10069 samples
+       6 atoms:  28788 samples
+       7 atoms:   6614 samples
+       8 atoms:  46302 samples
+       9 atoms:  11193 samples
+      10 atoms:  11959 samples
+      11 atoms:   1316 samples
+      12 atoms:  41240 samples
+      13 atoms:   3323 samples
+      14 atoms:   7501 samples
+      15 atoms:   3672 samples
+      16 atoms:  27435 samples
+      17 atoms:    905 samples
+      18 atoms:  12684 samples
+      19 atoms:    652 samples
+      20 atoms:  14086 samples
+      21 atoms:   1919 samples
+      22 atoms:   4585 samples
+      23 atoms:    175 samples
+      24 atoms:  20531 samples
+      25 atoms:    292 samples
+      26 atoms:   2186 samples
+      27 atoms:   1307 samples
+      28 atoms:   6097 samples
+      29 atoms:    958 samples
+      30 atoms:   6393 samples
+      31 atoms:    281 samples
+      32 atoms:  14321 samples
+      33 atoms:    479 samples
+      34 atoms:    637 samples
+      35 atoms:    161 samples
+      36 atoms:  11074 samples
+      37 atoms:    108 samples
+      38 atoms:    513 samples
+      39 atoms:    708 samples
+      40 atoms:   8921 samples
+      41 atoms:     14 samples
+      42 atoms:   2406 samples
+      44 atoms:   1291 samples
+      45 atoms:    645 samples
+      46 atoms:    138 samples
+      48 atoms:   8919 samples
+      49 atoms:    102 samples
+      50 atoms:    313 samples
+      51 atoms:    148 samples
+      52 atoms:    894 samples
+      54 atoms:   1818 samples
+      55 atoms:     39 samples
+      56 atoms:   1472 samples
+      57 atoms:     78 samples
+      58 atoms:    134 samples
+      60 atoms:   2997 samples
+      63 atoms:    178 samples
+      64 atoms:   3251 samples
+      65 atoms:     25 samples
+      66 atoms:    725 samples
+      68 atoms:    255 samples
+      69 atoms:     17 samples
+      70 atoms:     77 samples
+      72 atoms:   3626 samples
+      74 atoms:     10 samples
+      75 atoms:    105 samples
+      76 atoms:    153 samples
+      78 atoms:    756 samples
+      80 atoms:   1426 samples
+      81 atoms:    217 samples
+      82 atoms:      9 samples
+      84 atoms:    788 samples
+      87 atoms:     68 samples
+      88 atoms:    257 samples
+      90 atoms:    416 samples
+      92 atoms:     61 samples
+      93 atoms:     10 samples
+      95 atoms:      1 samples
+      96 atoms:   1721 samples
+      98 atoms:     31 samples
+      99 atoms:     29 samples
+     100 atoms:    117 samples
+     102 atoms:    178 samples
+     104 atoms:    205 samples
+     105 atoms:     19 samples
+     106 atoms:     46 samples
+     108 atoms:    715 samples
+     110 atoms:     13 samples
+     111 atoms:     10 samples
+     112 atoms:    404 samples
+     114 atoms:     87 samples
+     115 atoms:      1 samples
+     116 atoms:    300 samples
+     117 atoms:     30 samples
+     120 atoms:    510 samples
+     124 atoms:     15 samples
+     126 atoms:     54 samples
+     128 atoms:    327 samples
+     130 atoms:     30 samples
+     132 atoms:    272 samples
+     135 atoms:     78 samples
+     136 atoms:     37 samples
+     138 atoms:      3 samples
+     140 atoms:     45 samples
+     144 atoms:    294 samples
+     147 atoms:     47 samples
+     150 atoms:      9 samples
+     152 atoms:     37 samples
+     153 atoms:     16 samples
+     156 atoms:     37 samples
+     160 atoms:    127 samples
+     162 atoms:      8 samples
+     168 atoms:     50 samples
+     170 atoms:     30 samples
+     171 atoms:      2 samples
+     174 atoms:     27 samples
+     176 atoms:     22 samples
+     180 atoms:     46 samples
+     184 atoms:     14 samples
+     189 atoms:      1 samples
+     192 atoms:     45 samples
+     200 atoms:      6 samples
+     204 atoms:      8 samples
+     208 atoms:     28 samples
+     216 atoms:     18 samples
+     224 atoms:      1 samples
+
+======================================================================
+Adsorbate atom counts (n_ads)
+======================================================================
+  max = 11  (sample idx 30)
+  min = 1  (sample idx 6)
+  Distribution:
+       1 atoms:  44287 samples
+       2 atoms:  45880 samples
+       3 atoms:  56258 samples
+       4 atoms:  77176 samples
+       5 atoms:  74291 samples
+       6 atoms:  53086 samples
+       7 atoms:  41685 samples
+       8 atoms:  45336 samples
+       9 atoms:  11994 samples
+      11 atoms:   5499 samples
+
+======================================================================
+Primitive-cell element presence (graphs containing element)
+======================================================================
+  Unique elements: 55
+  Count by element (sorted by count desc):
+    Z= 16  S          43045 graphs
+    Z= 22  Ti         39996 graphs
+    Z= 13  Al         39840 graphs
+    Z= 14  Si         37366 graphs
+    Z= 72  Hf         30653 graphs
+    Z= 40  Zr         28767 graphs
+    Z= 31  Ga         27678 graphs
+    Z= 15  P          27676 graphs
+    Z= 46  Pd         27329 graphs
+    Z= 20  Ca         26884 graphs
+    Z= 28  Ni         26499 graphs
+    Z= 34  Se         26425 graphs
+    Z= 39  Y          24625 graphs
+    Z= 45  Rh         24316 graphs
+    Z= 78  Pt         23997 graphs
+    Z= 32  Ge         23985 graphs
+    Z= 33  As         22704 graphs
+    Z= 21  Sc         22372 graphs
+    Z= 50  Sn         22341 graphs
+    Z= 52  Te         22045 graphs
+    Z= 30  Zn         21487 graphs
+    Z= 23  V          21120 graphs
+    Z= 41  Nb         20852 graphs
+    Z= 29  Cu         20137 graphs
+    Z= 27  Co         19783 graphs
+    Z= 49  In         19384 graphs
+    Z= 42  Mo         18958 graphs
+    Z= 51  Sb         18632 graphs
+    Z= 73  Ta         18616 graphs
+    Z= 38  Sr         18465 graphs
+    Z=  7  N          18224 graphs
+    Z= 44  Ru         17817 graphs
+    Z= 26  Fe         16495 graphs
+    Z= 77  Ir         16468 graphs
+    Z= 79  Au         16346 graphs
+    Z= 25  Mn         15353 graphs
+    Z= 24  Cr         13831 graphs
+    Z= 47  Ag         13562 graphs
+    Z= 11  Na         13144 graphs
+    Z= 19  K          12044 graphs
+    Z= 82  Pb         11023 graphs
+    Z= 74  W          10939 graphs
+    Z= 48  Cd         10586 graphs
+    Z= 83  Bi          9795 graphs
+    Z= 17  Cl          9463 graphs
+    Z= 43  Tc          9127 graphs
+    Z= 76  Os          8850 graphs
+    Z= 80  Hg          8563 graphs
+    Z=  1  H           8393 graphs
+    Z= 37  Rb          7435 graphs
+    Z= 81  Tl          7038 graphs
+    Z= 75  Re          6365 graphs
+    Z= 55  Cs          5860 graphs
+    Z=  6  C           5328 graphs
+    Z=  5  B            121 graphs
 
 ======================================================================
 Adsorbate Cartesian positions (ads_pos) statistics (across full dataset)

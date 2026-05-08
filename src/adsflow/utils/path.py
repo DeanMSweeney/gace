@@ -7,88 +7,18 @@ from torch_geometric.utils import to_dense_batch
 from torchdiffeq import odeint
 from typing import Optional, Literal, Union, Tuple
 
-from adsflow.utils.invariance import pbc_aware_delta, batched_ot_align
-from adsflow.utils.utils import adsorbate_neighborhood_mask
+from adsflow.utils.invariance import pbc_aware_delta, batched_ot_align, global_ot_align
+from adsflow.utils.utils import adsorbate_neighborhood_mask, random_so3_rotation
 from adsflow.utils.builder import lattice_params_to_matrix
-from adsflow.utils.forge_sampler import euler_step, ctmc_step
+from adsflow.utils.euler import euler_step, ctmc_step
 
-NUM_CLASSES = 90  # number of atom-type classes (atomic numbers 1–90, shifted to 0-indexed)
+NUM_CLASSES = 100  # number of atom-type classes (atomic numbers 1–100, shifted to 0-indexed)
 
-class XMatching():
+class Flow():
     """
     This Mixin supports image invariant interpolation paths and masked loss for frozen atoms
     """
-
     def criterion(
-        self,
-        input_graph,
-        pred: Union[Tensor, dict],  # N, 3 positions or dict with {"u_x", "z_logits", ...}
-    ):
-        """Dispatch to the variant-specific loss."""
-        if self.variant == "place":
-            return self._criterion_place(input_graph, pred)
-        elif self.variant == "forge":
-            return self._criterion_forge(input_graph, pred)
-        else:
-            raise ValueError(f"Unknown variant: {self.variant}")
-
-    def _criterion_place(
-        self,
-        input_graph,
-        pred: Union[Tensor, dict],
-    ):
-        """
-        Loss for the relax variant: atomic positions only.
-
-        - Supervises only the adsorbate neighbourhood (controlled by ads_cutoff).
-        - Adsorbate atoms are upweighted by tao relative to catalyst neighbours.
-        - Supports both flow (velocity) and endpoint (position) matching modes.
-        """
-        data = input_graph
-        pred_x = pred.float()
-
-        if self.x_matching == "endpoint":
-            target_x = data.pos_relaxed.float()
-        else:
-            if not hasattr(data, "u_x"):
-                raise ValueError("Flow criterion requires `data.u_x` to be set in path().")
-            target_x = data.u_x.float()
-
-        if self.x_matching == "endpoint":
-            diff = pbc_aware_delta(
-                cell=data.cell.float(),
-                delta=(pred_x - target_x),
-                batch=data.batch,
-            )
-        elif self.x_matching == "flow":
-            diff = pred_x - target_x
-        else:
-            raise ValueError("Invalid x_matching routine")
-
-        with torch.no_grad():
-            alpha_t_x_factor = getattr(self, "alpha_t_x_factor", 1.0)
-
-            # Neighbourhood mask: adsorbate + optional cutoff shell of catalyst atoms
-            if hasattr(data, "ads_neighborhood_mask"):
-                mask = data.ads_neighborhood_mask.float().unsqueeze(1)
-            else:
-                mask = (data.fixed == 0).float().unsqueeze(1)
-
-            # Upweight adsorbate atoms by tao
-            tao = self.hparams.tao
-            adsorbates = (data.tags == 2).float().unsqueeze(1)  # N, 1
-            mask_factor = mask * (1 + adsorbates * (tao - 1))
-
-        L_per_atom = diff.abs().mean(dim=1, keepdim=True)           # N, 1
-        modified_L_per_atom = L_per_atom * mask_factor * alpha_t_x_factor
-        x_loss = modified_L_per_atom.sum() / mask.sum().clamp_min(1e-8)
-
-        with torch.no_grad():
-            x_max_L = modified_L_per_atom.max()
-
-        return {"total_loss": x_loss, "x_loss": x_loss}
-
-    def _criterion_forge(
         self,
         input_graph,
         pred: dict,
@@ -191,17 +121,12 @@ class XMatching():
             # ── Lattice and supercell (CatFlow data only) ────────────────────
             self.primitive_mask = (data.tags == 1)
             self.adsorbate_mask = (data.tags == 2)
-            
-            if self.variant == "forge":
-                data = self._build_lattice_path(data, t=t)
-                data = self._build_transformation_matrix_path(data, t=t)
-                data = self._build_ads_path(data, t=t)
-
-            # ── Positions (before atom types so OT permutation is available) ─
-            data = self._build_positions_path(data, t=t)
-
-            if self.variant == "forge":
-                data = self._build_atom_type_path(data, t=t)
+        
+            data = self._build_lattice_path(data, t=t) # lattice 
+            data = self._build_transformation_matrix_path(data, t=t) # transformation matrix 
+            data = self._build_ads_path(data, t=t) # adsorbate position 
+            data = self._build_positions_path(data, t=t) # positions
+            data = self._build_atom_type_path(data, t=t) # atom types 
 
             return data
 
@@ -240,7 +165,6 @@ class XMatching():
             raise ValueError("Invalid interpolant schedule")
 
         # scale only for endpoint
-        t0_weight = self.hparams.t0_weight
         alpha_t_factor = torch.clamp(alpha_t_grad / (1 - alpha_t) ** 2,  min=None, max=100) if x_matching == "endpoint" \
             else torch.tensor(1.0, device=t.device, dtype=torch.float32)
 
@@ -397,37 +321,7 @@ class XMatching():
             data.t          ← per-atom interpolation time
             data.u_x        ← target velocity (rescaled by schedule gradient)
         """
-        if self.variant == "place":
-            if hasattr(data, "pos_relaxed"):
-                x1 = data.pos_relaxed.float() # N, 3
-                x0 = data.pos.float() # N, 3
-
-                if hasattr(data, "velocity"):
-                    u_x = data.velocity.float()
-                else:
-                    u_x = pbc_aware_delta(
-                        delta=x1 - x0,
-                        cell=data.cell.float(),
-                        batch=data.batch,
-                    )
-
-                ads_cutoff = self.hparams.ads_cutoff
-                if ads_cutoff == 0:
-                    ads_neighborhood_mask = (self.adsorbate_mask)
-                elif ads_cutoff == float('inf'):
-                    ads_neighborhood_mask = (data.fixed == 0)
-                else:
-                    ads_neighborhood_mask = adsorbate_neighborhood_mask(data, ads_cutoff)
-
-                data.ads_neighborhood_mask = ads_neighborhood_mask
-                u_x = ads_neighborhood_mask.float().unsqueeze(1) * u_x
-
-                t_x_per_graph = t
-
-                # broadcast to per atom
-                t_x = t_x_per_graph[data.batch] # N, 1
-
-        elif self.variant == "forge":
+        if self.variant == "forge":
             x1 = data.pos.float() # combined primtive cell 
 
             if self.informed_priors:
@@ -436,14 +330,12 @@ class XMatching():
                 x0 = torch.randn_like(x1, dtype=torch.float32)  # N(0, 1)
 
             if self.optimal_transport:
-                x0 = batched_ot_align(
-                    source=x0, target=x1, batch=data.batch[self.primitive_mask],
-                    pbc_aware=True, return_assignment=False,
-                )
+                x0 = global_ot_align(source=x0, target=x1, pbc_aware=True)
 
-            u_x = x1 - x0 
-            u_x_n0 = torch.round(u_x)
-            u_x = u_x - u_x_n0
+            u_x = x1 - x0
+
+            if not self.operate_on_torus:
+                u_x = u_x - torch.round(u_x)
 
             # Sample per-graph interpolation time
             t_x_per_graph = t # B, 1 
@@ -486,16 +378,14 @@ class XMatching():
         """
         ads_batch = data.batch[self.adsorbate_mask]  # (N_ads,)
 
-        # Read absolute Cartesian target and z-score with dataset stats
+        # Read absolute Cartesian target; optionally z-score with dataset stats
         ads_pos1 = data.ads_pos.float()                                  # (N_ads, 3) raw Å
-        ads_pos1 = (ads_pos1 - self.ads_pos_mean) / self.ads_pos_std     # normalized
-        ads_pos0 = torch.randn_like(ads_pos1)                            # N(0,1) prior in normalized space
+        if self.standardize_ads_pos:
+            ads_pos1 = (ads_pos1 - self.ads_pos_mean) / self.ads_pos_std
+        ads_pos0 = torch.randn_like(ads_pos1)                            # N(0,1) prior
 
         if self.optimal_transport:
-            ads_pos0 = batched_ot_align(
-                source=ads_pos0, target=ads_pos1, batch=ads_batch,
-                pbc_aware=False, return_assignment=False,
-            )
+            ads_pos0 = global_ot_align(source=ads_pos0, target=ads_pos1, pbc_aware=False)
 
         t_ads = t[ads_batch]  # (N_ads, 1)
         alpha_t_ads, alpha_t_ads_grad, _ = self._interpolant_schedule(
@@ -513,6 +403,13 @@ class XMatching():
 
         if self.x_matching == "flow":
             data.u_ads_pos = alpha_t_ads_grad * u_ads
+
+        # Center ref_ads_pos and apply random SO(3) rotation each training step.
+        # Stored as ads_ref_centered_pos — conditioning signal, distinct from ads_pos.
+        B = t.shape[0]
+        data.ads_ref_centered_pos = random_so3_rotation(
+            data.ref_ads_pos.float(), ads_batch, B
+        )  # (N_ads, 3)
 
         return data
 
@@ -574,11 +471,12 @@ class XMatching():
 
         return data
 
-    def _sample_forge(
+    def sample(
             self,
             input_graph: Data,
             t: torch.Tensor,  # Time points, e.g. linspace(0, 1, n_steps)
-            num_prim_atoms: Optional[int] = None,
+            num_prim_atoms: Optional[Union[int, torch.Tensor]] = None,
+            refine_final: bool = False,
     ) -> Data:
         """Generate structures for the forge variant via a custom Euler loop.
 
@@ -590,7 +488,7 @@ class XMatching():
 
         Args:
             input_graph: PyG Data/Batch. Adsorbate conditioning fields
-                (ads_atomic_numbers, ads_pairwise_dist, ads_binding_energy) are
+                (ads_atomic_numbers, ads_ref_centered_pos, ads_binding_energy) are
                 used as-is; all generated modalities are re-initialised from prior.
             t: 1-D tensor of monotonically increasing time points in [0, 1].
                 The loop takes len(t)-1 Euler steps.
@@ -599,8 +497,8 @@ class XMatching():
             data with *_generated fields set for each modality.
         """
 
-        build_from_truth = True
-        num_prim_atoms = None
+        build_from_truth = False
+        #num_prim_atoms = None
 
         data = input_graph.clone()
         device = data.pos.device
@@ -609,22 +507,25 @@ class XMatching():
         self.adsorbate_mask = (data.tags == 2)
         B = int(data.batch.max().item()) + 1
 
+        # Center ref_ads_pos for conditioning (no rotation at inference)
+        ads_batch = data.batch[self.adsorbate_mask]
+        ref_ads_pos = data.ref_ads_pos.float()
+        com = scatter(ref_ads_pos, ads_batch, dim=0, dim_size=B, reduce="mean")  # (B, 3)
+        data.ads_ref_centered_pos = ref_ads_pos - com[ads_batch]                 # (N_ads, 3)
+
         # Shift ads conditioning to 0-indexed (matches _build_atom_type_path)
         data.ads_atomic_numbers = data.ads_atomic_numbers.long() - 1
         N_ads = int(self.adsorbate_mask.sum().item())
 
         if not build_from_truth: # TOGGLED ON ONLY FOR TESTING THE BUILD PROCESS, NORMALLY OFF 
             if num_prim_atoms is not None:
+                total_prim = int(num_prim_atoms.sum().item())
                 ads_mask = (data.tags == 2)
-                new_prim_batch = torch.repeat_interleave(
-                    torch.arange(B, device=device), num_prim_atoms
-                )
-                new_prim_tags = torch.ones(
-                    B * num_prim_atoms, dtype=data.tags.dtype, device=device
-                )
+                new_prim_batch = torch.repeat_interleave(torch.arange(B, device=device), num_prim_atoms)
+                new_prim_tags = torch.ones(total_prim, dtype=data.tags.dtype, device=device)
                 data.batch = torch.cat([new_prim_batch, data.batch[ads_mask]])
                 data.tags  = torch.cat([new_prim_tags,  data.tags[ads_mask]])
-                data.pos   = torch.zeros(B * num_prim_atoms, 3, device=device)
+                data.pos   = torch.zeros(total_prim, 3, device=device)
                 self.primitive_mask = (data.tags == 1)
                 self.adsorbate_mask = (data.tags == 2)
 
@@ -649,8 +550,7 @@ class XMatching():
             data.atomic_numbers_hot = F.one_hot(z0_idx, num_classes=NUM_CLASSES).float()  # (N_slab, 100)
 
         # N^(1/3) scale factor for length denormalisation — lengths_scaled is in normalised space
-        n_atoms = num_prim_atoms if num_prim_atoms is not None else int(self.primitive_mask.sum().item() / B)
-        n_scale = torch.full((B, 1), n_atoms ** (1 / 3), device=device, dtype=torch.float32)  # (B, 1)    
+        n_scale = (num_prim_atoms.float() ** (1 / 3)).unsqueeze(1)  # (B, 1)
 
         # ── Euler integration loop ────────────────────────────────────────────
         if not build_from_truth: 
@@ -672,7 +572,7 @@ class XMatching():
 
                 # Model forward
                 with torch.no_grad():
-                    pred = self._forge_forward(data)
+                    pred = self(data)
 
                 # Update continuous modalities
                 data.pos               = euler_step(data.pos,               pred["pos"],     t_curr, dt, pbc_aware=True)
@@ -684,6 +584,24 @@ class XMatching():
                 # Update discrete atom types (CTMC)
                 data.atomic_numbers_hot = ctmc_step(data.atomic_numbers_hot, pred["z"], t_curr, dt)
 
+        # ── Optional refinement: one final forward at t=1, take endpoint directly ──
+        if refine_final:
+            data.t = torch.full((B, 1), 1.0, device=device, dtype=torch.float32)
+            C_1 = lattice_params_to_matrix(
+                lengths=data.lengths_scaled * n_scale,
+                angles=data.angles_radians,
+            )
+            data.cell             = C_1
+            data.supercell_lattice = torch.bmm(data.transformation_matrix, C_1)
+            with torch.no_grad():
+                pred = self(data)
+            data.pos                   = pred["pos"]
+            data.lengths_scaled        = pred["len"]
+            data.angles_radians        = pred["ang"]
+            data.transformation_matrix = pred["M"]
+            data.ads_pos               = pred["ads_pos"]
+            data.atomic_numbers_hot    = pred["z"]  # argmax taken in output phase below
+
         # ── Store generated outputs ───────────────────────────────────────────
         data.pos_generated             = data.pos
         data.atomic_numbers_generated  = data.atomic_numbers_hot.argmax(dim=-1) + 1 if not build_from_truth else  data.atomic_numbers  # 1-indexed
@@ -691,95 +609,12 @@ class XMatching():
         data.angles_generated          = data.angles_radians
         data.transformation_matrix     = data.transformation_matrix.round().long()
         data.M_generated               = data.transformation_matrix
-        # Denormalize adsorbate positions back to raw Å for output
-        data.ads_pos_generated         = data.ads_pos * self.ads_pos_std + self.ads_pos_mean
+
+        
+        # Denormalize adsorbate positions back to raw Å for output (only if standardized)
+        if self.standardize_ads_pos:
+            data.ads_pos_generated = data.ads_pos * self.ads_pos_std + self.ads_pos_mean
+        else:
+            data.ads_pos_generated = data.ads_pos
 
         return data
-
-    def sample(
-            self,
-            input_graph: Data,
-            t: torch.Tensor,  # Time points for ODE integration (typically [0, 1])
-            ode_method: str = "dopri5",
-            num_prim_atoms: Optional[int] = None,
-    ) -> Data:
-        """
-        Generate relaxed atomic structures by integrating the learned velocity field.
-
-        Uses an ODE solver to integrate dx/dt = u(x, t) from t=0 to t=1, where:
-        - x(0) = initial positions
-        - x(1) = predicted relaxed positions
-        - u(x, t) = model-predicted velocity field
-
-        Returns:
-            data: Data object with pos_generated attribute containing predicted relaxed positions
-        """
-
-        if self.variant == "forge":
-            return self._sample_forge(input_graph, t, num_prim_atoms=num_prim_atoms)
-
-        data = input_graph.clone()
-        x0_ref = input_graph.pos.clone().float()  # fixed reference for displacement embedding
-        frozen_atoms = (data.fixed == 1)
-
-        # Precompute spatial mask based on ads_cutoff
-        ads_cutoff = self.hparams.ads_cutoff
-        if ads_cutoff == 0:
-            outside_neighborhood = (data.tags != 2)
-        elif ads_cutoff == float('inf'):
-            outside_neighborhood = frozen_atoms
-        else:
-            outside_neighborhood = ~adsorbate_neighborhood_mask(data, ads_cutoff)
-        
-        def dx_dt(t: torch.Tensor, xt: torch.Tensor) -> torch.Tensor:
-            """
-            ODE right-hand side: dx/dt = u(x, t)
-
-            Wraps the PyTorch model to match torchdiffeq's expected signature.
-            """
-            data.pos = xt
-            data.t = t.view(1,1).expand(len(xt), -1)
-
-            if self.x_matching == "endpoint":
-                x1_hat = self(data)
-                if isinstance(x1_hat, dict):
-                    x1_hat = x1_hat["u_x"]
-                _, _, alpha_t_factor = self._interpolant_schedule(
-                    t=data.t,
-                    schedule_type=self.schedule_type,
-                    v=1,
-                    x_matching=self.x_matching,
-                )   
-                delta = pbc_aware_delta(
-                        delta=x1_hat - xt,
-                        cell=data.cell.float(),
-                        batch=data.batch,
-                    )
-                #alpha_t_factor = torch.clamp(alpha_t_factor, 0.005, 1.5)
-                u_x =  alpha_t_factor * delta
-            else: 
-                u_x = self(data)  # Model predicts velocity field
-                if isinstance(u_x, dict):
-                    u_x = u_x["u_x"]
-
-            # Zero velocity for atoms outside the supervised neighborhood
-            u_x[outside_neighborhood] = 0
-
-            return u_x
-
-        # Integrate ODE from t=0 to t=1 to generate relaxed positions
-        xt = odeint(
-            func=dx_dt,
-            y0=input_graph.pos,  # Start from initial positions
-            t=t * 0.999 if self.x_matching == "endpoint" else t,  # Integration time points
-            rtol=self.rtol,  # Relative tolerance
-            atol=self.atol,  # Absolute tolerance
-            method=ode_method,  # ODE solver method (e.g., 'dopri5', 'euler')
-        )
-
-        # Extract final positions (at t=1)
-        data.pos = input_graph.pos
-        data.pos_generated = xt[-1]
-        
-        return data 
-  

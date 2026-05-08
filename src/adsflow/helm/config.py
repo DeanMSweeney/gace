@@ -74,25 +74,14 @@ class OptimizerConfig:
     max_epochs: int = 100
     """Maximum number of training epochs"""
 
+    ema_decay: Optional[float] = None
+    """Exponential moving average decay for model weights.
+    - None: EMA disabled
+    - 0.9999: standard for flow matching / diffusion models
+    EMA weights are used during validation and saved in checkpoints.
+    """
+
     # ==================== Loss Weighting ====================
-
-    tao: float = 1
-    """Adsorbate weighting multiplier for loss computation.
-    Applied within the atoms selected by ads_cutoff.
-    - 1: equal weighting for all selected atoms (default)
-    - >1: upweight adsorbate atoms by factor tao
-    E.g., tao=2 means adsorbate atoms contribute 2x more to loss
-    """
-
-    ads_cutoff: float = float('inf')
-    """Spatial cutoff controlling which atoms are supervised.
-    - 0: adsorbate atoms only (no catalyst supervision)
-    - >0 float: adsorbate + catalyst atoms within cutoff Angstroms
-    - inf: all non-frozen atoms (default, backward-compatible)
-    """
-
-    t0_weight: float = 1.0
-    """Weighting multiplier for t=0 in x_matching="endpoint"""
 
     lambda_x: float = 1.0
     """Loss weight for catalyst fractional coordinate loss (x_loss)"""
@@ -109,12 +98,6 @@ class OptimizerConfig:
     lambda_M: float = 1.0
     """Loss weight for supercell transformation matrix loss (M_loss)"""
 
-    ema_decay: Optional[float] = None
-    """Exponential moving average decay for model weights.
-    - None: EMA disabled
-    - 0.9999: standard for flow matching / diffusion models
-    EMA weights are used during validation and saved in checkpoints.
-    """
 
     
 @dataclass
@@ -147,22 +130,11 @@ class SamplerConfig:
     - "adaptive_heun": 2nd order adaptive (good speed/accuracy tradeoff)
     """
 
-    num_integration_steps: int = 10
+    num_integration_steps: int = 100
     """Number of integration steps for ODE solver (for inference)
     - 1: single-step integration
     - >1: multi-step integration for higher accuracy
     """
-
-    # ==================== Evaluation ====================
-
-    threshold: Optional[float] = 0.20
-    """Distance threshold (Angstroms) for computing evaluation metrics
-    Used for Distance within Threshold (DwT) and ADwT metrics
-    E.g., 0.20 = count atoms within 0.2 Angstroms of target position
-    """
-
-    write_eval_metrics: bool = False
-    """Whether to write evaluation metrics to file"""
 
     # ==================== Structure Generation ====================
 
@@ -176,7 +148,7 @@ class SamplerConfig:
     """Target adsorption binding energy (eV) for structure generation.
     Passed to the model as a conditioning signal during forge sampling."""
 
-    num_prim_atoms: Optional[int] = 3
+    num_prim_atoms: Optional[int] = None
     """Number of primitive atoms per graph to use during forge sampling.
     If None, uses the atom count from the data. Set to e.g. 3 to force smaller unit cells."""
 
@@ -187,11 +159,11 @@ class SamplerConfig:
     path for saving during testing (POSCAR format).
     """
 
-    gen_POS: Optional[str] = None
+    gen_POS: Optional[str] = "gen_strucs/" 
     """Output path for saving generated (model-predicted) structures during testing"""
 
-    rlxd_POS: Optional[str] = None
-    """Output path for saving relaxed (ground truth) structures during testing"""
+    rlxd_POS: Optional[str] = "rlxd_strucs/"
+    """Output path for saving relaxed structures (model-predicted) structures during testing"""
 
     config_vasp: bool = False
     """Whether to generate VASP DFT input files for generated structures
@@ -200,16 +172,23 @@ class SamplerConfig:
 
     # ==================== MLFF Relaxation ====================
 
+    refine_final: bool = False
+    """Whether to run a final refinement forward pass at t=1 after the Euler loop.
+    Uses the model's endpoint prediction directly rather than the Euler-integrated state."""
+
+    run_mlff: bool = False
+    """Whether to run MLFF relaxation after generation"""
+
+    mlff_checkpoint: str = "PaiNN-S2EF-OC20-All"
+    """Path to MLFF checkpoint for relaxation"""
+
+    # ==================== Evaluation Criteria ================
+
     covalent_radii_scale: float = 0.75
     """Scale factor applied to summed covalent radii for the atom-clash distance check (DIST_METHOD=2).
     A pair is flagged as clashing if its distance is below covalent_radii_scale * (r_i + r_j).
     Lower values are more permissive; higher values are stricter."""
 
-    run_mlff: bool = False
-    """Whether to run MLFF relaxation after generation"""
-
-    mlff_checkpoint: str = "EquiformerV2-153M-S2EF-OC20-All+MD"
-    """Path to MLFF checkpoint for relaxation"""
 
 
 @dataclass
@@ -352,10 +331,9 @@ class Config:
 
     # ==================== Model Run Mode ====================
 
-    variant: Literal["place", "forge"] = "forge"
+    variant: Literal["forge"] = "forge"
     """
     Flow matching variant:
-    - "relax": learn x0 → x1 (initial to relaxed structure)
     - "forge": learn noise/random → x1 (generative modeling from scratch)
     """
 
@@ -368,7 +346,7 @@ class Config:
     - "debug": debug mode with additional checks
     """
 
-    x_matching: Literal["flow", "endpoint"] = "flow"
+    x_matching: Literal["flow", "endpoint"] = "endpoint"
     """
     Loss computation mode:
     - "flow": velocity matching (predict dx/dt, standard flow matching)
@@ -394,6 +372,28 @@ class Config:
     informed_priors: bool = False
     """
     Whether to use informed priors for the noise x0 (forge variant only).
+    """
+
+    operate_on_torus: bool = False
+    """
+    Whether to apply the minimum image convention (MIC) to the velocity u_x
+    for catalyst fractional coordinates. When True, u_x is wrapped to [-0.5, 0.5)
+    by subtracting round(u_x), ensuring the shortest path on the periodic torus.
+    """
+
+    standardize_ads_pos: bool = False
+    """
+    Whether to standardize adsorbate positions by subtracting the mean and dividing by
+    the standard deviation before flow matching. 
+    - True: adsorbate positions are z-score normalized (zero mean, unit variance)
+    - False: adsorbate positions are used as-is (default)
+    """
+
+    condition_on_binding_E: bool = True
+    """
+    Whether to condition the model on the target adsorption binding energy.
+    - True: binding energy is embedded and added to the conditioning signal
+    - False: binding energy conditioning is disabled (model generates unconditionally)
     """
 
     # ==================== Sampler Settings (for Inference) ====================

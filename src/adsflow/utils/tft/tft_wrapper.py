@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import torch
-import torch.nn.functional as F
 from tensordict import TensorDict
 from torch import Tensor
 from torch_geometric.data import Data
@@ -49,8 +48,8 @@ class PyGToTensorDict:
     def to_tensordict(
         self,
         data: Data,
-        max_prim_nodes: Optional[int] = None,
-        max_ads_nodes: Optional[int] = None,
+        max_prim_nodes: int=250,
+        max_ads_nodes: int=15,
     ) -> Tuple[
         TensorDictBatch, TensorDictBatch,   # x_prim, x_ads
         TensorDictBatch, TensorDictBatch,   # t_prim, t_ads
@@ -79,11 +78,6 @@ class PyGToTensorDict:
 
         prim_batch = batch_index[prim_mask]
         ads_batch = batch_index[ads_mask]
-
-        if max_prim_nodes is None:
-            max_prim_nodes = int(torch.bincount(prim_batch, minlength=batch_size).max().item())
-        if max_ads_nodes is None:
-            max_ads_nodes = int(torch.bincount(ads_batch, minlength=batch_size).max().item())
 
         if max_prim_nodes <= 0:
             raise ValueError("max_prim_nodes must be positive (no prim atoms found).")
@@ -180,11 +174,11 @@ class PyGToTensorDict:
                 max_num_nodes=max_num_nodes,
             )  # (B, N_ads)
 
-            sd["ads_pairwise_dist"], _ = to_dense_batch(
-                data.ads_pairwise_dist,
+            sd["ads_ref_centered_pos"], _ = to_dense_batch(
+                data.ads_ref_centered_pos,
                 atom_batch,
                 max_num_nodes=max_num_nodes,
-            )  # (B, N_ads, 15)
+            )  # (B, N_ads, 3)
         else:
             # Node-level: positions (already prim-only after _build_positions_path)
             sd["frac_coords"], _  = to_dense_batch(
@@ -192,15 +186,6 @@ class PyGToTensorDict:
                 atom_batch,
                 max_num_nodes=max_num_nodes,
             ) # B, N, 3
-
-            # Node-level: Cartesian coords — frac @ cell, unified space with adsorbate
-            cell_per_atom = data.cell[atom_batch]  # (N_prim, 3, 3)
-            cart_sparse = torch.bmm(data.pos.unsqueeze(1), cell_per_atom).squeeze(1)  # (N_prim, 3)
-            sd["cart_coords"], _ = to_dense_batch(
-                cart_sparse,
-                atom_batch,
-                max_num_nodes=max_num_nodes,
-            )  # (B, N, 3)
 
             # Node-level: atomic_numbers_hot
             sd["atomic_numbers_hot"], mask = to_dense_batch(

@@ -21,6 +21,7 @@ out-claude.txt
 selected_frames-old.parquet
 selected_frames.parquet
 .DS_Store
+tea_debug.log
 
 
 # Folders
@@ -45,9 +46,9 @@ plots/
 *_files/
 mlff_checkpoint_cache/ 
 catflow/
-factorized/
 poscar*/
 analysis/
 .claude/CLAUDE.md
 generated_samples/
-analysis/
+datasets/factorized
+*strucs*/

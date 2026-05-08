@@ -1,4 +1,5 @@
 import contextlib
+import json
 import logging
 import os
 import numpy as np
@@ -12,25 +13,26 @@ from lightning.pytorch import LightningModule
 from torch_geometric.data import Data
 from transformers import get_cosine_schedule_with_warmup, get_polynomial_decay_schedule_with_warmup
 
-from adsflow.utils.x_matching import XMatching
-from adsflow.utils.evaluator import compute_eval_metrics
+from tqdm import tqdm
+
+from adsflow.utils.path import Flow
 from adsflow.utils.relaxation import relax_struc
 from adsflow.utils.atoms import write_strucs
-from adsflow.utils.tft.wrapper import PyGToTensorDict
-from adsflow.utils.builder import forge_catalyst
-from adsflow.utils.evaluator import evaluate_forge_batch, check_validity
+from adsflow.utils.tft.tft_wrapper import PyGToTensorDict
+from adsflow.utils.builder import forge_catalyst, sample_prim_atom_counts
+from adsflow.utils.evaluator import check_validity
 import ase.io
 
 from typing import Optional, Literal, Union, Tuple
 
 
-class LightFlowMatch(LightningModule, XMatching):
+class LightFlowMatch(LightningModule, Flow):
     """
     PyTorch Lightning module for training conditional flow matching models.
 
-    Combines LightningModule (for training infrastructure) with XMatching (for
-    interpolation paths and loss computation). Supports both "refine" and "forge"
-    variants for atomic structure relaxation.
+    Combines LightningModule (for training infrastructure) with Flow (for
+    interpolation paths and loss computation). Supports the "forge"
+    variant for de novo atomic structure generation.
 
     Args
     ---------
@@ -54,8 +56,6 @@ class LightFlowMatch(LightningModule, XMatching):
         Path to save initial structure files during testing
     gen_POS: str
         Path to save generated structure files during testing
-    rlxd_POS: str
-        Path to save relaxed (ground truth) structure files during testing
     config_vasp: bool
         Whether to configure VASP DFT input files during testing
     threshold: float
@@ -70,7 +70,7 @@ class LightFlowMatch(LightningModule, XMatching):
     def __init__(
             self,
             model,
-            variant: str="place",
+            variant: str="forge",
             mode: str="debug",
             rtol: float = 1e-7,
             atol: float = 1e-9,
@@ -85,16 +85,20 @@ class LightFlowMatch(LightningModule, XMatching):
             schedule_type: Literal["linear", "cosine"]="linear",
             optimal_transport: bool=False,
             informed_priors: bool=True,
+            operate_on_torus: bool=False,
             write_eval_metrics: bool=False,
             num_integration_steps: int=1,
             run_mlff: bool=False,
             mlff_checkpoint: Optional[str]=None,
             accelerator: str="gpu",
             seed: int=42,
-            num_prim_atoms: Optional[int]=3,
+            num_prim_atoms: Optional[int]=None,
+            refine_final: bool=False,
             target_binding_E: Optional[float]=None,
             num_generated_samples: int=1,
             covalent_radii_scale: float=0.75,
+            condition_on_binding_E: bool=True,
+            standardize_ads_pos: bool=False,
             ads_pos_mean: list = [0.02587131, -0.69517581, 0.91811687],
             ads_pos_std: list = [8.21663071, 9.02733422, 9.86882174],
             **kwargs,
@@ -103,7 +107,7 @@ class LightFlowMatch(LightningModule, XMatching):
         super().__init__()
         # Save hyperparameters for logging and checkpointing (ignoring model-specific args)
         self.save_hyperparameters(ignore=["model", "variant", "mode", "rtol", "atol", "ode_method", \
-            "track_grad_norms", "in_POS", "gen_POS", "rlxd_POS", "config_vasp", "threshold", "x_matching", \
+            "track_grad_norms", "in_POS", "gen_POS", "config_vasp", "threshold", "x_matching", \
             "interpolant_schedule", "write_eval_metrics", "num_integration_steps", "run_mlff", "mlff_checkpoint", \
             "accelerator", "seed", "num_prim_atoms", "optimal_transport"])
 
@@ -123,6 +127,7 @@ class LightFlowMatch(LightningModule, XMatching):
         self.in_POS = in_POS
         self.gen_POS = gen_POS
         self.rlxd_POS = rlxd_POS
+
         self.config_vasp = config_vasp
         self.threshold = threshold
         self.covalent_radii_scale = covalent_radii_scale
@@ -132,46 +137,43 @@ class LightFlowMatch(LightningModule, XMatching):
         self.schedule_type = schedule_type  # "linear" or "cosine"
         self.optimal_transport = optimal_transport
         self.informed_priors = informed_priors
+        self.operate_on_torus = operate_on_torus
         self.write_eval_metrics = write_eval_metrics
         self.num_integration_steps = num_integration_steps
         self.run_mlff = run_mlff
         self.accelerator = accelerator
         self.seed = seed
         self.num_prim_atoms = num_prim_atoms
+        self.refine_final = refine_final
         self.mlff_checkpoint = mlff_checkpoint
         self.target_binding_E = target_binding_E
         self.num_generated_samples = num_generated_samples
+        self.condition_on_binding_E = condition_on_binding_E
+        self.standardize_ads_pos = standardize_ads_pos
 
         # Adsorbate position normalization stats (per-axis), computed offline over training set.
         # Path, loss, and Euler integration run in normalized space; denormalize only at sampling output.
         self.register_buffer("ads_pos_mean", torch.tensor(ads_pos_mean, dtype=torch.float32))
         self.register_buffer("ads_pos_std", torch.tensor(ads_pos_std, dtype=torch.float32))
 
+        _hist_path = os.path.join(os.path.dirname(__file__), "primitive_atom_distribution.json")
+        with open(_hist_path) as f:
+            hist = json.load(f)["prim_slab_num_atoms_hist"]
+        self.prim_atoms_hist = torch.tensor(hist, dtype=torch.float32)
+
         # Diagnostic mode: detailed loss analysis for model development
         self._write_f_u = False
         self.bad_iter, self.good_ter, self.iter = 0, 0, 0
        # ==============================================================================
        
-    def forward(self, data=None, **kwargs):
-        """
-        Forward pass through the model.
-
-        For the 'place' variant, accepts a single PyG Data object.
-        For the 'forge' variant, accepts keyword arguments (x_prim, x_ads, etc.)
-        that are passed directly to the transformer model.
-        """
-        if kwargs:
-            return self.model(**kwargs)
-        return self.model(data)
-
-    def _forge_forward(self, data: Data) -> dict:
+    def forward(self, data: Data) -> dict:
         """Run the forge model forward pass and return a flat prediction dict.
 
         Converts the PyG batch to dense tensors, calls the transformer, and
         unpacks outputs back to sparse form. Used both during training
-        (via _transport_loss) and sampling (via XMatching._sample_forge),
-        which can call this as `self._forge_forward(data)` because
-        LightFlowMatch inherits from XMatching.
+        (via _transport_loss) and sampling (via Flow.sample),
+        which calls this as `self(data)` because
+        LightFlowMatch inherits from Flow.
 
         Args:
             data: PyG Data/Batch with all forge fields populated.
@@ -187,11 +189,10 @@ class LightFlowMatch(LightningModule, XMatching):
 
         t = t_prim.data["t"].squeeze(-1)  # (B,)
 
-        pred_prim, pred_ads, _ = self(
+        pred_prim, pred_ads, _ = self.model(
             x_prim=(
                 x_prim.data["atomic_numbers_hot"],     # (B, M, 118)
                 x_prim.data["frac_coords"],            # (B, M, 3)
-                x_prim.data["cart_coords"],            # (B, M, 3)
                 x_prim.data["lengths_scaled"],         # (B, 1, 3)
                 x_prim.data["angles_radians"],         # (B, 1, 3)
                 x_prim.data["transformation_matrix"],  # (B, 3, 3)
@@ -200,18 +201,18 @@ class LightFlowMatch(LightningModule, XMatching):
             x_ads=(
                 x_ads.data["ads_atomic_numbers"],      # (B, N)
                 x_ads.data["ads_pos"],                 # (B, N, 3)
-                x_ads.data["ads_pairwise_dist"],       # (B, N, D)
+                x_ads.data["ads_ref_centered_pos"],    # (B, N, 3)
             ),
             t_prim=(t, t, t, t),
             t_ads=(t,),
-            feats={"ads_binding_energy": f_prim.data["ads_binding_energy"]},
+            feats={"ads_binding_energy": f_prim.data["ads_binding_energy"] if self.condition_on_binding_E else None},
             prim_padding_mask=prim_padding_mask,
             ads_padding_mask=ads_padding_mask,
         )
 
         return {
             "pos":     x_prim.to_sparse(pred_prim[1]),   # (N_prim, 3)
-            "z":       x_prim.to_sparse(pred_prim[0]),   # (N_prim, 118)
+            "z":       x_prim.to_sparse(pred_prim[0]),   # (N_prim, 100)
             "len":     pred_prim[2].squeeze(1),          # (B, 3)
             "ang":     pred_prim[3].squeeze(1),          # (B, 3)
             "M":       pred_prim[4],                     # (B, 3, 3)
@@ -242,15 +243,11 @@ class LightFlowMatch(LightningModule, XMatching):
         data = self.path(input_graph=input_graph) 
 
         # Model predicts velocity field (or dict for forge with z_logits)
-        if self.variant =="place":
-            f = self(data)
-            losses = self.criterion(
-                input_graph=data,
-                pred=f,  # Model prediction
-            )
-        elif self.variant == "forge":
-            pred = self._forge_forward(data)
+        if self.variant == "forge":
+            pred = self(data)
             losses = self.criterion(input_graph=data, pred=pred)
+        else:
+            raise RuntimeError(f"Unknown variant: {self.variant}")
 
         return losses
     
@@ -328,48 +325,68 @@ class LightFlowMatch(LightningModule, XMatching):
         """
         
         t = torch.linspace(0., 1, self.num_integration_steps, device=data.pos.device, dtype=data.pos.dtype)
-        opt_graph = self.sample(input_graph=data, t=t, ode_method=self.ode_method, num_prim_atoms=self.num_prim_atoms)
-        
-        cat_atoms_list, prim_atoms_list = forge_catalyst(opt_graph, write_dir=None, batch_idx=batch_idx)
-        cat_validity  = [check_validity(atoms, self.covalent_radii_scale) for atoms in cat_atoms_list]
-        prim_validity = [check_validity(atoms, self.covalent_radii_scale) for atoms in prim_atoms_list]
+        B = int(data.batch.max().item()) + 1
+        counts = sample_prim_atom_counts(B, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
+        opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts, refine_final=self.refine_final)
 
-        if self.gen_POS:
-            os.makedirs(self.gen_POS, exist_ok=True)
-            for b, (atoms, result) in enumerate(zip(cat_atoms_list, cat_validity)):
-                if result["is_valid"] and atoms is not None:
+        prim_batch = opt_graph.batch[opt_graph.tags == 1]
+        ads_batch  = opt_graph.batch[opt_graph.tags == 2]
+        num_graphs = int(opt_graph.batch.max().item()) + 1
+
+        for b in range(num_graphs):
+            atoms = forge_catalyst(opt_graph, b, prim_batch, ads_batch)
+
+            if atoms is not None: 
+                atoms_rlxd = relax_struc(
+                        atoms=atoms,
+                        run_mlff=self.run_mlff,
+                        config_vasp=self.config_vasp,
+                        mlff_checkpoint=self.mlff_checkpoint,
+                        accelerator=self.accelerator,
+                        seed=self.seed,
+                    )
+                
+                atoms_rlxd = atoms_rlxd if self.run_mlff else atoms
+                target_ads_dists = opt_graph.ads_pairwise_dist[ads_batch == b].cpu().numpy()  # (N_ads_b, 15)
+                result = check_validity(atoms_rlxd, self.covalent_radii_scale, target_ads_dists=target_ads_dists)
+
+                metrics = {
+                    "vol_ok":      float(result["vol_ok"]),
+                    "cat_dist_ok":     float(result["cat_dist_ok"]),
+                    "ads_dist_ok": float(result["ads_dist_ok"]),
+                    "sample_is_valid":    float(result["is_valid"]),
+                }
+
+                if result["ads_dist_mae"] is not None: 
+                    metrics["ads_dist_mae"] = float(result["ads_dist_mae"])
+ 
+                for key, val in metrics.items():
+                    self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
+
+                if self.gen_POS and result["is_valid"]:
+                    os.makedirs(self.gen_POS, exist_ok=True)
                     ase.io.write(
                         os.path.join(self.gen_POS, f'{batch_idx}_{b}.vasp'),
                         atoms,
                         format='vasp',
                     )
 
-        for prefix, results, n in [
-            ("validity/cat",  cat_validity,  len(cat_atoms_list)),
-            ("validity/prim", prim_validity, len(prim_atoms_list)),
-        ]:
-            metrics = {
-                f"{prefix}/vol_ok":   float(np.mean([r["vol_ok"]   for r in results])),
-                f"{prefix}/dist_ok":  float(np.mean([r["dist_ok"]  for r in results])),
-                f"{prefix}/is_valid": float(np.mean([r["is_valid"] for r in results])),
-            }
-            for key, val in metrics.items():
-                self.log(key, val, on_step=False, on_epoch=True, batch_size=n)
+                if self.rlxd_POS and self.run_mlff and result["is_valid"]:
+                    os.makedirs(self.rlxd_POS, exist_ok=True)
+                    ase.io.write(
+                        os.path.join(self.rlxd_POS, f'{batch_idx}_{b}.vasp'),
+                        atoms_rlxd,
+                        format='vasp',
+                    )
 
-        """
-        opt_graph = relax_struc(
-                opt_graph,
-                run_mlff=self.run_mlff,
-                config_vasp=self.config_vasp,
-                mlff_checkpoint=self.mlff_checkpoint,
-                accelerator=self.accelerator,
-                seed=self.seed,
-                gen_POS=self.gen_POS,
-                in_POS=self.in_POS,
-                rlxd_POS=self.rlxd_POS,
-            )
-        """
-        
+                if batch_idx == 2 and b == 13: 
+                    print(opt_graph.ref_ads_pos[ads_batch == b])
+                    print(opt_graph.ads_atomic_numbers[ads_batch == b])
+                
+                if batch_idx == 3 and b == 3: 
+                    print(opt_graph.ref_ads_pos[ads_batch == b])
+                    print(opt_graph.ads_atomic_numbers[ads_batch == b])
+
         return   
 
     def predict_step(self, data: Data, batch_idx: int):
@@ -386,12 +403,9 @@ class LightFlowMatch(LightningModule, XMatching):
         Returns:
             List of ASE Atoms objects (one per graph in the batch).
         """
-        # Override binding energy from config if provided
         if self.target_binding_E is not None:
-            B = int(data.batch.max().item()) + 1
-            data.ads_binding_energy = torch.full(
-                (B,), self.target_binding_E,
-                device=data.pos.device, dtype=torch.float32,
+            data.ads_binding_energy = torch.tensor(
+                [self.target_binding_E], device=data.pos.device, dtype=torch.float32,
             )
 
         t = torch.linspace(
@@ -400,41 +414,64 @@ class LightFlowMatch(LightningModule, XMatching):
         )
 
         all_atoms = []
+        all_metrics = []
         for sample_idx in range(self.num_generated_samples):
-            opt_graph = self.sample(
-                input_graph=data,
-                t=t,
-                ode_method=self.ode_method,
-                num_prim_atoms=self.num_prim_atoms,
-            )
+            counts = sample_prim_atom_counts(1, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
+            opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts, refine_final=self.refine_final)
 
-            cat_atoms_list, prim_atoms_list = forge_catalyst(opt_graph, write_dir=None, batch_idx=batch_idx)
-            cat_validity  = [check_validity(atoms, self.covalent_radii_scale) for atoms in cat_atoms_list]
-            prim_validity = [check_validity(atoms, self.covalent_radii_scale) for atoms in prim_atoms_list]
+            prim_batch = opt_graph.batch[opt_graph.tags == 1]
+            ads_batch  = opt_graph.batch[opt_graph.tags == 2]
 
-            for prefix, results, n in [
-                ("validity/cat",  cat_validity,  len(cat_atoms_list)),
-                ("validity/prim", prim_validity, len(prim_atoms_list)),
-            ]:
+            atoms = forge_catalyst(opt_graph, 0, prim_batch, ads_batch)
+
+            if atoms is not None:
+                atoms_rlxd = relax_struc(
+                    atoms=atoms,
+                    run_mlff=self.run_mlff,
+                    config_vasp=self.config_vasp,
+                    mlff_checkpoint=self.mlff_checkpoint,
+                    accelerator=self.accelerator,
+                    seed=self.seed,
+                )
+
+                atoms_rlxd = atoms_rlxd if self.run_mlff else atoms
+                target_ads_dists = opt_graph.ads_pairwise_dist[ads_batch == 0].cpu().numpy()
+                result = check_validity(atoms_rlxd, self.covalent_radii_scale, target_ads_dists=target_ads_dists)
+
                 metrics = {
-                    f"{prefix}/vol_ok":   float(np.mean([r["vol_ok"]   for r in results])),
-                    f"{prefix}/dist_ok":  float(np.mean([r["dist_ok"]  for r in results])),
-                    f"{prefix}/is_valid": float(np.mean([r["is_valid"] for r in results])),
+                    "vol_ok":          float(result["vol_ok"]),
+                    "cat_dist_ok":     float(result["cat_dist_ok"]),
+                    "ads_dist_ok":     float(result["ads_dist_ok"]),
+                    "sample_is_valid": float(result["is_valid"]),
                 }
-                for key, val in metrics.items():
-                    self.log(key, val, on_step=False, on_epoch=True, batch_size=n)
+                if result["ads_dist_mae"] is not None:
+                    metrics["ads_dist_mae"] = float(result["ads_dist_mae"])
 
-            if self.gen_POS:
-                os.makedirs(self.gen_POS, exist_ok=True)
-                for b, (atoms, result) in enumerate(zip(cat_atoms_list, cat_validity)):
-                    if atoms is not None and result["is_valid"]:
-                        ase.io.write(
-                            os.path.join(self.gen_POS, f'{batch_idx}_{sample_idx}_{b}.vasp'),
-                            atoms,
-                            format='vasp',
-                        )
+                all_metrics.append(metrics)
 
-            all_atoms.extend(cat_atoms_list)
+                if self.gen_POS and result["is_valid"]:
+                    os.makedirs(self.gen_POS, exist_ok=True)
+                    ase.io.write(
+                        os.path.join(self.gen_POS, f'{batch_idx}_{sample_idx}.vasp'),
+                        atoms,
+                        format='vasp',
+                    )
+
+                if self.rlxd_POS and self.run_mlff and result["is_valid"]:
+                    os.makedirs(self.rlxd_POS, exist_ok=True)
+                    ase.io.write(
+                        os.path.join(self.rlxd_POS, f'{batch_idx}_{sample_idx}.vasp'),
+                        atoms_rlxd,
+                        format='vasp',
+                    )
+
+            all_atoms.append(atoms)
+
+        if all_metrics:
+            keys = all_metrics[0].keys()
+            avgs = {k: np.mean([m[k] for m in all_metrics if k in m]) for k in keys}
+            print(f"[predict batch={batch_idx} avg over {len(all_metrics)} samples] " +
+                  " ".join(f"{k}={v:.4f}" for k, v in avgs.items()))
 
         return all_atoms
 

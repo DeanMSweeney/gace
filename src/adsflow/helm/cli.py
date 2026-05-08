@@ -81,13 +81,9 @@ def main(cfg: Config) -> None:
     defaults_cfg = OmegaConf.create(asdict(defaults))
     cfg = OmegaConf.merge(defaults_cfg, cfg)
 
-    if cfg.mode == "eval":
+    if cfg.mode == "eval" or cfg.mode == "generate":
         cfg.precision = 32 
     
-    if cfg.sampler_cfg.run_mlff:
-        declare(">>> Configured for MLFF relaxation on generated samples, setting batch size to 1 ⛷️")
-        cfg.batch_size = 1
-
     # === Reproducibility & Performance Setup ===
     # Seed RNG for reproducibility across multi-GPU training
     pl.seed_everything(cfg.seed, workers=True)
@@ -187,7 +183,9 @@ def main(cfg: Config) -> None:
     # --- Evaluation Mode ---
     # Load test dataset for model evaluation
     elif cfg.mode == "eval" and cfg.oc20_test:
+        n = cfg.sampler_cfg.get("num_prim_atoms", None)
         declare(f">>> Activated Evaluation mode with OC20-test: {cfg.oc20_test} 🦉")
+        declare(f">>> Primitive atom count: {'fixed at ' + str(n) if n is not None else 'sampling from histogram'} 🧙🏽‍♀️")
         ptst = {"src": cfg.oc20_test}
         test_set = LazyLmdbDataset(ptst)
         test_set = Subset(test_set, indices=range(100))
@@ -201,7 +199,9 @@ def main(cfg: Config) -> None:
     # --- Generation Mode ---
     # Build Data object from adsorbate molecule POSCAR + target binding energy
     elif cfg.mode == "generate" and cfg.sampler_cfg.in_POS:
+        n = cfg.sampler_cfg.get("num_prim_atoms", None)
         declare(">>> Activated Generation mode with user adsorbate input")
+        declare(f">>> Primitive atom count: {'fixed at ' + str(n) if n is not None else 'sampling from histogram'} 🧙🏽‍♀️")
         mol_atoms = ase.io.read(cfg.sampler_cfg.in_POS)
         initial_graph = build_graph_from_atoms(
             mol_atoms=mol_atoms,
@@ -222,6 +222,9 @@ def main(cfg: Config) -> None:
         variant=cfg.variant,
         optimal_transport=cfg.optimal_transport,
         informed_priors=cfg.informed_priors,
+        operate_on_torus=cfg.operate_on_torus,
+        condition_on_binding_E=cfg.condition_on_binding_E,
+        standardize_ads_pos=cfg.standardize_ads_pos,
         mode=cfg.mode,
         track_grad_norms=cfg.track_grad_norms,
         x_matching=cfg.x_matching,

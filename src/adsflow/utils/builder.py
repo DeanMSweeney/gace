@@ -1,7 +1,5 @@
-import os
 import numpy as np
 from ase import Atoms
-import ase.io
 from pymatgen.core import Structure, Lattice
 from pymatgen.core.periodic_table import DummySpecie, Element
 from pymatgen.io.ase import AseAtomsAdaptor
@@ -219,112 +217,69 @@ def build_slab_adsorbate(
 
 def forge_catalyst(
     opt_graph,
-    write_dir: Optional[str] = None,
-    batch_idx: Optional[int] = None,
-) -> list:
+    b: int,
+    prim_batch: torch.Tensor,
+    ads_batch: torch.Tensor,
+) -> Tuple[Optional[Atoms], Optional[Atoms]]:
     """
-    Build a full slab + adsorbate ASE Atoms object for every sample in a forge batch.
+    Build a full slab + adsorbate ASE Atoms object for graph index b in a forge batch.
 
     Reads `*_generated` fields from `opt_graph` (the ODE-sampled output), converts
-    fractional coordinates to Cartesian, reconstructs adsorbate positions from COM +
-    relative offsets, and calls `build_slab_adsorbate` for each sample.
-
-    Side-effects:
-        Attaches two attributes to `opt_graph`:
-        - `gen_pos_all`: list of (N_i, 3) numpy arrays — full Cartesian positions
-        - `gen_atomic_numbers_all`: list of (N_i,) numpy arrays — atomic numbers
+    fractional coordinates to Cartesian, and calls `build_slab_adsorbate`.
 
     Args:
         opt_graph:   PyG Batch returned by `sample()`, carrying `*_generated` fields.
-        write_dir:   If given, write each structure as a VASP POSCAR to this directory.
-        batch_idx:   Batch index used to name POSCAR files (`{batch_idx}_{b}.vasp`).
+        b:           Index of the graph within the batch to build.
+        prim_batch:  Batch indices for primitive-cell atoms (opt_graph.batch[tags == 1]).
+        ads_batch:   Batch indices for adsorbate atoms (opt_graph.batch[tags == 2]).
 
     Returns:
-        Tuple of (cat_atoms_list, prim_atoms_list): one ASE Atoms per sample.
-        cat_atoms_list contains the full supercell slab + adsorbate.
-        prim_atoms_list contains the primitive unit cell atoms only.
+        Tuple of (cat_atoms, prim_atoms): full supercell slab+adsorbate and primitive cell,
+        or (None, None) if build fails.
     """
-    prim_mask  = (opt_graph.tags == 1)
-    ads_mask   = (opt_graph.tags == 2)
-    prim_batch = opt_graph.batch[prim_mask]
-    ads_batch  = opt_graph.batch[ads_mask]
-    # num_graphs is not set on forge-sampled batches; derive from batch index
-    num_graphs = int(opt_graph.batch.max().item()) + 1
+    try:
+        lengths = opt_graph.lengths_generated[b]   # (3,)
+        angles  = opt_graph.angles_generated[b]    # (3,)
+        M       = opt_graph.M_generated[b]         # (3, 3)
 
-    cat_atoms_list = []
-    prim_atoms_list = []
-    gen_pos_all = []
-    gen_atomic_numbers_all = []
+        cell     = lattice_params_to_matrix(lengths.unsqueeze(0), angles.unsqueeze(0)).squeeze(0)
+        frac     = opt_graph.pos_generated[prim_batch == b]       # (N_prim, 3)
+        prim_pos = frac @ cell                                     # (N_prim, 3) Cartesian
 
-    for b in range(num_graphs):
-        try:
-            lengths = opt_graph.lengths_generated[b]   # (3,)
-            angles  = opt_graph.angles_generated[b]    # (3,)
-            M       = opt_graph.M_generated[b]         # (3, 3)
+        ads_pos = opt_graph.ads_pos_generated[ads_batch == b]     # (N_ads, 3)
 
-            cell     = lattice_params_to_matrix(lengths.unsqueeze(0), angles.unsqueeze(0)).squeeze(0)
-            frac     = opt_graph.pos_generated[prim_batch == b]           # (N_prim, 3)
-            prim_pos = frac @ cell                                         # (N_prim, 3) Cartesian
+        # atomic_numbers_generated is already 1-indexed (sampler stores argmax + 1)
+        # ads_atomic_numbers is 0-indexed (sampler shifts it down by 1 for internal use)
+        atoms = build_slab_adsorbate(
+            prim_pos=prim_pos,
+            lattice_params=torch.cat([lengths, angles]),           # (6,) radians
+            transformation_matrix=M,
+            ads_pos=ads_pos,
+            prim_atomic_numbers=opt_graph.atomic_numbers_generated[prim_batch == b],
+            ads_atomic_numbers=opt_graph.ads_atomic_numbers[ads_batch == b] + 1,
+            vacuum=15.0,
+        )
 
-            ads_pos = opt_graph.ads_pos_generated[ads_batch == b]     # (N_ads, 3)
+        return atoms
 
-            cell_np    = _to_numpy(cell)
-            prim_pos_np = _to_numpy(prim_pos)
-            prim_z_np   = _to_numpy(opt_graph.atomic_numbers_generated[prim_batch == b])
-
-            prim_atoms = Atoms(
-                numbers=prim_z_np,
-                positions=prim_pos_np,
-                cell=cell_np,
-                pbc=True,
-            )
+    except Exception as e:
+        print(f"[forge_catalyst] Failed to build graph {b}: {e}")
+        return None
 
 
-            # atomic_numbers_generated is already 1-indexed (sampler stores argmax + 1)
-            # ads_atomic_numbers is 0-indexed (sampler shifts it down by 1 for internal use)
-            atoms = build_slab_adsorbate(
-                prim_pos=prim_pos,
-                lattice_params=torch.cat([lengths, angles]),               # (6,) radians
-                transformation_matrix=M,
-                ads_pos=ads_pos,
-                prim_atomic_numbers=opt_graph.atomic_numbers_generated[prim_batch == b],
-                ads_atomic_numbers=opt_graph.ads_atomic_numbers[ads_batch == b] + 1,
-                vacuum=15.0,
-            )
+def sample_prim_atom_counts(
+    B: int,
+    device: torch.device,
+    hist: Optional[torch.Tensor] = None,
+    num_prim_atoms: Optional[int] = None,
+) -> torch.Tensor:
+    """Sample per-graph primitive atom counts.
 
-
-            cat_atoms_list.append(atoms)
-            prim_atoms_list.append(prim_atoms)
-            gen_pos_all.append(atoms.get_positions())
-            gen_atomic_numbers_all.append(atoms.get_atomic_numbers())
-
-            if write_dir:
-                os.makedirs(write_dir, exist_ok=True)
-                ase.io.write(
-                    os.path.join(write_dir, f'{batch_idx}_{b}_prim.vasp'),
-                    prim_atoms,
-                    format='vasp',
-                )
-
-        except Exception as e:
-            print(f"[forge_catalyst] Failed to build graph {b}: {e}")
-            cat_atoms_list.append(None)
-            prim_atoms_list.append(None)
-
-    opt_graph.gen_pos_all = gen_pos_all
-    opt_graph.gen_atomic_numbers_all = gen_atomic_numbers_all
-
-    if write_dir:
-        os.makedirs(write_dir, exist_ok=True)
-        for b, atoms in enumerate(cat_atoms_list):
-            if atoms is not None:
-                ase.io.write(
-                    os.path.join(write_dir, f'{batch_idx}_{b}.vasp'),
-                    atoms,
-                    format='vasp',
-                )
-
-    return cat_atoms_list, prim_atoms_list
+    num_prim_atoms takes priority over hist if both are set.
+    """
+    if num_prim_atoms is not None:
+        return torch.full((B,), num_prim_atoms, dtype=torch.long, device=device)
+    return torch.multinomial(hist.expand(B, -1), num_samples=1).squeeze(1)
 
 
 def build_graph_from_atoms(
@@ -352,8 +307,6 @@ def build_graph_from_atoms(
     N_ads = len(ads_z_np)
 
     ads_pos_t = torch.from_numpy(ads_pos_np)
-    ads_com   = ads_pos_t.mean(dim=0)              # (3,)
-    ads_rel_pos = ads_pos_t - ads_com              # (N_ads, 3)
     ads_pairwise_dist = compute_ads_pairwise_distances(ads_pos_t)  # (N_ads, 15)
 
     tags = torch.cat([
@@ -365,13 +318,10 @@ def build_graph_from_atoms(
         num_nodes=num_prim_atoms + N_ads,
         pos=torch.zeros(num_prim_atoms, 3),
         tags=tags,
-        # Adsorbate conditioning (fixed throughout sampling)
         ads_atomic_numbers=torch.from_numpy(ads_z_np),
-        ads_pairwise_dist=ads_pairwise_dist,
-        ads_com=ads_com.unsqueeze(0),              # (1, 3) → batches to (B, 3)
-        ads_rel_pos=ads_rel_pos,                   # (N_ads, 3)
+        ref_ads_pos=ads_pos_t,                     # (N_ads, 3) — centered on-the-fly in sample()
+        ads_pairwise_dist=ads_pairwise_dist,       # (N_ads, 15) — used in validity check
         ads_binding_energy=torch.tensor(binding_energy, dtype=torch.float32),
-        # Placeholder lattice / geometry (overwritten from noise in _sample_forge)
         lengths_scaled=torch.zeros(1, 3),
         angles_radians=torch.zeros(1, 3),
         transformation_matrix=torch.eye(3, dtype=torch.long).unsqueeze(0),  # (1, 3, 3)
