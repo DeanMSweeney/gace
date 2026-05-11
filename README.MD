@@ -1,33 +1,37 @@
-# 🧪 AdsFlow 💻
-![Concept Art](concept_art.png)
+# AdsFlow
 
-This repository contains code for implementing Conditional Flow Matching (CFM) for adsorbate placement and optimization on catalyst surfaces. AdsFlow leverages geometric deep learning models and optimal transport theory to predict and refine adsorbate configurations on catalytic surfaces.
+AdsFlow is a **conditional flow matching** model for generating catalyst slab + adsorbate structures de novo. It learns a velocity field that transports from Gaussian noise to real DFT-relaxed structures, conditioned on binding energy and spacegroup.
 
 ## Overview
 
-AdsFlow uses flow matching with optimal transport to model the continuous transformation of atomic structures. The model learns to predict velocity fields that guide atomic positions from initial configurations to optimized adsorbate placements on catalyst surfaces. This approach is particularly useful for computational catalysis and materials discovery.
+AdsFlow uses conditional flow matching (CFM) to model the joint distribution over catalyst primitive-cell geometry (fractional coordinates, atom types, lattice parameters, supercell matrix) and adsorbate geometry (center-of-mass, relative positions). Hungarian-alignment-based optimal transport is applied at training time to handle permutation invariance.
+
+### Variants
+
+- **`forge`** — generates a full slab+adsorbate structure de novo from Gaussian noise, conditioned on target binding energy
+- **`place`** *(legacy)* — relaxes an existing slab+adsorbate from initial DFT geometry to relaxed geometry (uses EquiformerV2/GemNet backbone)
 
 ### Key Features
 
-- **Flow Matching with Optimal Transport**: Implements conditional flow matching using optimal transport to learn structure transformations
-- **State-of-the-art GNN Architectures**: Supports EquiFormer-v2 and GemNet models for geometric deep learning
-- **PyTorch Lightning Integration**: Scalable training with distributed computing support
-- **Flexible Training Modes**: Supports both refinement and generation variants
-- **Docker Support**: Ready-to-use Docker images for AMD64 and ARM64 architectures
-- **Experiment Tracking**: Built-in Weights & Biases (wandb) integration for monitoring
+- **Multi-modality flow matching**: simultaneous flows over positions, atom types (simplex corruption), lattice lengths/angles, supercell matrix M, and adsorbate geometry
+- **Transformer backbone (forge)**: `TransformerModule` processes primitive-cell and adsorbate tokens as separate sequences with a shared trunk and modality-specific output heads
+- **Equivariant GNN backbone (place)**: EquiformerV2 with SO(3)-equivariant attention for structure refinement
+- **Endpoint & velocity matching**: configurable loss mode (`endpoint` or `flow`)
+- **ODE-based sampling**: torchdiffeq integration with dopri5, euler, rk4, or adaptive_heun solvers
+- **MLFF relaxation**: optional post-generation relaxation via FairChem OCPCalculator
+- **PyTorch Lightning**: multi-GPU/multi-node training with bf16 mixed precision
+- **WandB integration**: experiment tracking
 
 ## Installation
 
 ### Using Docker (Recommended)
 
-Build and run using the provided Dockerfiles:
-
 ```bash
-# For AMD64 systems
+# AMD64 (CUDA 12.4)
 docker build -f Dockerfile.amd64 -t adsflow:amd64 .
 docker run --gpus all -it adsflow:amd64
 
-# For ARM64 systems (Apple Silicon)
+# ARM64 (Apple Silicon)
 docker build -f Dockerfile.arm64 -t adsflow:arm64 .
 docker run -it adsflow:arm64
 ```
@@ -36,11 +40,11 @@ docker run -it adsflow:arm64
 
 1. **Clone the repository**:
 ```bash
-git clone https://github.com/yourusername/AdsFlow.git
+git clone <repo-url>
 cd AdsFlow
 ```
 
-2. **Create a conda environment** (optional but recommended):
+2. **Create a conda environment**:
 ```bash
 conda create -n adsflow python=3.10
 conda activate adsflow
@@ -62,7 +66,7 @@ pip install torch-scatter torch-sparse torch-cluster torch-spline-conv \
 pip install --no-deps fairchem-core==1.10.0
 ```
 
-6. **Install other dependencies**:
+6. **Install remaining dependencies**:
 ```bash
 pip install -r requirements.txt
 ```
@@ -72,117 +76,194 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
+## Usage
+
+All configuration is passed via Hydra CLI overrides to `scripts/train.py`. There are no YAML config files — `model_cfg` is the only required argument and is a Hydra-instantiable model config.
+
+### Train
+
+```bash
+python scripts/train.py \
+  model_cfg=<hydra-instantiable-model-config> \
+  mode=train \
+  oc20_train=/path/to/train.lmdb \
+  oc20_val=/path/to/val.lmdb \
+  variant=forge \
+  x_matching=endpoint
+```
+
+### Debug mode (small subset, fast iteration)
+
+```bash
+python scripts/train.py \
+  mode=debug \
+  oc20_train=/path/to/train.lmdb \
+  oc20_val=/path/to/val.lmdb \
+  num_debug_samples=1000
+```
+
+### Evaluate
+
+```bash
+python scripts/train.py \
+  mode=eval \
+  oc20_test=/path/to/test.lmdb \
+  ckpt_path=/path/to/ckpt.ckpt
+```
+
+### Generate
+
+```bash
+python scripts/train.py \
+  mode=generate \
+  ckpt_path=/path/to/ckpt.ckpt \
+  sampler_cfg.target_binding_E=-1.5 \
+  sampler_cfg.num_generated_samples=10
+```
+
+### Preprocess LMDB dataset
+
+```bash
+python -m adsflow.utils.factorized_builders.data_processor \
+  --src /path/to/raw.lmdb \
+  --dst /path/to/processed.lmdb
+```
+
+## Configuration
+
+Configuration is handled by `helm/config.py` via three dataclasses:
+
+### `Config` (top-level)
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `model_cfg` | MISSING | Hydra-instantiable model architecture config |
+| `variant` | `"forge"` | Flow matching variant |
+| `mode` | `"generate"` | Execution mode: `train`, `eval`, `generate`, `debug` |
+| `x_matching` | `"endpoint"` | Loss mode: `endpoint` (predict x₁) or `flow` (predict dx/dt) |
+| `interpolant_schedule` | `"linear"` | Interpolation schedule: `linear` or `cosine` |
+| `optimal_transport` | `False` | Hungarian alignment of noise x₀ to target x₁ |
+| `informed_priors` | `False` | Use informed priors for noise (forge only) |
+| `precision` | `"bf16-mixed"` | Training precision |
+| `devices` / `num_nodes` | `1` / `1` | Multi-GPU / multi-node config |
+
+### `OptimizerConfig`
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `lr` | `1e-3` | Base learning rate (AdamW) |
+| `lr_scheduler` | `"cosine_w_warmup"` | Scheduler: `cosine_w_warmup`, `cosine_annealing`, `polynomial_w_warmup`, `polynomial_decay` |
+| `warmup_proportion` | `0.01` | Fraction of steps for linear warmup |
+| `ema_decay` | `None` | EMA weight decay (e.g. `0.9999`); `None` disables EMA |
+| `lambda_x` | `1.0` | Loss weight for catalyst fractional coordinates |
+| `lambda_z` | `0.1` | Loss weight for catalyst atom types (cross-entropy) |
+| `lambda_ads` | `1.0` | Loss weight for adsorbate geometry |
+| `lambda_lat` | `1.0` | Loss weight for lattice lengths/angles |
+| `lambda_M` | `1.0` | Loss weight for supercell matrix M |
+
+### `SamplerConfig`
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `ode_method` | `"dopri5"` | ODE solver: `dopri5`, `euler`, `rk4`, `adaptive_heun` |
+| `num_integration_steps` | `100` | Integration steps for ODE |
+| `target_binding_E` | `None` | Target adsorption binding energy (eV) |
+| `num_generated_samples` | `1` | Number of structures to generate per batch |
+| `run_mlff` | `False` | Run MLFF relaxation after generation |
+| `refine_final` | `False` | Run a final endpoint-prediction pass at t=1 |
+| `config_vasp` | `False` | Generate VASP DFT input files for generated structures |
+
+## Architecture
+
+### Forge: Transformer backbone (`models/TFT/`)
+
+`TransformerModule` takes dense padded tensors for primitive-cell atoms and adsorbate atoms as **separate sequences**, concatenates them for a shared transformer trunk, then splits back for modality-specific output heads.
+
+**Inputs (via `PyGToTensorDict` wrapper):**
+- Primitive cell: atom types (soft one-hot, 90 classes), fractional coords, lengths, angles, transformation matrix M, supercell lattice
+- Adsorbate: atom types (conditioned), COM, relative positions, pairwise distances (RBF-encoded, `(N_ads, 15)`)
+- Conditions: flow time t (Fourier), dataset index, spacegroup, binding energy
+
+**Outputs (endpoint predictions):**
+- Primitive cell: atom type logits, fractional coords, lengths, angles, M
+- Adsorbate: COM, relative positions
+
+### Place: Equivariant GNN backbone (`models/equiformer_v2/`)
+
+EquiformerV2 with SO(3)-equivariant attention for structure refinement. Also supports GemNet (`models/gemnet/`) as an alternative backbone.
+
+### Training loop (`helm/lightning.py`, `utils/path.py`)
+
+`LightFlowMatch` is the PyTorch Lightning module. `path()` builds the interpolated training sample at random time t. `criterion()` computes the multi-component loss. `sample()` runs ODE integration at inference time.
+
 ## Project Structure
 
 ```
 AdsFlow/
-├── src/adsflow/          # Main source code
-│   ├── models/           # Neural network architectures
-│   │   ├── equiformer_v2/  # EquiFormer-v2 implementation
-│   │   └── gemnet/         # GemNet implementation
-│   ├── utils/            # Utility functions
-│   │   ├── data_processing.py
-│   │   ├── graph.py      # Graph construction utilities
-│   │   ├── lmdb_dataset.py
-│   │   ├── optimal_transport.py
-│   │   └── utils.py
-│   └── helm/             # Training infrastructure
-│       ├── cli.py        # Command-line interface
-│       ├── configure.py  # Configuration management
-│       └── lightning.py  # PyTorch Lightning module
-├── scripts/              # Training and generation scripts
-│   ├── train.py          # Main training script
-│   ├── conf/             # Hydra configuration files
-│   ├── generate/         # Generation scripts
-│   └── data_scripts/     # Data preparation utilities
-├── analysis/             # Analysis notebooks and results
-├── datasets/             # Dataset storage
-├── configs/              # Additional configuration files
-└── requirements.txt      # Python dependencies
+├── src/adsflow/
+│   ├── helm/                       # Training orchestration
+│   │   ├── config.py               # Hydra config dataclasses
+│   │   ├── cli.py                  # Training entry point
+│   │   ├── lightning.py            # LightFlowMatch Lightning module
+│   │   └── callbacks.py            # EMA callback
+│   ├── models/
+│   │   ├── TFT/                    # Transformer backbone (forge)
+│   │   │   ├── transformer_module.py
+│   │   │   └── architectures/      # Attention, losses, positional encoding
+│   │   └── equiformer_v2/          # Equivariant GNN backbone (place)
+│   │       ├── equiformerv2_flow.py
+│   │       ├── equiformerv2_forge.py
+│   │       └── layers/             # SO(3) layers, attention, RBF
+│   └── utils/
+│       ├── path.py                 # Flow interpolation & multi-component loss
+│       ├── invariance.py           # PBC distances, optimal transport (Hungarian)
+│       ├── lmdb_loader.py          # Lazy LMDB dataset loader
+│       ├── builder.py              # Lattice/graph construction, forge sampling
+│       ├── atoms.py                # ASE Atoms ↔ PyG Data conversion
+│       ├── euler.py                # Euler & CTMC ODE step functions
+│       ├── evaluator.py            # Structural validity checks
+│       ├── relaxation.py           # MLFF (FairChem) and DFT (VASP) relaxation
+│       ├── graph/                  # PBC-aware neighbor list construction
+│       ├── factorized_builders/    # Data preprocessing (dict → PyG, pairwise distances)
+│       └── tft/                    # TFT data utilities and wrappers
+├── scripts/
+│   └── train.py                    # Main training script (@hydra.main)
+├── analysis/                       # Jupyter notebooks and example structures
+├── datasets/                       # LMDB dataset storage (mini, factorized splits)
+├── Dockerfile.amd64
+├── Dockerfile.arm64
+└── requirements.txt
 ```
 
-## Usage
+## Data Pipeline
 
-### Training
-
-Train a flow matching model using Hydra configurations:
-
-```bash
-cd scripts
-python train.py --config-path conf --config-name gem_config-89
+```
+Raw CatFlow LMDB
+  → factorized_builders/data_processor.py   (precompute lattice params, fractional coords, pairwise distances)
+  → factorized_builders/pyg_converter.py    (dict → PyG Data)
+  → LazyLmdbDataset (lmdb_loader.py)
+  → PyG DataLoader
+  → PyGToTensorDict / to_dense_batch         (sparse PyG → dense padded tensors)
+  → TransformerModule / EquiformerV2
 ```
 
-Available configuration files:
-- `equ_config-31.yaml` - EquiFormer-v2 with 31 layers
-- `equ_config-53.yaml` - EquiFormer-v2 with 53 layers
-- `gem_config-32.yaml` - GemNet with 32 layers
-- `gem_config-89.yaml` - GemNet with 89 layers
-
-### Configuration
-
-The project uses [Hydra](https://hydra.cc/) for configuration management. Key configuration parameters include:
-
-- **Model Architecture**: Choose between EquiFormer-v2 and GemNet
-- **Training Variant**: `refine` (refine existing structures) or `generate` (generate from noise)
-- **Learning Rate**: Base learning rate with cosine/polynomial scheduling
-- **Masking**: Option to mask frozen atoms during training
-- **ODE Solver**: Configure solver method, tolerance, and other parameters
-
-### Data Format
-
-AdsFlow expects data in LMDB format containing atomic structures with:
-- Atomic positions
-- Atomic numbers
-- Cell parameters
-- Tags (surface/adsorbate labels)
-- Fixed atom flags
-
-## Model Architectures
-
-### EquiFormer-v2
-A state-of-the-art equivariant transformer architecture for molecular property prediction, incorporating:
-- SO(3)-equivariant attention mechanisms
-- Graph-level attention
-- Efficient scaling for large molecular systems
-
-### GemNet
-Geometric message passing neural network with:
-- Directional message passing
-- Efficient edge and angle updates
-- Spherical basis functions for geometric representations
+Atoms are identified by `tags`: `1 = slab (primitive cell)`, `2 = adsorbate`. These are split and handled separately throughout the model — they are never concatenated at the data level.
 
 ## Dependencies
 
-Core dependencies include:
-- **PyTorch**: Deep learning framework
-- **PyTorch Lightning**: Training infrastructure
-- **PyTorch Geometric**: Geometric deep learning
-- **e3nn**: Equivariant neural networks
-- **fairchem-core**: Open Catalyst Project tools
-- **torchdiffeq**: ODE solvers for flow matching
-- **Hydra**: Configuration management
-- **Weights & Biases**: Experiment tracking
-- **ASE**: Atomic Simulation Environment
+| Category | Packages |
+|----------|---------|
+| Deep learning | PyTorch, PyTorch Lightning, PyTorch Geometric |
+| Equivariance | e3nn |
+| ODE solvers | torchdiffeq |
+| Atomistic | ASE, pymatgen, fairchem-core |
+| Configuration | hydra-core, omegaconf |
+| Experiment tracking | Weights & Biases |
+| Data | lmdb, numba, orjson |
+| Type safety | beartype, jaxtyping |
 
 See `requirements.txt` for the complete list.
 
-## Analysis
-
-The `analysis/` directory contains Jupyter notebooks for:
-- Loss analysis per atom type
-- Distance metrics evaluation
-- Model performance diagnostics
-- Visualization of generated structures
-
-## Contributing
-
-If you'd like to contribute, please open an issue or submit a pull request. Contributions are welcome in the following areas:
-- Additional model architectures
-- Improved data augmentation strategies
-- Enhanced sampling methods
-- Documentation and tutorials
-
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.

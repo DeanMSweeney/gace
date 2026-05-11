@@ -367,17 +367,16 @@ class LightFlowMatch(LightningModule, Flow):
                 if self.gen_POS and result["is_valid"]:
                     os.makedirs(self.gen_POS, exist_ok=True)
                     ase.io.write(
-                        os.path.join(self.gen_POS, f'{batch_idx}_{b}.vasp'),
+                        os.path.join(self.gen_POS, f'{batch_idx}_{b}.traj'),
                         atoms,
-                        format='vasp',
+                        
                     )
 
                 if self.rlxd_POS and self.run_mlff and result["is_valid"]:
                     os.makedirs(self.rlxd_POS, exist_ok=True)
                     ase.io.write(
-                        os.path.join(self.rlxd_POS, f'{batch_idx}_{b}.vasp'),
+                        os.path.join(self.rlxd_POS, f'{batch_idx}_{b}.traj'),
                         atoms_rlxd,
-                        format='vasp',
                     )
 
         return   
@@ -445,17 +444,15 @@ class LightFlowMatch(LightningModule, Flow):
                 if self.gen_POS and result["is_valid"]:
                     os.makedirs(self.gen_POS, exist_ok=True)
                     ase.io.write(
-                        os.path.join(self.gen_POS, f'{batch_idx}_{sample_idx}.vasp'),
+                        os.path.join(self.gen_POS, f'{batch_idx}_{sample_idx}.traj'),
                         atoms,
-                        format='vasp',
                     )
 
                 if self.rlxd_POS and self.run_mlff and result["is_valid"]:
                     os.makedirs(self.rlxd_POS, exist_ok=True)
                     ase.io.write(
-                        os.path.join(self.rlxd_POS, f'{batch_idx}_{sample_idx}.vasp'),
+                        os.path.join(self.rlxd_POS, f'{batch_idx}_{sample_idx}.traj'),
                         atoms_rlxd,
-                        format='vasp',
                     )
 
             all_atoms.append(atoms)
