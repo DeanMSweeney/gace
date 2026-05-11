@@ -148,9 +148,9 @@ class SamplerConfig:
     """Target adsorption binding energy (eV) for structure generation.
     Passed to the model as a conditioning signal during forge sampling."""
 
-    num_prim_atoms: Optional[int] = None
+    num_prim_atoms: Optional[int] = 4
     """Number of primitive atoms per graph to use during forge sampling.
-    If None, uses the atom count from the data. Set to e.g. 3 to force smaller unit cells."""
+    If None, uses the atom count from the data. Set to e.g. 4 to force smaller unit cells."""
 
     # ==================== Structure Generation/Output ====================
 
@@ -184,7 +184,7 @@ class SamplerConfig:
 
     # ==================== Evaluation Criteria ================
 
-    covalent_radii_scale: float = 0.75
+    covalent_radii_scale: float = 0.59
     """Scale factor applied to summed covalent radii for the atom-clash distance check (DIST_METHOD=2).
     A pair is flagged as clashing if its distance is below covalent_radii_scale * (r_i + r_j).
     Lower values are more permissive; higher values are stricter."""
