@@ -160,6 +160,7 @@ class LightFlowMatch(LightningModule, Flow):
         with open(_hist_path) as f:
             hist = json.load(f)["prim_slab_num_atoms_hist"]
         self.prim_atoms_hist = torch.tensor(hist, dtype=torch.float32)
+        #self.register_buffer("prim_atoms_hist", torch.tensor(hist, dtype=torch.float32))
 
         # Diagnostic mode: detailed loss analysis for model development
         self._write_f_u = False
@@ -378,14 +379,6 @@ class LightFlowMatch(LightningModule, Flow):
                         atoms_rlxd,
                         format='vasp',
                     )
-
-                if batch_idx == 2 and b == 13: 
-                    print(opt_graph.ref_ads_pos[ads_batch == b])
-                    print(opt_graph.ads_atomic_numbers[ads_batch == b])
-                
-                if batch_idx == 3 and b == 3: 
-                    print(opt_graph.ref_ads_pos[ads_batch == b])
-                    print(opt_graph.ads_atomic_numbers[ads_batch == b])
 
         return   
 
