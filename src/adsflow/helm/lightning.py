@@ -159,8 +159,8 @@ class LightFlowMatch(LightningModule, Flow):
         _hist_path = os.path.join(os.path.dirname(__file__), "primitive_atom_distribution.json")
         with open(_hist_path) as f:
             hist = json.load(f)["prim_slab_num_atoms_hist"]
-        self.prim_atoms_hist = torch.tensor(hist, dtype=torch.float32)
-        #self.register_buffer("prim_atoms_hist", torch.tensor(hist, dtype=torch.float32))
+        #self.prim_atoms_hist = torch.tensor(hist, dtype=torch.float32)
+        self.register_buffer("prim_atoms_hist", torch.tensor(hist, dtype=torch.float32))
 
         # Diagnostic mode: detailed loss analysis for model development
         self._write_f_u = False
@@ -329,7 +329,7 @@ class LightFlowMatch(LightningModule, Flow):
         B = int(data.batch.max().item()) + 1
         counts = sample_prim_atom_counts(B, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
         opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts, refine_final=self.refine_final)
-
+        print(counts)
         prim_batch = opt_graph.batch[opt_graph.tags == 1]
         ads_batch  = opt_graph.batch[opt_graph.tags == 2]
         num_graphs = int(opt_graph.batch.max().item()) + 1
@@ -367,15 +367,14 @@ class LightFlowMatch(LightningModule, Flow):
                 if self.gen_POS and result["is_valid"]:
                     os.makedirs(self.gen_POS, exist_ok=True)
                     ase.io.write(
-                        os.path.join(self.gen_POS, f'{batch_idx}_{b}.traj'),
+                        os.path.join(self.gen_POS, f'{batch_idx}_{b}.vasp'),
                         atoms,
-                        
                     )
 
                 if self.rlxd_POS and self.run_mlff and result["is_valid"]:
                     os.makedirs(self.rlxd_POS, exist_ok=True)
                     ase.io.write(
-                        os.path.join(self.rlxd_POS, f'{batch_idx}_{b}.traj'),
+                        os.path.join(self.rlxd_POS, f'{batch_idx}_{b}.vasp'),
                         atoms_rlxd,
                     )
 
