@@ -54,8 +54,8 @@ def check_validity(atoms: Atoms, covalent_radii_scale: float = 0.75, target_ads_
         atomic_radii = covalent_radii[cat_atomic_numbers]               # (N_cat,)
         sum_atomic_radii = atomic_radii[:, None] + atomic_radii[None, :]   # (N_cat, N_cat)
         sum_atomic_radii[sum_atomic_radii == 0.0] = np.inf
-        cat_dist_ok = bool(np.all(cat_dists >= covalent_radii_scale * sum_atomic_radii))
-
+        cat_dist_ok = bool((cat_dists >= covalent_radii_scale * sum_atomic_radii).all())
+        naive_cat_dist = bool(cat_dists.min() >= 0.5)
         # interatomic distance of adsorbate atoms
         num_ads_atoms = ads_mask.sum()
         generated_ads_interatomic_dist = dists[np.ix_(ads_idx, ads_idx)].copy()  # N_ads, N_ads
@@ -65,6 +65,7 @@ def check_validity(atoms: Atoms, covalent_radii_scale: float = 0.75, target_ads_
 
     except Exception:
         cat_dist_ok = False
+        naive_cat_dist = False 
         vol_ok = False
         ads_dist_ok = False
         ads_dist_mae = None
@@ -72,6 +73,7 @@ def check_validity(atoms: Atoms, covalent_radii_scale: float = 0.75, target_ads_
     return {
         "vol_ok": vol_ok,
         "cat_dist_ok": cat_dist_ok,
+        "naive_cat_dist": naive_cat_dist, 
         "ads_dist_ok": ads_dist_ok,
         "ads_dist_mae": ads_dist_mae,
         "is_valid": vol_ok and cat_dist_ok and ads_dist_ok,
