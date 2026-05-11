@@ -353,7 +353,7 @@ class LightFlowMatch(LightningModule, Flow):
 
                 metrics = {
                     "vol_ok":      float(result["vol_ok"]),
-                    "naive_cat_dist": float(result["naive_cat_dist"]),
+                    "cat_dist_ok_naive": float(result["cat_dist_ok_naive"]),
                     "cat_dist_ok":     float(result["cat_dist_ok"]),
                     "ads_dist_ok": float(result["ads_dist_ok"]),
                     "sample_is_valid":    float(result["is_valid"]),
