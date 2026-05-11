@@ -261,7 +261,7 @@ def forge_catalyst(
             vacuum=15.0,
         )
 
-        atoms.set_constraint(FixAtoms(atoms.tags != 0))
+        atoms.set_constraint(FixAtoms(atoms.get_tags() == 0))
 
         return atoms
 
