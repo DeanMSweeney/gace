@@ -195,7 +195,7 @@ def relax_struc(
         atoms=atoms,
         calculator=calculator,
         fmax=0.05,
-        steps=200,
+        steps=0,
         optimizer="BFGS",
     )
 
