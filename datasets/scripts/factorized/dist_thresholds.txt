@@ -1,0 +1,61 @@
+======================================================================
+OC20 Distance Threshold Analysis
+LMDB            : /datasets/oc20/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data_refined.lmdb
+Structures limit: all
+======================================================================
+
+CATALYST–CATALYST  (tags != 2 vs tags != 2)
+  Structures with valid pairs: 460328
+
+  METHOD 1 — raw minimum pairwise distance (Å)
+  mean of per-structure min dist (Å)  : 2.6362
+  median of per-structure min dist (Å): 2.6060
+  5th-percentile                   : 2.0777
+  1st-percentile                   : 1.7282
+  global minimum                   : 0.7563
+
+  METHOD 2 — minimum (dist / sum_covalent_radii) ratio
+  mean of per-structure min ratio     : 0.9462
+  median of per-structure min ratio   : 0.9404
+  5th-percentile                   : 0.8256
+  1st-percentile                   : 0.7813
+  global minimum                   : 0.5903
+
+SURFACE–ADSORBATE  (tags != 2 vs tags == 2)
+  Structures with valid pairs: 460328
+
+  METHOD 1 — raw minimum pairwise distance (Å)
+  mean of per-structure min dist (Å)  : 1.9062
+  median of per-structure min dist (Å): 1.9000
+  5th-percentile                   : 1.3632
+  1st-percentile                   : 1.1081
+  global minimum                   : 0.2590
+
+  METHOD 2 — minimum (dist / sum_covalent_radii) ratio
+  mean of per-structure min ratio     : 0.9483
+  median of per-structure min ratio   : 0.9832
+  5th-percentile                   : 0.7714
+  1st-percentile                   : 0.7315
+  global minimum                   : 0.1551
+
+ADSORBATE–ADSORBATE (tags == 2 vs tags == 2)
+  Structures with valid pairs: 415950
+
+  METHOD 1 — raw minimum pairwise distance (Å)
+  mean of per-structure min dist (Å)  : 1.0729
+  median of per-structure min dist (Å): 1.0700
+  5th-percentile                   : 0.9700
+  1st-percentile                   : 0.9700
+  global minimum                   : 0.9700
+
+  METHOD 2 — minimum (dist / sum_covalent_radii) ratio
+  mean of per-structure min ratio     : 0.9944
+  median of per-structure min ratio   : 1.0000
+  5th-percentile                   : 0.9500
+  1st-percentile                   : 0.9500
+  global minimum                   : 0.9500
+
+Suggested thresholds (conservative = 5th-percentile of catalyst–catalyst):
+  Method 1 threshold : 2.0777 Å
+  Method 2 fraction  : 0.8256
+======================================================================
