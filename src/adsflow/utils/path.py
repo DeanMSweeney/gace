@@ -497,7 +497,7 @@ class Flow():
             data with *_generated fields set for each modality.
         """
 
-        build_from_truth = True
+        build_from_truth = False
         if build_from_truth: 
             num_prim_atoms = input_graph.prim_natoms
 
