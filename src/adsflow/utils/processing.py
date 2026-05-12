@@ -7,6 +7,8 @@ import numpy as np
 from adsflow.utils.evaluator import check_validity
 from adsflow.utils.relaxation import _fmt, relax_struc
 
+_initialized_csvs: set = set()
+
 
 def process_sample(
     atoms,
@@ -53,30 +55,47 @@ def process_sample(
         else (os.path.join(gen_POS, "binding_energies.csv") if gen_POS else None)
     )
 
-    atoms_rlxd = relax_struc(
+    atoms_rlxd, energy_dict = relax_struc(
         atoms=atoms,
         calculator=calculator,
         run_mlff=run_mlff,
         config_vasp=config_vasp,
         calc_binding_energy=calc_binding_energy,
-        csv_path=_csv_path,
-        batch_idx=batch_idx,
-        graph_idx=graph_idx,
-        target_binding_E=target_binding_E,
     )
 
-    if not calc_binding_energy and _csv_path is not None:
+    if _csv_path is not None:
         os.makedirs(os.path.dirname(_csv_path), exist_ok=True)
-        _file_exists = os.path.isfile(_csv_path)
-        with open(_csv_path, "a", newline="") as _f:
-            _w = csv.DictWriter(_f, fieldnames=["batch_idx", "graph_idx", "target_binding_E"])
-            if not _file_exists:
-                _w.writeheader()
-            _w.writerow({
+        first_write = _csv_path not in _initialized_csvs
+        if first_write:
+            _initialized_csvs.add(_csv_path)
+            if os.path.isfile(_csv_path):
+                os.remove(_csv_path)
+        if energy_dict is not None:
+            fieldnames = [
+                "batch_idx", "graph_idx", "target_binding_E",
+                "slab_ads_energy", "slab_energy", "ads_ref_energy", "ads_energy",
+            ]
+            row = {
                 "batch_idx": batch_idx,
                 "graph_idx": graph_idx,
                 "target_binding_E": _fmt(target_binding_E),
-            })
+                "slab_ads_energy": _fmt(energy_dict["slab_ads_energy"]),
+                "slab_energy": _fmt(energy_dict["slab_energy"]),
+                "ads_ref_energy": _fmt(energy_dict["ads_ref_energy"]),
+                "ads_energy": _fmt(energy_dict["ads_energy"]),
+            }
+        else:
+            fieldnames = ["batch_idx", "graph_idx", "target_binding_E"]
+            row = {
+                "batch_idx": batch_idx,
+                "graph_idx": graph_idx,
+                "target_binding_E": _fmt(target_binding_E),
+            }
+        with open(_csv_path, "a", newline="") as _f:
+            _w = csv.DictWriter(_f, fieldnames=fieldnames)
+            if first_write:
+                _w.writeheader()
+            _w.writerow(row)
 
     atoms_rlxd = atoms_rlxd if run_mlff else atoms
     result = check_validity(atoms_rlxd, covalent_radii_scale, target_ads_dists=target_ads_dists)
