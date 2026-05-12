@@ -17,6 +17,8 @@ from ase import Atoms
 from ase.optimize import BFGS, LBFGS, FIRE
 from fairchem.core import OCPCalculator
 
+from huggingface_hub import hf_hub_download
+
 from adsflow.utils.atoms import data_to_atoms
 
 class Silent:
@@ -103,7 +105,7 @@ def config_DFT(
     finally:
         # Always return to the original directory
         os.chdir(original_dir)
-    
+   
 def relax_w_mlff(
     atoms: Atoms,
     calculator: OCPCalculator,
@@ -144,11 +146,9 @@ def relax_w_mlff(
 
 def relax_struc(
     atoms: Atoms,
+    calculator: OCPCalculator,
     run_mlff: bool = False,
     config_vasp: bool = False,
-    mlff_checkpoint: Optional[str] = None,
-    accelerator: str = "gpu",
-    seed: int = 42,
 ) -> Data:
     """
     Post-generation relaxation step.
@@ -171,20 +171,13 @@ def relax_struc(
         opt_graph with pos_generated updated (MLFF) or DFT inputs written (config_vasp)
     """
     if run_mlff:
-        with Silent():
-            calculator = OCPCalculator(
-                model_name=mlff_checkpoint,
-                local_cache="./mlff_checkpoint_cache",
-                cpu=(accelerator == "cpu"),
-                seed=seed,
-            )
-            atoms_relaxed, _, _ = relax_w_mlff(
-                atoms=atoms,
-                calculator=calculator,
-                fmax=0.05,
-                steps=200,
-                optimizer="BFGS",
-            )
+        atoms_relaxed, _, _ = relax_w_mlff(
+            atoms=atoms,
+            calculator=calculator,
+            fmax=0.05,
+            steps=200,
+            optimizer="BFGS",
+        )
     else:
         return None
 
