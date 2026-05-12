@@ -497,8 +497,8 @@ class Flow():
             data with *_generated fields set for each modality.
         """
 
-        build_from_truth = False
-        #num_prim_atoms = None
+        build_from_truth = True
+        num_prim_atoms = None
 
         data = input_graph.clone()
         device = data.pos.device
