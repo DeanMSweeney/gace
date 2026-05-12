@@ -16,6 +16,7 @@ POSCAR*
 *.gz
 *.sh
 *.html
+*.vasp
 core
 out-claude.txt
 selected_frames-old.parquet
