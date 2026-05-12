@@ -73,15 +73,15 @@ def process_sample(
         if energy_dict is not None:
             fieldnames = [
                 "batch_idx", "graph_idx", "target_binding_E",
-                "computed_binding_E", "MAE",
+                "computed_binding_E", "ERROR",
             ]
-            energy_dict["MAE"] = abs(energy_dict["computed_binding_E"] - target_binding_E)
+            energy_dict["ERROR"] = abs(energy_dict["computed_binding_E"] - target_binding_E)
             row = {
                 "batch_idx": batch_idx,
                 "graph_idx": graph_idx,
                 "target_binding_E": _fmt(target_binding_E),
                 "computed_binding_E": _fmt(energy_dict["computed_binding_E"]),
-                "MAE": _fmt(energy_dict["MAE"]),
+                "ERROR": _fmt(energy_dict["ERROR"]),
             }
         else:
             fieldnames = ["batch_idx", "graph_idx", "target_binding_E"]
@@ -108,6 +108,8 @@ def process_sample(
     }
     if result["ads_dist_mae"] is not None:
         metrics["ads_dist_mae"] = float(result["ads_dist_mae"])
+    if energy_dict is not None and target_binding_E is not None:
+        metrics["binding_E_mae"] = energy_dict["ERROR"]
 
     fname = f"{batch_idx}_{graph_idx}{file_ext}"
     if gen_POS and result["is_valid"]:
