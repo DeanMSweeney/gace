@@ -90,11 +90,13 @@ def process_sample(
                 "graph_idx": graph_idx,
                 "target_binding_E": _fmt(target_binding_E),
             }
+        """
         with open(_csv_path, "a", newline="") as _f:
             _w = csv.DictWriter(_f, fieldnames=fieldnames)
             if first_write:
                 _w.writeheader()
             _w.writerow(row)
+        """
 
     atoms_rlxd = atoms_rlxd if run_mlff else atoms
     result = check_validity(atoms_rlxd, covalent_radii_scale, target_ads_dists=target_ads_dists)
