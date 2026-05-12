@@ -361,7 +361,7 @@ class LightFlowMatch(LightningModule, Flow):
                     config_vasp=self.config_vasp, calc_binding_energy=self.calc_binding_energy,
                     covalent_radii_scale=self.covalent_radii_scale,
                     gen_POS=self.gen_POS, rlxd_POS=self.rlxd_POS,
-                    target_binding_E=data.ads_binding_energy[ads_batch==b].item(), file_ext=".vasp",
+                    target_binding_E=data.ads_binding_energy[b].item(), file_ext=".vasp",
                 )
                 for key, val in metrics.items():
                     self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
