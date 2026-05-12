@@ -73,16 +73,15 @@ def process_sample(
         if energy_dict is not None:
             fieldnames = [
                 "batch_idx", "graph_idx", "target_binding_E",
-                "slab_ads_energy", "slab_energy", "ads_ref_energy", "ads_energy",
+                "computed_binding_E", "MAE",
             ]
+            energy_dict["MAE"] = abs(energy_dict["computed_binding_E"] - target_binding_E)
             row = {
                 "batch_idx": batch_idx,
                 "graph_idx": graph_idx,
                 "target_binding_E": _fmt(target_binding_E),
-                "slab_ads_energy": _fmt(energy_dict["slab_ads_energy"]),
-                "slab_energy": _fmt(energy_dict["slab_energy"]),
-                "ads_ref_energy": _fmt(energy_dict["ads_ref_energy"]),
-                "ads_energy": _fmt(energy_dict["ads_energy"]),
+                "computed_binding_E": _fmt(energy_dict["computed_binding_E"]),
+                "MAE": _fmt(energy_dict["MAE"]),
             }
         else:
             fieldnames = ["batch_idx", "graph_idx", "target_binding_E"]

@@ -205,6 +205,7 @@ def relax_struc(
     try:
         E_slab_ads = atoms_relaxed.get_potential_energy()
 
+        """
         slab_atoms = atoms[atoms.get_tags() != 2]
         slab_relaxed, _, _ = relax_w_mlff(
             atoms=slab_atoms,
@@ -228,11 +229,10 @@ def relax_struc(
 
         E_ads_ref = sum(ATOMIC_REFERENCE_ENERGIES[s] for s in ads_symbols)
         E_ads = E_slab_ads - E_slab - E_ads_ref
+        """
+        
         return atoms_relaxed, {
-            "slab_ads_energy": E_slab_ads,
-            "slab_energy": E_slab,
-            "ads_ref_energy": E_ads_ref,
-            "ads_energy": E_ads,
+            "computed_binding_E": E_slab_ads,
         }
     except Exception as e:
         logging.warning(f"calc_binding_energy failed: {e}")
