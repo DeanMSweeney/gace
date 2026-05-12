@@ -1,9 +1,10 @@
 import contextlib
+import csv
 import logging
 import os
 import shutil
 import subprocess
-import sys  
+import sys
 
 import torch
 from torch import Tensor
@@ -20,6 +21,14 @@ from fairchem.core import OCPCalculator
 from huggingface_hub import hf_hub_download
 
 from adsflow.utils.atoms import data_to_atoms
+
+# OC20 gas-phase reference energies (eV) from H2O/N2/CO/H2 linear combination
+ATOMIC_REFERENCE_ENERGIES = {
+    "H": -3.477,
+    "N": -8.083,
+    "O": -7.204,
+    "C": -7.282,
+}
 
 class Silent:
     def __enter__(self):
@@ -144,41 +153,112 @@ def relax_w_mlff(
     return atoms, converged, opt.nsteps
 
 
+_CSV_DECIMALS = 6
+_FMT = f".{_CSV_DECIMALS}f"
+
+
+def _fmt(v: Optional[float]) -> str:
+    return format(v, _FMT) if v is not None else ""
+
+
 def relax_struc(
     atoms: Atoms,
     calculator: OCPCalculator,
     run_mlff: bool = False,
     config_vasp: bool = False,
-) -> Data:
+    calc_binding_energy: bool = False,
+    csv_path: Optional[str] = None,
+    batch_idx: Optional[int] = None,
+    graph_idx: Optional[int] = None,
+    target_binding_E: Optional[float] = None,
+) -> Atoms:
     """
     Post-generation relaxation step.
 
-    Applies either MLFF relaxation or configures DFT input files depending
-    on which option is enabled. If neither is set, returns opt_graph unchanged.
+    Applies MLFF relaxation. When calc_binding_energy=True, also relaxes the
+    isolated slab (adsorbate stripped from the original geometry), computes the
+    OC20 gas-phase reference energy for the adsorbate, and appends a full row to
+    csv_path. When calc_binding_energy=False the caller is responsible for writing
+    the simpler CSV (batch_idx / graph_idx / target_binding_E only).
+
+    Adsorption energy: E_ads = E(slab+ads) - E(bare_slab) - E(ads_ref)
+    where E(ads_ref) = sum of ATOMIC_REFERENCE_ENERGIES for each adsorbate atom.
 
     Args:
-        opt_graph: Graph with pos_generated set to the flow-matched positions
+        atoms: ASE Atoms (slab + adsorbate; tags 1=slab, 2=adsorbate)
+        calculator: OCP calculator with loaded MLFF model
         run_mlff: Whether to run MLFF relaxation
         config_vasp: Whether to configure VASP DFT input files
-        mlff_checkpoint: MLFF model checkpoint name (required if run_mlff=True)
-        accelerator: Device type ("gpu" or "cpu") for OCPCalculator
-        seed: Random seed for OCPCalculator
-        gen_POS: Path to generated structure file (required if config_vasp=True)
-        in_POS: Path to initial structure file
-        rlxd_POS: Path to relaxed structure file
+        calc_binding_energy: If True, compute adsorption energy via two relaxations
+        csv_path: Path to CSV file for adsorption energy output (appended)
+        batch_idx: Batch index written to CSV
+        graph_idx: Graph index within batch written to CSV
+        target_binding_E: Target binding energy from dataset written to CSV
 
     Returns:
-        opt_graph with pos_generated updated (MLFF) or DFT inputs written (config_vasp)
+        Relaxed ASE Atoms, or None if run_mlff=False
     """
-    if run_mlff:
-        atoms_relaxed, _, _ = relax_w_mlff(
-            atoms=atoms,
-            calculator=calculator,
-            fmax=0.05,
-            steps=200,
-            optimizer="BFGS",
-        )
-    else:
+    if not run_mlff:
         return None
+
+    atoms_relaxed, _, _ = relax_w_mlff(
+        atoms=atoms,
+        calculator=calculator,
+        fmax=0.05,
+        steps=200,
+        optimizer="BFGS",
+    )
+
+    if calc_binding_energy and csv_path is not None:
+        try:
+            E_slab_ads = atoms_relaxed.get_potential_energy()
+
+            slab_atoms = atoms[atoms.get_tags() != 2]
+            slab_relaxed, _, _ = relax_w_mlff(
+                atoms=slab_atoms,
+                calculator=calculator,
+                fmax=0.05,
+                steps=200,
+                optimizer="BFGS",
+            )
+            E_slab = slab_relaxed.get_potential_energy()
+
+            ads_symbols = [
+                s for s, t in zip(atoms.get_chemical_symbols(), atoms.get_tags())
+                if t == 2
+            ]
+            unknown = [s for s in ads_symbols if s not in ATOMIC_REFERENCE_ENERGIES]
+            if unknown:
+                logging.warning(
+                    f"Skipping binding energy row (batch {batch_idx}, graph {graph_idx}): "
+                    f"no reference energy for {set(unknown)}"
+                )
+            else:
+                E_ads_ref = sum(ATOMIC_REFERENCE_ENERGIES[s] for s in ads_symbols)
+                E_ads = E_slab_ads - E_slab - E_ads_ref
+
+                fieldnames = [
+                    "batch_idx", "graph_idx", "target_binding_E",
+                    "slab_ads_energy", "slab_energy", "ads_ref_energy", "ads_energy",
+                ]
+                os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+                file_exists = os.path.isfile(csv_path)
+                with open(csv_path, "a", newline="") as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    if not file_exists:
+                        writer.writeheader()
+                    writer.writerow({
+                        "batch_idx": batch_idx,
+                        "graph_idx": graph_idx,
+                        "target_binding_E": _fmt(target_binding_E),
+                        "slab_ads_energy": _fmt(E_slab_ads),
+                        "slab_energy": _fmt(E_slab),
+                        "ads_ref_energy": _fmt(E_ads_ref),
+                        "ads_energy": _fmt(E_ads),
+                    })
+        except Exception as e:
+            logging.warning(
+                f"calc_binding_energy failed (batch {batch_idx}, graph {graph_idx}): {e}"
+            )
 
     return atoms_relaxed
