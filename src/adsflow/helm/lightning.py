@@ -16,7 +16,8 @@ from transformers import get_cosine_schedule_with_warmup, get_polynomial_decay_s
 from tqdm import tqdm
 
 from adsflow.utils.path import Flow
-from adsflow.utils.relaxation import relax_struc
+from adsflow.utils.relaxation import relax_struc, Silent
+from fairchem.core import OCPCalculator
 from adsflow.utils.atoms import write_strucs
 from adsflow.utils.tft.tft_wrapper import PyGToTensorDict
 from adsflow.utils.builder import forge_catalyst, sample_prim_atom_counts
@@ -146,6 +147,17 @@ class LightFlowMatch(LightningModule, Flow):
         self.num_prim_atoms = num_prim_atoms
         self.refine_final = refine_final
         self.mlff_checkpoint = mlff_checkpoint
+
+        self._mlff_calculator = None
+        if run_mlff and mlff_checkpoint is not None:
+            with Silent():
+                self._mlff_calculator = OCPCalculator(
+                    model_name=mlff_checkpoint,
+                    local_cache="./mlff_checkpoint_cache",
+                    cpu=(accelerator == "cpu"),
+                    seed=seed,
+                )
+
         self.target_binding_E = target_binding_E
         self.num_generated_samples = num_generated_samples
         self.condition_on_binding_E = condition_on_binding_E
@@ -340,11 +352,9 @@ class LightFlowMatch(LightningModule, Flow):
             if atoms is not None: 
                 atoms_rlxd = relax_struc(
                         atoms=atoms,
+                        calculator=self._mlff_calculator,
                         run_mlff=self.run_mlff,
                         config_vasp=self.config_vasp,
-                        mlff_checkpoint=self.mlff_checkpoint,
-                        accelerator=self.accelerator,
-                        seed=self.seed,
                     )
                 
                 atoms_rlxd = atoms_rlxd if self.run_mlff else atoms
@@ -419,11 +429,9 @@ class LightFlowMatch(LightningModule, Flow):
             if atoms is not None:
                 atoms_rlxd = relax_struc(
                     atoms=atoms,
+                    calculator=self._mlff_calculator,
                     run_mlff=self.run_mlff,
                     config_vasp=self.config_vasp,
-                    mlff_checkpoint=self.mlff_checkpoint,
-                    accelerator=self.accelerator,
-                    seed=self.seed,
                 )
 
                 atoms_rlxd = atoms_rlxd if self.run_mlff else atoms
