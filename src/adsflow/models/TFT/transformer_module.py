@@ -108,9 +108,9 @@ class TransformerModule(nn.Module):
 
         self.input_dim = spatial_dim + atom_dim
         self.time_dim = 1
-        # When use_adaln_conditioning=True, embed_conditions is removed from the concat input
-        self.prim_cond_dim = 8 if use_adaln_conditioning else 9   # atom_types, frac_coords, lengths, angles, T_matrix, supercell_lattice, posenc, [conditions,] type
-        self.ads_cond_dim = 5 if use_adaln_conditioning else 6    # ads_atom_types, ads_pos, ads_ref_centered_pos, posenc, [conditions,] type
+        # conditions are always added to input tokens; AdaLN additionally reinforces them per-layer
+        self.prim_cond_dim = 9   # atom_types, frac_coords, lengths, angles, T_matrix, supercell_lattice, posenc, conditions, type
+        self.ads_cond_dim = 6    # ads_atom_types, ads_pos, ads_ref_centered_pos, posenc, conditions, type
         self.comb_input_dim = self.input_dim + self.time_dim
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
@@ -505,9 +505,9 @@ class TransformerModule(nn.Module):
         # Fused condition vector: non-linearly combines time and binding energy for AdaLN
         c = self.cond_proj(torch.cat([embed_time, embed_binding_energy], dim=-1))  # (B, C)
 
-        if not self.use_adaln_conditioning:
-            # Legacy path: sum into a single broadcast token added to the input embeddings
-            embed_conditions = (embed_time + embed_binding_energy).unsqueeze(-2)  # (B, 1, C)
+        # Always add conditions to input tokens so the signal is available from step 0.
+        # When use_adaln_conditioning=True, AdaLN additionally reinforces them per-layer.
+        embed_conditions = (embed_time + embed_binding_energy).unsqueeze(-2)  # (B, 1, C)
 
         # ── Build h_in for prim sequence ─────────────────────────────────────
         if self.concat_combine_input:
@@ -517,98 +517,54 @@ class TransformerModule(nn.Module):
             embed_transformation_matrix_bc = embed_transformation_matrix.expand(-1, prim_seq_len, -1)
             embed_supercell_lattice_bc = embed_supercell_lattice.expand(-1, prim_seq_len, -1)
 
-            if self.use_adaln_conditioning:
-                h_in_prim = torch.cat([
-                    embed_atom_types,               # (B, M,  C)
-                    embed_frac_coords,              # (B, M,  C)
-                    embed_lengths_scaled_bc,        # (B, M,  C)
-                    embed_angles_radians_bc,        # (B, M,  C)
-                    embed_transformation_matrix_bc, # (B, M,  C)
-                    embed_supercell_lattice_bc,     # (B, M,  C)
-                    embed_posenc_prim,              # (B, M,  C)
-                    embed_prim_type_ids,            # (B, M,  C)
-                ], dim=-1)  # (B, M, 8*C)
-                h_in_prim = self.combine_input_prim(h_in_prim)
-            else:
-                embed_conditions_prim = embed_conditions.expand(-1, prim_seq_len, -1)
-                h_in_prim = torch.cat([
-                    embed_atom_types,               # (B, M,  C)
-                    embed_frac_coords,              # (B, M,  C)
-                    embed_lengths_scaled_bc,        # (B, M,  C)
-                    embed_angles_radians_bc,        # (B, M,  C)
-                    embed_transformation_matrix_bc, # (B, M,  C)
-                    embed_supercell_lattice_bc,     # (B, M,  C)
-                    embed_posenc_prim,              # (B, M,  C)
-                    embed_conditions_prim,          # (B, M,  C)
-                    embed_prim_type_ids,            # (B, M,  C)
-                ], dim=-1)  # (B, M,  9*C)
-                h_in_prim = self.combine_input_prim(h_in_prim)  # (B, M, C)
+            embed_conditions_prim = embed_conditions.expand(-1, prim_seq_len, -1)
+            h_in_prim = torch.cat([
+                embed_atom_types,               # (B, M,  C)
+                embed_frac_coords,              # (B, M,  C)
+                embed_lengths_scaled_bc,        # (B, M,  C)
+                embed_angles_radians_bc,        # (B, M,  C)
+                embed_transformation_matrix_bc, # (B, M,  C)
+                embed_supercell_lattice_bc,     # (B, M,  C)
+                embed_posenc_prim,              # (B, M,  C)
+                embed_conditions_prim,          # (B, M,  C)
+                embed_prim_type_ids,            # (B, M,  C)
+            ], dim=-1)  # (B, M,  9*C)
+            h_in_prim = self.combine_input_prim(h_in_prim)  # (B, M, C)
         else:
-            if self.use_adaln_conditioning:
-                h_in_prim = (
-                    embed_atom_types              # (B, M,  C)
-                    + embed_frac_coords           # (B, M,  C)
-                    + embed_lengths_scaled        # (B, 1, C) → broadcasts
-                    + embed_angles_radians        # (B, 1, C) → broadcasts
-                    + embed_transformation_matrix # (B, 1, C) → broadcasts
-                    + embed_supercell_lattice     # (B, 1, C) → broadcasts
-                    + embed_posenc_prim           # (B, M,  C)
-                    + embed_prim_type_ids         # (B, M,  C)
-                )
-            else:
-                h_in_prim = (
-                    embed_atom_types              # (B, M,  C)
-                    + embed_frac_coords           # (B, M,  C)
-                    + embed_lengths_scaled        # (B, 1, C) → broadcasts
-                    + embed_angles_radians        # (B, 1, C) → broadcasts
-                    + embed_transformation_matrix # (B, 1, C) → broadcasts
-                    + embed_supercell_lattice     # (B, 1, C) → broadcasts
-                    + embed_posenc_prim           # (B, M,  C)
-                    + embed_conditions            # (B, 1, C) → broadcasts
-                    + embed_prim_type_ids         # (B, M,  C)
-                )
+            h_in_prim = (
+                embed_atom_types              # (B, M,  C)
+                + embed_frac_coords           # (B, M,  C)
+                + embed_lengths_scaled        # (B, 1, C) → broadcasts
+                + embed_angles_radians        # (B, 1, C) → broadcasts
+                + embed_transformation_matrix # (B, 1, C) → broadcasts
+                + embed_supercell_lattice     # (B, 1, C) → broadcasts
+                + embed_posenc_prim           # (B, M,  C)
+                + embed_conditions            # (B, 1, C) → broadcasts
+                + embed_prim_type_ids         # (B, M,  C)
+            )
         h_in_prim = h_in_prim * prim_real_mask.unsqueeze(-1)  # (B, M, C)
 
         # ── Build h_in for ads sequence ──────────────────────────────────────
         if self.concat_combine_input:
-            if self.use_adaln_conditioning:
-                h_in_ads = torch.cat([
-                    embed_ads_atom_types,           # (B, N, C)
-                    embed_ads_pos,                  # (B, N, C)
-                    embed_ads_ref_centered_pos,     # (B, N, C)
-                    embed_posenc_ads,               # (B, N, C)
-                    embed_ads_type_ids,             # (B, N, C)
-                ], dim=-1)  # (B, N, 5*C)
-                h_in_ads = self.combine_input_ads(h_in_ads)
-            else:
-                embed_conditions_ads = embed_conditions.expand(-1, ads_seq_len, -1)
-                h_in_ads = torch.cat([
-                    embed_ads_atom_types,           # (B, N, C)
-                    embed_ads_pos,                  # (B, N, C)
-                    embed_ads_ref_centered_pos,     # (B, N, C)
-                    embed_posenc_ads,               # (B, N, C)
-                    embed_conditions_ads,           # (B, N, C)
-                    embed_ads_type_ids,             # (B, N, C)
-                ], dim=-1)  # (B, N, 6*C)
-                h_in_ads = self.combine_input_ads(h_in_ads)  # (B, N,  C)
+            embed_conditions_ads = embed_conditions.expand(-1, ads_seq_len, -1)
+            h_in_ads = torch.cat([
+                embed_ads_atom_types,           # (B, N, C)
+                embed_ads_pos,                  # (B, N, C)
+                embed_ads_ref_centered_pos,     # (B, N, C)
+                embed_posenc_ads,               # (B, N, C)
+                embed_conditions_ads,           # (B, N, C)
+                embed_ads_type_ids,             # (B, N, C)
+            ], dim=-1)  # (B, N, 6*C)
+            h_in_ads = self.combine_input_ads(h_in_ads)  # (B, N,  C)
         else:
-            if self.use_adaln_conditioning:
-                h_in_ads = (
-                    embed_ads_atom_types            # (B, N, C)
-                    + embed_ads_pos                 # (B, N, C)
-                    + embed_ads_ref_centered_pos    # (B, N, C)
-                    + embed_posenc_ads              # (B, N, C)
-                    + embed_ads_type_ids            # (B, N, C)
-                )
-            else:
-                h_in_ads = (
-                    embed_ads_atom_types            # (B, N, C)
-                    + embed_ads_pos                 # (B, N, C)
-                    + embed_ads_ref_centered_pos    # (B, N, C)
-                    + embed_posenc_ads              # (B, N, C)
-                    + embed_conditions              # (B, 1, C) → broadcasts
-                    + embed_ads_type_ids            # (B, N, C)
-                )
+            h_in_ads = (
+                embed_ads_atom_types            # (B, N, C)
+                + embed_ads_pos                 # (B, N, C)
+                + embed_ads_ref_centered_pos    # (B, N, C)
+                + embed_posenc_ads              # (B, N, C)
+                + embed_conditions              # (B, 1, C) → broadcasts
+                + embed_ads_type_ids            # (B, N, C)
+            )
         h_in_ads = h_in_ads * ads_real_mask.unsqueeze(-1)  # (B, N,  C)
 
         # ── Concatenate prim + ads into single sequence ──────────────────────
