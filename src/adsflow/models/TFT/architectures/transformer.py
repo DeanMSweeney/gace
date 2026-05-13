@@ -538,9 +538,10 @@ class ConditionedModernTransformerDecoderBlock(nn.Module):
             jvp_attn=jvp_attn,
         )
         self.feed_forward = SwiGLUFeedForward(dim=dim, hidden_dim=4 * dim)
-        self.self_attention_norm = nn.RMSNorm(dim)
-        self.cross_attention_norm = nn.RMSNorm(dim)
-        self.ffn_norm = nn.RMSNorm(dim)
+        # elementwise_affine=False: AdaLN is the sole source of scale and shift
+        self.self_attention_norm = nn.RMSNorm(dim, elementwise_affine=False)
+        self.cross_attention_norm = nn.RMSNorm(dim, elementwise_affine=False)
+        self.ffn_norm = nn.RMSNorm(dim, elementwise_affine=False)
 
         # Projects c → 9 params: (shift, scale, gate) × (self-attn, cross-attn, ffn).
         # Zero-init so every block is an identity at the start of training (DiT-Zero).
@@ -641,8 +642,9 @@ class ConditionedModernTransformerBlock(nn.Module):
             jvp_attn=jvp_attn,
         )
         self.feed_forward = SwiGLUFeedForward(dim=dim, hidden_dim=4 * dim)
-        self.attention_norm = nn.RMSNorm(dim)
-        self.ffn_norm = nn.RMSNorm(dim)
+        # elementwise_affine=False: AdaLN is the sole source of scale and shift
+        self.attention_norm = nn.RMSNorm(dim, elementwise_affine=False)
+        self.ffn_norm = nn.RMSNorm(dim, elementwise_affine=False)
 
         # Projects c → (shift_attn, scale_attn, gate_attn, shift_ff, scale_ff, gate_ff).
         # Zero-init so every block is an identity at the start of training (DiT-Zero).
