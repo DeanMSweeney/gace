@@ -28,7 +28,7 @@ def check_validity(atoms: Atoms, catalyst_dist_cutoff: float = 0.75, target_ads_
         dict with keys: vol_ok (bool), cat_dist_ok (bool), ads_dist_ok (bool), is_valid (bool).
     """
     if atoms is None:
-        return {"vol_ok": False, "cat_dist_ok": False, "cat_dist_ok_naive": True, "ads_dist_ok": False, "ads_dist_mae": None, "ads_dist_me": None, "is_valid": False}
+        return {"vol_ok": False, "cat_dist_ok": False, "cat_dist_ok_naive": True, "cat_atom_types_ok": False, "ads_dist_ok": False, "ads_dist_mae": None, "ads_dist_me": None, "is_valid": False}
 
     # Volume check # intertatomic distance check
     try:
@@ -86,6 +86,7 @@ def check_validity(atoms: Atoms, catalyst_dist_cutoff: float = 0.75, target_ads_
     except Exception:
         cat_dist_ok = False
         cat_dist_ok_naive = False 
+        cat_atom_types_ok = False
         vol_ok = False
         ads_dist_ok = False
         ads_dist_mae = None
