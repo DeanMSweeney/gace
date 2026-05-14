@@ -13,16 +13,16 @@ from typing import Dict
 from adsflow.utils.invariance import pbc_aware_delta
 
 
-def check_validity(atoms: Atoms, covalent_radii_scale: float = 0.75, target_ads_dists: np.ndarray = None) -> dict:
+def check_validity(atoms: Atoms, catalyst_dist_cutoff: float = 0.75, target_ads_dists: np.ndarray = None) -> dict:
     """Check structural validity of a single ASE Atoms object.
 
     Runs two checks:
     - Volume: cell volume >= 0.1 Å³ (guards against degenerate cells)
-    - Distance: no pair closer than covalent_radii_scale * sum of covalent radii
+    - Distance: no pair closer than catalyst_dist_cutoff * sum of covalent radii
 
     Args:
         atoms: ASE Atoms object to check, or None if build failed.
-        covalent_radii_scale: Fraction of summed covalent radii used as minimum allowed distance.
+        catalyst_dist_cutoff: Fraction of summed covalent radii used as minimum allowed distance.
 
     Returns:
         dict with keys: vol_ok (bool), cat_dist_ok (bool), ads_dist_ok (bool), is_valid (bool).
@@ -49,7 +49,11 @@ def check_validity(atoms: Atoms, covalent_radii_scale: float = 0.75, target_ads_
         # interatomic distance within the adsorabte moelcule  
         ads_idx = np.where(tags == 2)[0]
         ads_dists = dists[ads_mask, :] # N_ads, N
-        ads_dist_ok = bool(ads_dists.min() >= 0.95) # scalar
+        ads_atomic_numbers = ads_atoms.get_atomic_numbers()
+        ads_atomic_radii = covalent_radii[ads_atomic_numbers]               # (N_ads,)
+        ads_sum_atomic_radii = ads_atomic_radii[:, None] + ads_atomic_radii[None, :]   # (N_ads, N_ads)
+        ads_sum_atomic_radii[ads_sum_atomic_radii == 0.0] = np.inf
+        ads_dist_ok = bool((ads_dists >= 0.95 * ads_sum_atomic_radii).all()) # hard coded 0.95 since it is 
 
         # comapre to reference structure 
         num_ads_atoms = ads_mask.sum()
@@ -70,8 +74,13 @@ def check_validity(atoms: Atoms, covalent_radii_scale: float = 0.75, target_ads_
         atomic_radii = covalent_radii[cat_atomic_numbers]               # (N_cat,)
         sum_atomic_radii = atomic_radii[:, None] + atomic_radii[None, :]   # (N_cat, N_cat)
         sum_atomic_radii[sum_atomic_radii == 0.0] = np.inf
-        cat_dist_ok = bool((cat_dists >= covalent_radii_scale * sum_atomic_radii).all())
+        cat_dist_ok = bool((cat_dists >= catalyst_dist_cutoff * sum_atomic_radii).all())
         cat_dist_ok_naive = bool(cat_dists.min() >= 0.5)
+
+        # atom types - check for metals
+        cat_oc20_atom_types = np.arange(22, 84)  # integers 22 to 83 inclusive
+        cat_atom_types = np.unique(cat_atomic_numbers)
+        cat_atom_types_ok = bool(np.isin(cat_atom_types, cat_oc20_atom_types).any())
 
 
     except Exception:
@@ -85,9 +94,10 @@ def check_validity(atoms: Atoms, covalent_radii_scale: float = 0.75, target_ads_
         "vol_ok": vol_ok,
         "cat_dist_ok": cat_dist_ok,
         "cat_dist_ok_naive": cat_dist_ok_naive, 
+        "cat_atom_types_ok": cat_atom_types_ok, 
         "ads_dist_ok": ads_dist_ok,
         "ads_dist_mae": ads_dist_mae,
-        "is_valid": vol_ok and cat_dist_ok and ads_dist_ok,
+        "is_valid": vol_ok and cat_dist_ok and ads_dist_ok and cat_atom_types_ok,
     }
 
 

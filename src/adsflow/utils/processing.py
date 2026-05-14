@@ -19,7 +19,7 @@ def process_sample(
     calculator,
     run_mlff: bool,
     config_vasp,
-    covalent_radii_scale: float,
+    catalyst_dist_cutoff: float,
     gen_POS: str | None,
     rlxd_POS: str | None,
     target_binding_E: float | None,
@@ -38,7 +38,7 @@ def process_sample(
         calculator: MLFF calculator instance (or None).
         run_mlff: Whether to run structure relaxation.
         config_vasp: VASP config dict (or None).
-        covalent_radii_scale: Scale factor for covalent radii in validity check.
+        catalyst_dist_cutoff: Scale factor for covalent radii in validity check.
         gen_POS: Directory to write unrelaxed structures (or None).
         rlxd_POS: Directory to write relaxed structures (or None).
         target_binding_E: Target binding energy (or None).
@@ -53,7 +53,7 @@ def process_sample(
         else (os.path.join(gen_POS, "binding_energies.csv"))
     )
 
-    result = check_validity(atoms, covalent_radii_scale, target_ads_dists=target_ads_dists)
+    result = check_validity(atoms, catalyst_dist_cutoff, target_ads_dists=target_ads_dists)
 
     if result["is_valid"] == True:
         atoms_rlxd, energy_dict = relax_struc(
@@ -104,6 +104,7 @@ def process_sample(
         "vol_ok":            float(result["vol_ok"]),
         "cat_dist_ok_naive": float(result["cat_dist_ok_naive"]),
         "cat_dist_ok":       float(result["cat_dist_ok"]),
+        "cat_atom_types_ok": float(result["cat_atom_types_ok"]),
         "ads_dist_ok":       float(result["ads_dist_ok"]),
         "sample_is_valid":   float(result["is_valid"]),
     }

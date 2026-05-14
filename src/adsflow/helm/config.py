@@ -184,16 +184,10 @@ class SamplerConfig:
 
     # ==================== Evaluation Criteria ================
 
-    covalent_radii_scale: float = 0.59
-    """Scale factor applied to summed covalent radii for the atom-clash distance check (DIST_METHOD=2).
-    A pair is flagged as clashing if its distance is below covalent_radii_scale * (r_i + r_j).
+    catalyst_dist_cutoff: float = 0.59
+    """Scale factor applied to summed covalent radii for the atom-clash distance check.
+    A pair is flagged as clashing if its distance is below catalyst_dist_cutoff * (r_i + r_j).
     Lower values are more permissive; higher values are stricter."""
-
-    calc_binding_energy: bool = False
-    """If True, run a second MLFF relaxation on the isolated slab (adsorbate stripped) and
-    compute the adsorption energy: E_ads = E(slab+ads) - E(bare_slab) - E(ads_ref).
-    Requires run_mlff=True. Writes full energy breakdown to binding_energies.csv in rlxd_POS.
-    If False, writes only batch_idx / graph_idx / target_binding_E to gen_POS."""
 
 
 
