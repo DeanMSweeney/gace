@@ -19,7 +19,6 @@ def process_sample(
     calculator,
     run_mlff: bool,
     config_vasp,
-    calc_binding_energy: bool,
     covalent_radii_scale: float,
     gen_POS: str | None,
     rlxd_POS: str | None,
@@ -60,7 +59,6 @@ def process_sample(
         calculator=calculator,
         run_mlff=run_mlff,
         config_vasp=config_vasp,
-        calc_binding_energy=calc_binding_energy,
     )
 
     if _csv_path is not None:

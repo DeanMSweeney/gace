@@ -168,7 +168,6 @@ def relax_struc(
     calculator: OCPCalculator,
     run_mlff: bool = False,
     config_vasp: bool = False,
-    calc_binding_energy: bool = False,
 ) -> tuple:
     """
     Post-generation relaxation step.
@@ -201,9 +200,6 @@ def relax_struc(
         steps=200,
         optimizer="BFGS",
     )
-
-    if not calc_binding_energy:
-        return atoms_relaxed, None
 
     try:
         E_slab_ads = atoms_relaxed.get_potential_energy()
