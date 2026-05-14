@@ -184,7 +184,7 @@ class SamplerConfig:
 
     # ==================== Evaluation Criteria ================
 
-    catalyst_dist_cutoff: float = 0.59
+    catalyst_dist_cutoff: float = 0.75
     """Scale factor applied to summed covalent radii for the atom-clash distance check.
     A pair is flagged as clashing if its distance is below catalyst_dist_cutoff * (r_i + r_j).
     Lower values are more permissive; higher values are stricter."""
