@@ -97,7 +97,7 @@ class LightFlowMatch(LightningModule, Flow):
             seed: int=42,
             num_prim_atoms: Optional[int]=None,
             refine_final: bool=False,
-            target_binding_E: Optional[float]=None,
+            target_binding_energy: Optional[float]=None,
             num_generated_samples: int=1,
             covalent_radii_scale: float=0.75,
             condition_on_binding_E: bool=True,
@@ -160,7 +160,7 @@ class LightFlowMatch(LightningModule, Flow):
                     seed=seed,
                 )
 
-        self.target_binding_E = target_binding_E
+        self.target_binding_energy = target_binding_energy
         self.num_generated_samples = num_generated_samples
         self.condition_on_binding_E = condition_on_binding_E
         self.standardize_ads_pos = standardize_ads_pos
