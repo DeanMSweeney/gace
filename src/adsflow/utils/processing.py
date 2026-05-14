@@ -53,12 +53,18 @@ def process_sample(
         else (os.path.join(gen_POS, "binding_energies.csv") if gen_POS else None)
     )
 
-    atoms_rlxd, energy_dict = relax_struc(
-        atoms=atoms,
-        calculator=calculator,
-        run_mlff=run_mlff,
-        config_vasp=config_vasp,
+    result = check_validity(atoms, covalent_radii_scale, target_ads_dists=target_ads_dists)
+
+    if result["is_valid"] == True:
+        atoms_rlxd, energy_dict = relax_struc(
+            atoms=atoms,
+            calculator=calculator,
+            run_mlff=run_mlff,
+            config_vasp=config_vasp,
     )
+    else: 
+        atoms_rlxd  = None 
+        energy_dict = None 
 
     if _csv_path is not None:
         os.makedirs(os.path.dirname(_csv_path), exist_ok=True)
@@ -93,11 +99,7 @@ def process_sample(
             if first_write:
                 _w.writeheader()
             _w.writerow(row)
-        
-
-    atoms_rlxd = atoms_rlxd if run_mlff else atoms
-    result = check_validity(atoms_rlxd, covalent_radii_scale, target_ads_dists=target_ads_dists)
-
+    
     metrics = {
         "vol_ok":            float(result["vol_ok"]),
         "cat_dist_ok_naive": float(result["cat_dist_ok_naive"]),
@@ -105,8 +107,10 @@ def process_sample(
         "ads_dist_ok":       float(result["ads_dist_ok"]),
         "sample_is_valid":   float(result["is_valid"]),
     }
+
     if result["ads_dist_mae"] is not None:
         metrics["ads_dist_mae"] = float(result["ads_dist_mae"])
+        
     if energy_dict is not None and target_binding_E is not None:
         metrics["binding_E_mae"] = energy_dict["ERROR"]
 
