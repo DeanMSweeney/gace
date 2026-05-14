@@ -342,6 +342,10 @@ class LightFlowMatch(LightningModule, Flow):
         t = torch.linspace(0., 1, self.num_integration_steps, device=data.pos.device, dtype=data.pos.dtype)
         B = int(data.batch.max().item()) + 1
         counts = sample_prim_atom_counts(B, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
+        
+        if self.target_binding_energy:
+            data.ads_binding_energy = torch.ones(B, device=data.pos.device, dtype=data.pos.dtype) * self.target_binding_energy
+
         opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts, refine_final=self.refine_final)
 
         prim_batch = opt_graph.batch[opt_graph.tags == 1]
@@ -384,6 +388,8 @@ class LightFlowMatch(LightningModule, Flow):
             data.ads_binding_energy = torch.tensor(
                 [self.target_binding_E], device=data.pos.device, dtype=torch.float32,
             )
+        else:
+            raise ValueError("No target binding energy provided.")
 
         t = torch.linspace(0., 1., self.num_integration_steps,device=data.pos.device, dtype=torch.float32)
 
