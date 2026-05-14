@@ -144,7 +144,7 @@ class SamplerConfig:
     Output files are indexed as {batch_idx}_{sample_idx}_{b}.vasp.
     """
 
-    target_binding_E: Optional[float] = None
+    target_binding_energy: Optional[float] = None
     """Target adsorption binding energy (eV) for structure generation.
     Passed to the model as a conditioning signal during forge sampling."""
 
