@@ -99,7 +99,7 @@ class LightFlowMatch(LightningModule, Flow):
             refine_final: bool=False,
             target_binding_energy: Optional[float]=None,
             num_generated_samples: int=1,
-            covalent_radii_scale: float=0.75,
+            catalyst_dist_cutoff: float=0.75,
             condition_on_binding_E: bool=True,
             standardize_ads_pos: bool=False,
             ads_pos_mean: list = [0.02587131, -0.69517581, 0.91811687],
@@ -133,7 +133,7 @@ class LightFlowMatch(LightningModule, Flow):
 
         self.config_vasp = config_vasp
         self.threshold = threshold
-        self.covalent_radii_scale = covalent_radii_scale
+        self.catalyst_dist_cutoff = catalyst_dist_cutoff
 
         # Flow matching configuration
         self.x_matching = x_matching  # "flow" or "endpoint"
@@ -361,7 +361,7 @@ class LightFlowMatch(LightningModule, Flow):
                     atoms, target_ads_dists, graph_idx=b, batch_idx=batch_idx,
                     calculator=self._mlff_calculator, run_mlff=self.run_mlff,
                     config_vasp=self.config_vasp,
-                    covalent_radii_scale=self.covalent_radii_scale,
+                    catalyst_dist_cutoff=self.catalyst_dist_cutoff,
                     gen_POS=self.gen_POS, rlxd_POS=self.rlxd_POS,
                     target_binding_E=data.ads_binding_energy[b].item(), file_ext=".vasp",
                 )
@@ -410,7 +410,7 @@ class LightFlowMatch(LightningModule, Flow):
                     atoms, target_ads_dists, graph_idx=sample_idx, batch_idx=batch_idx,
                     calculator=self._mlff_calculator, run_mlff=self.run_mlff,
                     config_vasp=self.config_vasp, 
-                    covalent_radii_scale=self.covalent_radii_scale,
+                    catalyst_dist_cutoff=self.catalyst_dist_cutoff,
                     gen_POS=self.gen_POS, rlxd_POS=self.rlxd_POS,
                     target_binding_E=self.target_binding_energy, file_ext=".traj",
                 )
