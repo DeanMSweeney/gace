@@ -104,7 +104,6 @@ class LightFlowMatch(LightningModule, Flow):
             standardize_ads_pos: bool=False,
             ads_pos_mean: list = [0.02587131, -0.69517581, 0.91811687],
             ads_pos_std: list = [8.21663071, 9.02733422, 9.86882174],
-            calc_binding_energy: bool=False,
             **kwargs,
         ):
 
@@ -165,7 +164,6 @@ class LightFlowMatch(LightningModule, Flow):
         self.num_generated_samples = num_generated_samples
         self.condition_on_binding_E = condition_on_binding_E
         self.standardize_ads_pos = standardize_ads_pos
-        self.calc_binding_energy = calc_binding_energy
 
         # Adsorbate position normalization stats (per-axis), computed offline over training set.
         # Path, loss, and Euler integration run in normalized space; denormalize only at sampling output.
@@ -358,7 +356,7 @@ class LightFlowMatch(LightningModule, Flow):
                 _, metrics = process_sample(
                     atoms, target_ads_dists, graph_idx=b, batch_idx=batch_idx,
                     calculator=self._mlff_calculator, run_mlff=self.run_mlff,
-                    config_vasp=self.config_vasp, calc_binding_energy=self.calc_binding_energy,
+                    config_vasp=self.config_vasp,
                     covalent_radii_scale=self.covalent_radii_scale,
                     gen_POS=self.gen_POS, rlxd_POS=self.rlxd_POS,
                     target_binding_E=data.ads_binding_energy[b].item(), file_ext=".vasp",
@@ -405,7 +403,7 @@ class LightFlowMatch(LightningModule, Flow):
                 _, metrics = process_sample(
                     atoms, target_ads_dists, graph_idx=sample_idx, batch_idx=batch_idx,
                     calculator=self._mlff_calculator, run_mlff=self.run_mlff,
-                    config_vasp=self.config_vasp, calc_binding_energy=self.calc_binding_energy,
+                    config_vasp=self.config_vasp, 
                     covalent_radii_scale=self.covalent_radii_scale,
                     gen_POS=self.gen_POS, rlxd_POS=self.rlxd_POS,
                     target_binding_E=self.target_binding_E, file_ext=".traj",

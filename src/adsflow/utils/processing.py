@@ -19,7 +19,6 @@ def process_sample(
     calculator,
     run_mlff: bool,
     config_vasp,
-    calc_binding_energy: bool,
     covalent_radii_scale: float,
     gen_POS: str | None,
     rlxd_POS: str | None,
@@ -39,7 +38,6 @@ def process_sample(
         calculator: MLFF calculator instance (or None).
         run_mlff: Whether to run structure relaxation.
         config_vasp: VASP config dict (or None).
-        calc_binding_energy: Whether relax_struc should compute binding energy.
         covalent_radii_scale: Scale factor for covalent radii in validity check.
         gen_POS: Directory to write unrelaxed structures (or None).
         rlxd_POS: Directory to write relaxed structures (or None).
@@ -51,7 +49,7 @@ def process_sample(
     """
     _csv_path = (
         os.path.join(rlxd_POS, "binding_energies.csv")
-        if calc_binding_energy and rlxd_POS
+        if run_mlff and rlxd_POS
         else (os.path.join(gen_POS, "binding_energies.csv") if gen_POS else None)
     )
 
@@ -60,7 +58,6 @@ def process_sample(
         calculator=calculator,
         run_mlff=run_mlff,
         config_vasp=config_vasp,
-        calc_binding_energy=calc_binding_energy,
     )
 
     if _csv_path is not None:
