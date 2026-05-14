@@ -42,12 +42,28 @@ def check_validity(atoms: Atoms, covalent_radii_scale: float = 0.75, target_ads_
         dists = atoms.get_all_distances(mic=True) # N, N 
         np.fill_diagonal(dists, np.inf) # N, N
 
-        # first adsorbate atoms
+        # ========================= 
+        # Adsorbate metrics 
+        # ========================= 
+
+        # interatomic distance within the adsorabte moelcule  
         ads_idx = np.where(tags == 2)[0]
         ads_dists = dists[ads_mask, :] # N_ads, N
-        ads_dist_ok = bool(ads_dists.min() >= 0.5) # scalar
+        ads_dist_ok = bool(ads_dists.min() >= 0.95) # scalar
 
-        # then catalyst atoms 
+        # comapre to reference structure 
+        num_ads_atoms = ads_mask.sum()
+        generated_ads_interatomic_dist = dists[np.ix_(ads_idx, ads_idx)].copy()  # N_ads, N_ads
+        np.fill_diagonal(generated_ads_interatomic_dist, 0.0)  # undo inf from line 43; self-dist = 0
+        target_ads_interatomic_dist = np.asarray(target_ads_dists)[:num_ads_atoms, :num_ads_atoms]  # N_ads, N_ads
+        ads_dist_mae = float(np.abs(target_ads_interatomic_dist - generated_ads_interatomic_dist).mean())
+
+
+        # ========================= 
+        # Catalyst metrics 
+        # ========================= 
+
+        # interatomic distance within the catalyst 
         cat_idx = np.where(cat_mask)[0]
         cat_dists = dists[np.ix_(cat_idx, cat_idx)] # N_cat, N_cat 
         cat_atomic_numbers = cat_atoms.get_atomic_numbers()
@@ -56,12 +72,7 @@ def check_validity(atoms: Atoms, covalent_radii_scale: float = 0.75, target_ads_
         sum_atomic_radii[sum_atomic_radii == 0.0] = np.inf
         cat_dist_ok = bool((cat_dists >= covalent_radii_scale * sum_atomic_radii).all())
         cat_dist_ok_naive = bool(cat_dists.min() >= 0.5)
-        # interatomic distance of adsorbate atoms
-        num_ads_atoms = ads_mask.sum()
-        generated_ads_interatomic_dist = dists[np.ix_(ads_idx, ads_idx)].copy()  # N_ads, N_ads
-        np.fill_diagonal(generated_ads_interatomic_dist, 0.0)  # undo inf from line 43; self-dist = 0
-        target_ads_interatomic_dist = np.asarray(target_ads_dists)[:num_ads_atoms, :num_ads_atoms]  # N_ads, N_ads
-        ads_dist_mae = float(np.abs(target_ads_interatomic_dist - generated_ads_interatomic_dist).mean())
+
 
     except Exception:
         cat_dist_ok = False

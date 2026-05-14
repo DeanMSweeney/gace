@@ -49,8 +49,8 @@ def process_sample(
     """
     _csv_path = (
         os.path.join(rlxd_POS, "binding_energies.csv")
-        if run_mlff and rlxd_POS
-        else (os.path.join(gen_POS, "binding_energies.csv") if gen_POS else None)
+        if run_mlff
+        else (os.path.join(gen_POS, "binding_energies.csv"))
     )
 
     result = check_validity(atoms, covalent_radii_scale, target_ads_dists=target_ads_dists)
@@ -117,9 +117,8 @@ def process_sample(
     fname = f"{batch_idx}_{graph_idx}{file_ext}"
 
     if result["is_valid"]:
-        if gen_POS:
-            os.makedirs(gen_POS, exist_ok=True)
-            ase.io.write(os.path.join(gen_POS, fname), atoms)
+        os.makedirs(gen_POS, exist_ok=True)
+        ase.io.write(os.path.join(gen_POS, fname), atoms)
 
         if run_mlff and atoms_rlxd is not None:
             os.makedirs(rlxd_POS, exist_ok=True)
