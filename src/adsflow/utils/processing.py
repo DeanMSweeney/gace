@@ -115,12 +115,15 @@ def process_sample(
         metrics["binding_E_mae"] = energy_dict["ERROR"]
 
     fname = f"{batch_idx}_{graph_idx}{file_ext}"
-    if gen_POS and result["is_valid"]:
-        os.makedirs(gen_POS, exist_ok=True)
-        ase.io.write(os.path.join(gen_POS, fname), atoms)
 
-    if rlxd_POS and run_mlff and result["is_valid"]:
-        os.makedirs(rlxd_POS, exist_ok=True)
-        ase.io.write(os.path.join(rlxd_POS, fname), atoms_rlxd)
+    if result["is_valid"]:
+        if gen_POS:
+            os.makedirs(gen_POS, exist_ok=True)
+            ase.io.write(os.path.join(gen_POS, fname), atoms)
 
+        if run_mlff and atoms_rlxd is not None:
+            os.makedirs(rlxd_POS, exist_ok=True)
+            ase.io.write(os.path.join(rlxd_POS, fname), atoms_rlxd)
+
+        
     return atoms_rlxd, metrics
