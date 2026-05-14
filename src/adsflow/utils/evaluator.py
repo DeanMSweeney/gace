@@ -28,7 +28,7 @@ def check_validity(atoms: Atoms, catalyst_dist_cutoff: float = 0.75, target_ads_
         dict with keys: vol_ok (bool), cat_dist_ok (bool), ads_dist_ok (bool), is_valid (bool).
     """
     if atoms is None:
-        return {"vol_ok": False, "cat_dist_ok": False, "cat_dist_ok_naive": True, "cat_atom_types_ok": False, "ads_dist_ok": False, "ads_dist_mae": None, "ads_dist_me": None, "is_valid": False}
+        return {"vol_ok": False, "cat_dist_ok": False, "cat_dist_ok_naive": True, "cat_atom_types_ok": False, "ads_dist_ok": False, "ads_dist_mae": None, "cat_ads_dist_ok": False, "is_valid": False}
 
     # Volume check # intertatomic distance check
     try:
@@ -47,8 +47,8 @@ def check_validity(atoms: Atoms, catalyst_dist_cutoff: float = 0.75, target_ads_
         # ========================= 
 
         # interatomic distance within the adsorabte moelcule  
-        ads_idx = np.where(tags == 2)[0]
-        ads_dists = dists[ads_mask, :] # N_ads, N
+        ads_idx = np.where(ads_mask)[0]
+        ads_dists = dists[np.ix_(ads_idx, ads_idx)] # N_ads, N_ads
         ads_atomic_numbers = ads_atoms.get_atomic_numbers()
         ads_atomic_radii = covalent_radii[ads_atomic_numbers]               # (N_ads,)
         ads_sum_atomic_radii = ads_atomic_radii[:, None] + ads_atomic_radii[None, :]   # (N_ads, N_ads)
@@ -83,6 +83,13 @@ def check_validity(atoms: Atoms, catalyst_dist_cutoff: float = 0.75, target_ads_
         cat_atom_types_ok = bool(np.isin(cat_atom_types, cat_oc20_atom_types).any())
 
 
+        # ========================= 
+        # Catalyst + Adsorbate metrics 
+        # ========================= 
+        cat_ads_dists = dists[cat_mask, :] # N_ads, N
+        cat_ads_dist_ok = bool(cat_ads_dists.min() >= 0.5) # scalar
+
+
     except Exception:
         cat_dist_ok = False
         cat_dist_ok_naive = False 
@@ -90,15 +97,17 @@ def check_validity(atoms: Atoms, catalyst_dist_cutoff: float = 0.75, target_ads_
         vol_ok = False
         ads_dist_ok = False
         ads_dist_mae = None
+        cat_ads_dist_ok = False
 
     return {
         "vol_ok": vol_ok,
         "cat_dist_ok": cat_dist_ok,
         "cat_dist_ok_naive": cat_dist_ok_naive, 
         "cat_atom_types_ok": cat_atom_types_ok, 
+        "cat_ads_dist_ok": cat_ads_dist_ok, 
         "ads_dist_ok": ads_dist_ok,
         "ads_dist_mae": ads_dist_mae,
-        "is_valid": vol_ok and cat_dist_ok and ads_dist_ok,
+        "is_valid": vol_ok and cat_dist_ok and ads_dist_ok and cat_ads_dist_ok and cat_atom_types_ok,
     }
 
 
