@@ -149,7 +149,10 @@ def relax_w_mlff(
     opt = opt_class(atoms, logfile=None)
     converged = opt.run(fmax=fmax, steps=steps)
 
-    return atoms, converged, opt.nsteps
+    if bool(converged) == False:
+        atoms = None
+
+    return atoms
 
 
 _CSV_DECIMALS = 6
@@ -191,7 +194,7 @@ def relax_struc(
     if not run_mlff:
         return None, None
 
-    atoms_relaxed, _, _ = relax_w_mlff(
+    atoms_relaxed = relax_w_mlff(
         atoms=atoms,
         calculator=calculator,
         fmax=0.05,
@@ -235,5 +238,5 @@ def relax_struc(
             "computed_binding_E": E_slab_ads,
         }
     except Exception as e:
-        logging.warning(f"calc_binding_energy failed: {e}")
+        logging.warning(f"Failed to calculate binding energy: {e}")
         return atoms_relaxed, None
