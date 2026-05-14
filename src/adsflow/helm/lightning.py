@@ -384,9 +384,9 @@ class LightFlowMatch(LightningModule, Flow):
         Returns:
             List of ASE Atoms objects (one per graph in the batch).
         """
-        if self.target_binding_E is not None:
+        if self.target_binding_energy is not None:
             data.ads_binding_energy = torch.tensor(
-                [self.target_binding_E], device=data.pos.device, dtype=torch.float32,
+                [self.target_binding_energy], device=data.pos.device, dtype=torch.float32,
             )
         else:
             raise ValueError("No target binding energy provided.")
@@ -412,7 +412,7 @@ class LightFlowMatch(LightningModule, Flow):
                     config_vasp=self.config_vasp, 
                     covalent_radii_scale=self.covalent_radii_scale,
                     gen_POS=self.gen_POS, rlxd_POS=self.rlxd_POS,
-                    target_binding_E=self.target_binding_E, file_ext=".traj",
+                    target_binding_E=self.target_binding_energy, file_ext=".traj",
                 )
                 all_metrics.append(metrics)
 
