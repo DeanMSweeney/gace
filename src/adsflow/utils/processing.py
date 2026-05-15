@@ -66,6 +66,11 @@ def process_sample(
         atoms_rlxd  = None 
         energy_dict = None 
 
+    if energy_dict is not None and energy_dict["computed_binding_E"] > 10: # discard very unstable structures
+        energy_dict = None 
+        atoms_rlxd = None 
+        result["is_valid"] = False
+
     if _csv_path is not None:
         os.makedirs(os.path.dirname(_csv_path), exist_ok=True)
         first_write = _csv_path not in _initialized_csvs
