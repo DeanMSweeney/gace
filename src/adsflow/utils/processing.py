@@ -102,12 +102,12 @@ def process_sample(
     
     metrics = {
         "vol_ok":            float(result["vol_ok"]),
-        "cat_dist_ok_naive": float(result["cat_dist_ok_naive"]),
         "cat_dist_ok":       float(result["cat_dist_ok"]),
         "cat_atom_types_ok": float(result["cat_atom_types_ok"]),
         "cat_ads_dist_ok":   float(result["cat_ads_dist_ok"]),
         "ads_dist_ok":       float(result["ads_dist_ok"]),
         "sample_is_valid":   float(result["is_valid"]),
+        "sample_is_valid_naive":    float(result["is_valid_naive"]),
     }
 
     if result["ads_dist_mae"] is not None:

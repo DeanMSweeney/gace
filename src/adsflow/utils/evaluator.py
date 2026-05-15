@@ -28,7 +28,7 @@ def check_validity(atoms: Atoms, catalyst_dist_cutoff: float = 0.75, target_ads_
         dict with keys: vol_ok (bool), cat_dist_ok (bool), ads_dist_ok (bool), is_valid (bool).
     """
     if atoms is None:
-        return {"vol_ok": False, "cat_dist_ok": False, "cat_dist_ok_naive": True, "cat_atom_types_ok": False, "ads_dist_ok": False, "ads_dist_mae": None, "cat_ads_dist_ok": False, "is_valid": False}
+        return {"vol_ok": False, "cat_dist_ok": False, "cat_atom_types_ok": False, "ads_dist_ok": False, "ads_dist_mae": None, "cat_ads_dist_ok": False, "is_valid": False, "is_valid_naive": False}
 
     # Volume check # intertatomic distance check
     try:
@@ -70,7 +70,7 @@ def check_validity(atoms: Atoms, catalyst_dist_cutoff: float = 0.75, target_ads_
         atomic_radii = covalent_radii[cat_atomic_numbers]               # (N_cat,)
         sum_atomic_radii = atomic_radii[:, None] + atomic_radii[None, :]   # (N_cat, N_cat)
         sum_atomic_radii[sum_atomic_radii == 0.0] = np.inf
-        cat_dist_ok = bool((cat_dists >= catalyst_dist_cutoff * sum_atomic_radii).all())
+        cat_dist_ok = bool((cat_dists >= catalyst_dist_cutoff * sum_atomic_radii).all()) # must ensure this is a data-fit value
         cat_dist_ok_naive = bool(cat_dists.min() >= 0.5)
 
         # atom types - check for metals
@@ -83,12 +83,12 @@ def check_validity(atoms: Atoms, catalyst_dist_cutoff: float = 0.75, target_ads_
         # Catalyst + Adsorbate metrics 
         # ========================= 
         cat_ads_dists = dists[cat_mask, :] # N_ads, N
-        cat_ads_dist_ok = bool(cat_ads_dists.min() >= 0.5) # scalar
+        cat_ads_dist_ok = bool(cat_ads_dists.min() >= 0.5) # we can let the optimzier handle this 
 
 
     except Exception:
         cat_dist_ok = False
-        cat_dist_ok_naive = False 
+        is_valid_naive = False 
         cat_atom_types_ok = False
         vol_ok = False
         ads_dist_ok = False
@@ -98,12 +98,12 @@ def check_validity(atoms: Atoms, catalyst_dist_cutoff: float = 0.75, target_ads_
     return {
         "vol_ok": vol_ok,
         "cat_dist_ok": cat_dist_ok,
-        "cat_dist_ok_naive": cat_dist_ok_naive, 
         "cat_atom_types_ok": cat_atom_types_ok, 
         "cat_ads_dist_ok": cat_ads_dist_ok, 
         "ads_dist_ok": ads_dist_ok,
         "ads_dist_mae": ads_dist_mae,
         "is_valid": vol_ok and cat_dist_ok and ads_dist_ok and cat_ads_dist_ok and cat_atom_types_ok,
+        "is_valid_naive": cat_dist_ok_naive and ads_dist_ok and cat_ads_dist_ok and vol_ok,
     }
 
 
