@@ -172,23 +172,16 @@ def relax_struc(
     """
     Post-generation relaxation step.
 
-    Applies MLFF relaxation. When calc_binding_energy=True, also relaxes the
-    isolated slab and computes the OC20 adsorption energy.
-
-    Adsorption energy: E_ads = E(slab+ads) - E(bare_slab) - E(ads_ref)
-    where E(ads_ref) = sum of ATOMIC_REFERENCE_ENERGIES for each adsorbate atom.
+    Applies MLFF relaxation.
 
     Args:
         atoms: ASE Atoms (slab + adsorbate; tags 1=slab, 2=adsorbate)
         calculator: OCP calculator with loaded MLFF model
         run_mlff: Whether to run MLFF relaxation
         config_vasp: Whether to configure VASP DFT input files
-        calc_binding_energy: If True, compute adsorption energy via two relaxations
 
     Returns:
-        (atoms_relaxed, energy_dict) where energy_dict is None when
-        calc_binding_energy=False or the calculation fails. energy_dict keys:
-        slab_ads_energy, slab_energy, ads_ref_energy, ads_energy.
+        (atoms_relaxed, energy_dict)
     """
     if not run_mlff:
         return None, None

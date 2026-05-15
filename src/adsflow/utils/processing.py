@@ -19,7 +19,7 @@ def process_sample(
     calculator,
     run_mlff: bool,
     config_vasp,
-    covalent_radii_scale: float,
+    catalyst_dist_cutoff: float,
     gen_POS: str | None,
     rlxd_POS: str | None,
     target_binding_E: float | None,
@@ -38,7 +38,7 @@ def process_sample(
         calculator: MLFF calculator instance (or None).
         run_mlff: Whether to run structure relaxation.
         config_vasp: VASP config dict (or None).
-        covalent_radii_scale: Scale factor for covalent radii in validity check.
+        catalyst_dist_cutoff: Scale factor for covalent radii in validity check.
         gen_POS: Directory to write unrelaxed structures (or None).
         rlxd_POS: Directory to write relaxed structures (or None).
         target_binding_E: Target binding energy (or None).
@@ -49,16 +49,22 @@ def process_sample(
     """
     _csv_path = (
         os.path.join(rlxd_POS, "binding_energies.csv")
-        if run_mlff and rlxd_POS
-        else (os.path.join(gen_POS, "binding_energies.csv") if gen_POS else None)
+        if run_mlff
+        else (os.path.join(gen_POS, "binding_energies.csv"))
     )
 
-    atoms_rlxd, energy_dict = relax_struc(
-        atoms=atoms,
-        calculator=calculator,
-        run_mlff=run_mlff,
-        config_vasp=config_vasp,
+    result = check_validity(atoms, catalyst_dist_cutoff, target_ads_dists=target_ads_dists)
+
+    if result["is_valid"] == True:
+        atoms_rlxd, energy_dict = relax_struc(
+            atoms=atoms,
+            calculator=calculator,
+            run_mlff=run_mlff,
+            config_vasp=config_vasp,
     )
+    else: 
+        atoms_rlxd  = None 
+        energy_dict = None 
 
     if _csv_path is not None:
         os.makedirs(os.path.dirname(_csv_path), exist_ok=True)
@@ -93,30 +99,32 @@ def process_sample(
             if first_write:
                 _w.writeheader()
             _w.writerow(row)
-        
-
-    atoms_rlxd = atoms_rlxd if run_mlff else atoms
-    result = check_validity(atoms_rlxd, covalent_radii_scale, target_ads_dists=target_ads_dists)
-
+    
     metrics = {
         "vol_ok":            float(result["vol_ok"]),
-        "cat_dist_ok_naive": float(result["cat_dist_ok_naive"]),
         "cat_dist_ok":       float(result["cat_dist_ok"]),
+        "cat_atom_types_ok": float(result["cat_atom_types_ok"]),
+        "cat_ads_dist_ok":   float(result["cat_ads_dist_ok"]),
         "ads_dist_ok":       float(result["ads_dist_ok"]),
         "sample_is_valid":   float(result["is_valid"]),
+        "sample_is_valid_naive":    float(result["is_valid_naive"]),
     }
+
     if result["ads_dist_mae"] is not None:
         metrics["ads_dist_mae"] = float(result["ads_dist_mae"])
+        
     if energy_dict is not None and target_binding_E is not None:
         metrics["binding_E_mae"] = energy_dict["ERROR"]
 
     fname = f"{batch_idx}_{graph_idx}{file_ext}"
-    if gen_POS and result["is_valid"]:
+
+    if result["is_valid"]:
         os.makedirs(gen_POS, exist_ok=True)
         ase.io.write(os.path.join(gen_POS, fname), atoms)
 
-    if rlxd_POS and run_mlff and result["is_valid"]:
-        os.makedirs(rlxd_POS, exist_ok=True)
-        ase.io.write(os.path.join(rlxd_POS, fname), atoms_rlxd)
+        if run_mlff and atoms_rlxd is not None:
+            os.makedirs(rlxd_POS, exist_ok=True)
+            ase.io.write(os.path.join(rlxd_POS, fname), atoms_rlxd)
 
+        
     return atoms_rlxd, metrics

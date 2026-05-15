@@ -13,22 +13,22 @@ from typing import Dict
 from adsflow.utils.invariance import pbc_aware_delta
 
 
-def check_validity(atoms: Atoms, covalent_radii_scale: float = 0.75, target_ads_dists: np.ndarray = None) -> dict:
+def check_validity(atoms: Atoms, catalyst_dist_cutoff: float = 0.75, target_ads_dists: np.ndarray = None) -> dict:
     """Check structural validity of a single ASE Atoms object.
 
     Runs two checks:
     - Volume: cell volume >= 0.1 Å³ (guards against degenerate cells)
-    - Distance: no pair closer than covalent_radii_scale * sum of covalent radii
+    - Distance: no pair closer than catalyst_dist_cutoff * sum of covalent radii
 
     Args:
         atoms: ASE Atoms object to check, or None if build failed.
-        covalent_radii_scale: Fraction of summed covalent radii used as minimum allowed distance.
+        catalyst_dist_cutoff: Fraction of summed covalent radii used as minimum allowed distance.
 
     Returns:
         dict with keys: vol_ok (bool), cat_dist_ok (bool), ads_dist_ok (bool), is_valid (bool).
     """
     if atoms is None:
-        return {"vol_ok": False, "cat_dist_ok": False, "cat_dist_ok_naive": True, "ads_dist_ok": False, "ads_dist_mae": None, "ads_dist_me": None, "is_valid": False}
+        return {"vol_ok": False, "cat_dist_ok": False, "cat_atom_types_ok": False, "ads_dist_ok": False, "ads_dist_mae": None, "cat_ads_dist_ok": False, "is_valid": False, "is_valid_naive": False}
 
     # Volume check # intertatomic distance check
     try:
@@ -42,41 +42,68 @@ def check_validity(atoms: Atoms, covalent_radii_scale: float = 0.75, target_ads_
         dists = atoms.get_all_distances(mic=True) # N, N 
         np.fill_diagonal(dists, np.inf) # N, N
 
-        # first adsorbate atoms
-        ads_idx = np.where(tags == 2)[0]
-        ads_dists = dists[ads_mask, :] # N_ads, N
-        ads_dist_ok = bool(ads_dists.min() >= 0.5) # scalar
+        # ========================= 
+        # Adsorbate metrics 
+        # ========================= 
 
-        # then catalyst atoms 
-        cat_idx = np.where(cat_mask)[0]
-        cat_dists = dists[np.ix_(cat_idx, cat_idx)] # N_cat, N_cat 
-        cat_atomic_numbers = cat_atoms.get_atomic_numbers()
-        atomic_radii = covalent_radii[cat_atomic_numbers]               # (N_cat,)
-        sum_atomic_radii = atomic_radii[:, None] + atomic_radii[None, :]   # (N_cat, N_cat)
-        sum_atomic_radii[sum_atomic_radii == 0.0] = np.inf
-        cat_dist_ok = bool((cat_dists >= covalent_radii_scale * sum_atomic_radii).all())
-        cat_dist_ok_naive = bool(cat_dists.min() >= 0.5)
-        # interatomic distance of adsorbate atoms
+        # interatomic distance within the adsorabte moelcule  
+        ads_idx = np.where(ads_mask)[0]
+        ads_dists = dists[np.ix_(ads_idx, ads_idx)] # N_ads, N_ads
+        ads_dist_ok = bool(ads_dists.min() >= 0.5) # makign this too stringent will remove feasible structures
+
+        # comapre to reference structure 
         num_ads_atoms = ads_mask.sum()
         generated_ads_interatomic_dist = dists[np.ix_(ads_idx, ads_idx)].copy()  # N_ads, N_ads
         np.fill_diagonal(generated_ads_interatomic_dist, 0.0)  # undo inf from line 43; self-dist = 0
         target_ads_interatomic_dist = np.asarray(target_ads_dists)[:num_ads_atoms, :num_ads_atoms]  # N_ads, N_ads
         ads_dist_mae = float(np.abs(target_ads_interatomic_dist - generated_ads_interatomic_dist).mean())
 
+
+        # ========================= 
+        # Catalyst metrics 
+        # ========================= 
+
+        # interatomic distance within the catalyst 
+        cat_idx = np.where(cat_mask)[0]
+        cat_dists = dists[np.ix_(cat_idx, cat_idx)] # N_cat, N_cat 
+        cat_atomic_numbers = cat_atoms.get_atomic_numbers()
+        atomic_radii = covalent_radii[cat_atomic_numbers]               # (N_cat,)
+        sum_atomic_radii = atomic_radii[:, None] + atomic_radii[None, :]   # (N_cat, N_cat)
+        sum_atomic_radii[sum_atomic_radii == 0.0] = np.inf
+        cat_dist_ok = bool((cat_dists >= catalyst_dist_cutoff * sum_atomic_radii).all()) # must ensure this is a data-fit value
+        cat_dist_ok_naive = bool(cat_dists.min() >= 0.5)
+
+        # atom types - check for metals
+        cat_oc20_atom_types = np.arange(22, 84)  # integers 22 to 83 inclusive
+        cat_atom_types = np.unique(cat_atomic_numbers)
+        cat_atom_types_ok = bool(np.isin(cat_atom_types, cat_oc20_atom_types).any())
+
+
+        # ========================= 
+        # Catalyst + Adsorbate metrics 
+        # ========================= 
+        cat_ads_dists = dists[cat_mask, :] # N_ads, N
+        cat_ads_dist_ok = bool(cat_ads_dists.min() >= 0.5) # we can let the optimzier handle this 
+
+
     except Exception:
         cat_dist_ok = False
-        cat_dist_ok_naive = False 
+        is_valid_naive = False 
+        cat_atom_types_ok = False
         vol_ok = False
         ads_dist_ok = False
         ads_dist_mae = None
+        cat_ads_dist_ok = False
 
     return {
         "vol_ok": vol_ok,
         "cat_dist_ok": cat_dist_ok,
-        "cat_dist_ok_naive": cat_dist_ok_naive, 
+        "cat_atom_types_ok": cat_atom_types_ok, 
+        "cat_ads_dist_ok": cat_ads_dist_ok, 
         "ads_dist_ok": ads_dist_ok,
         "ads_dist_mae": ads_dist_mae,
-        "is_valid": vol_ok and cat_dist_ok and ads_dist_ok,
+        "is_valid": vol_ok and cat_dist_ok and ads_dist_ok and cat_ads_dist_ok and cat_atom_types_ok,
+        "is_valid_naive": cat_dist_ok_naive and ads_dist_ok and cat_ads_dist_ok and vol_ok,
     }
 
 

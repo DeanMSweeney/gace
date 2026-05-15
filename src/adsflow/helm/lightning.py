@@ -97,9 +97,9 @@ class LightFlowMatch(LightningModule, Flow):
             seed: int=42,
             num_prim_atoms: Optional[int]=None,
             refine_final: bool=False,
-            target_binding_E: Optional[float]=None,
+            target_binding_energy: Optional[float]=None,
             num_generated_samples: int=1,
-            covalent_radii_scale: float=0.75,
+            catalyst_dist_cutoff: float=0.75,
             condition_on_binding_E: bool=True,
             standardize_ads_pos: bool=False,
             ads_pos_mean: list = [0.02587131, -0.69517581, 0.91811687],
@@ -133,7 +133,7 @@ class LightFlowMatch(LightningModule, Flow):
 
         self.config_vasp = config_vasp
         self.threshold = threshold
-        self.covalent_radii_scale = covalent_radii_scale
+        self.catalyst_dist_cutoff = catalyst_dist_cutoff
 
         # Flow matching configuration
         self.x_matching = x_matching  # "flow" or "endpoint"
@@ -160,7 +160,7 @@ class LightFlowMatch(LightningModule, Flow):
                     seed=seed,
                 )
 
-        self.target_binding_E = target_binding_E
+        self.target_binding_energy = target_binding_energy
         self.num_generated_samples = num_generated_samples
         self.condition_on_binding_E = condition_on_binding_E
         self.standardize_ads_pos = standardize_ads_pos
@@ -342,6 +342,10 @@ class LightFlowMatch(LightningModule, Flow):
         t = torch.linspace(0., 1, self.num_integration_steps, device=data.pos.device, dtype=data.pos.dtype)
         B = int(data.batch.max().item()) + 1
         counts = sample_prim_atom_counts(B, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
+        
+        if self.target_binding_energy:
+            data.ads_binding_energy = torch.ones(B, device=data.pos.device, dtype=data.pos.dtype) * self.target_binding_energy
+
         opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts, refine_final=self.refine_final)
 
         prim_batch = opt_graph.batch[opt_graph.tags == 1]
@@ -357,7 +361,7 @@ class LightFlowMatch(LightningModule, Flow):
                     atoms, target_ads_dists, graph_idx=b, batch_idx=batch_idx,
                     calculator=self._mlff_calculator, run_mlff=self.run_mlff,
                     config_vasp=self.config_vasp,
-                    covalent_radii_scale=self.covalent_radii_scale,
+                    catalyst_dist_cutoff=self.catalyst_dist_cutoff,
                     gen_POS=self.gen_POS, rlxd_POS=self.rlxd_POS,
                     target_binding_E=data.ads_binding_energy[b].item(), file_ext=".vasp",
                 )
@@ -380,10 +384,12 @@ class LightFlowMatch(LightningModule, Flow):
         Returns:
             List of ASE Atoms objects (one per graph in the batch).
         """
-        if self.target_binding_E is not None:
+        if self.target_binding_energy is not None:
             data.ads_binding_energy = torch.tensor(
-                [self.target_binding_E], device=data.pos.device, dtype=torch.float32,
+                [self.target_binding_energy], device=data.pos.device, dtype=torch.float32,
             )
+        else:
+            raise ValueError("No target binding energy provided.")
 
         t = torch.linspace(0., 1., self.num_integration_steps,device=data.pos.device, dtype=torch.float32)
 
@@ -404,9 +410,9 @@ class LightFlowMatch(LightningModule, Flow):
                     atoms, target_ads_dists, graph_idx=sample_idx, batch_idx=batch_idx,
                     calculator=self._mlff_calculator, run_mlff=self.run_mlff,
                     config_vasp=self.config_vasp, 
-                    covalent_radii_scale=self.covalent_radii_scale,
+                    catalyst_dist_cutoff=self.catalyst_dist_cutoff,
                     gen_POS=self.gen_POS, rlxd_POS=self.rlxd_POS,
-                    target_binding_E=self.target_binding_E, file_ext=".traj",
+                    target_binding_E=self.target_binding_energy, file_ext=".traj",
                 )
                 all_metrics.append(metrics)
 
