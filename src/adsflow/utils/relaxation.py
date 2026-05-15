@@ -197,32 +197,6 @@ def relax_struc(
     try:
         E_slab_ads = atoms_relaxed.get_potential_energy()
 
-        """
-        slab_atoms = atoms[atoms.get_tags() != 2]
-        slab_relaxed, _, _ = relax_w_mlff(
-            atoms=slab_atoms,
-            calculator=calculator,
-            fmax=0.05,
-            steps=200,
-            optimizer="BFGS",
-        )
-        E_slab = slab_relaxed.get_potential_energy()
-
-        ads_symbols = [
-            s for s, t in zip(atoms.get_chemical_symbols(), atoms.get_tags())
-            if t == 2
-        ]
-        unknown = [s for s in ads_symbols if s not in ATOMIC_REFERENCE_ENERGIES]
-        if unknown:
-            logging.warning(
-                f"Skipping binding energy (unknown reference energies for {set(unknown)})"
-            )
-            return atoms_relaxed, None
-
-        E_ads_ref = sum(ATOMIC_REFERENCE_ENERGIES[s] for s in ads_symbols)
-        E_ads = E_slab_ads - E_slab - E_ads_ref
-        """
-        
         return atoms_relaxed, {
             "computed_binding_E": E_slab_ads,
         }
