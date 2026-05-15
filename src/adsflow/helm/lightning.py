@@ -366,9 +366,19 @@ class LightFlowMatch(LightningModule, Flow):
                     target_binding_E=data.ads_binding_energy[b].item(), file_ext=".vasp",
                 )
                 for key, val in metrics.items():
-                    self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
+                    if key == "binding_E_mae":
+                        self._test_binding_E_maes.append(val)
+                    else:
+                        self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
 
-        return   
+        return
+
+    def on_test_epoch_start(self):
+        self._test_binding_E_maes = []
+
+    def on_test_epoch_end(self):
+        if self._test_binding_E_maes:
+            self.log("binding_E_mae", float(np.median(self._test_binding_E_maes)))
 
     def predict_step(self, data: Data, batch_idx: int):
         """Generate catalyst structures conditioned on adsorbate molecule and target binding energy.
