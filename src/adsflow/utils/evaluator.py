@@ -49,11 +49,7 @@ def check_validity(atoms: Atoms, catalyst_dist_cutoff: float = 0.75, target_ads_
         # interatomic distance within the adsorabte moelcule  
         ads_idx = np.where(ads_mask)[0]
         ads_dists = dists[np.ix_(ads_idx, ads_idx)] # N_ads, N_ads
-        ads_atomic_numbers = ads_atoms.get_atomic_numbers()
-        ads_atomic_radii = covalent_radii[ads_atomic_numbers]               # (N_ads,)
-        ads_sum_atomic_radii = ads_atomic_radii[:, None] + ads_atomic_radii[None, :]   # (N_ads, N_ads)
-        ads_sum_atomic_radii[ads_sum_atomic_radii == 0.0] = np.inf
-        ads_dist_ok = bool((ads_dists >= 0.50 * ads_sum_atomic_radii).all()) # hard coded 0.95 since it is 
+        ads_dist_ok = bool(ads_dists.min() >= 0.5) # makign this too stringent will remove feasible structures
 
         # comapre to reference structure 
         num_ads_atoms = ads_mask.sum()
