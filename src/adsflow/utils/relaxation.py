@@ -217,7 +217,6 @@ def batch_relax_w_mlff(
             )
         results = {
             "energy": relaxed_batch.y,
-            "forces": relaxed_batch.force,
         }
         relaxed_atoms = batch_to_atoms(relaxed_batch, results=results)
 
