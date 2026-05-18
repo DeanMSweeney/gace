@@ -93,7 +93,6 @@ def check_validity(atoms: Atoms, catalyst_dist_cutoff: float = 0.75, target_ads_
         cat_atom_types_ok = False
         vol_ok = False
         ads_dist_ok = False
-        ads_dist_mae = None
         cat_ads_dist_ok = False
 
     return {
@@ -101,6 +100,7 @@ def check_validity(atoms: Atoms, catalyst_dist_cutoff: float = 0.75, target_ads_
         "cat_dist_ok": cat_dist_ok,
         "cat_atom_types_ok": cat_atom_types_ok, 
         "cat_ads_dist_ok": cat_ads_dist_ok, 
+        "ads_dist_ok": ads_dist_ok,
         "is_valid": vol_ok and cat_dist_ok and ads_dist_ok and cat_ads_dist_ok and cat_atom_types_ok,
         "is_valid_naive": cat_dist_ok_naive and ads_dist_ok and cat_ads_dist_ok and vol_ok,
     }
