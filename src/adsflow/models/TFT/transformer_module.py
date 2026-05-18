@@ -32,15 +32,7 @@ class TransformerModule(nn.Module):
         atom_dim: Number of atom types.
         num_heads: Number of attention heads.
         num_layers: Number of transformer layers.
-        num_aux_layers: Number of auxiliary transformer layers.
-        num_aux_mlip_layers: Number of auxiliary energy and force prediction transformer layers.
-        aux_hidden_dim: Dimension of auxiliary transformer layers.
-        aux_mlip_hidden_dim: Dimension of auxiliary energy and force prediction transformer layers.
-        aux_layer: Layer at which to extract representations for auxiliary tasks.
         hidden_dim: Dimension of the hidden layers.
-        num_properties: Number of global properties to predict.
-        dataset_embedder: The dataset embedder module.
-        spacegroup_embedder: The spacegroup embedder module.
         activation: Activation function to use ("SiLU", "ReLU", "SwiGLU").
         implementation: Implementation type ("transformer", "modern_transformer").
         context_length: Maximum context length for positional encoding.
@@ -51,9 +43,6 @@ class TransformerModule(nn.Module):
         cross_attention: Whether to use cross-attention layers.
         add_sinusoid_posenc: Whether to add sinusoidal positional encoding.
         concat_combine_input: Whether to concatenate and combine inputs.
-        is_conservative: Whether to enforce conservative atomic forces as negative gradients of global energy.
-        sum_pool_energy: Whether to sum-pool atom representations for energy prediction.
-        separate_energy_force_transformers: Whether to use separate transformers for energy and force predictions.
         mask_material_coords: Whether or not material coordinates are masked in forward().
         custom_weight_init: Custom weight initialization method (None, "xavier", "kaiming", "orthogonal", "uniform", "eye", "normal").
             NOTE: "uniform" does not work well.
@@ -66,13 +55,7 @@ class TransformerModule(nn.Module):
         atom_dim: int,
         num_heads: int,
         num_layers: int,
-        num_aux_layers: int,
-        num_aux_mlip_layers: int,
-        aux_hidden_dim: int,
-        aux_mlip_hidden_dim: int,
-        aux_layer: int,
         hidden_dim: int,
-        num_properties: int,
         activation: Literal["SiLU", "ReLU", "SwiGLU"] = "SiLU",
         implementation: Literal["transformer", "modern_transformer"] = "modern_transformer",
         context_length: int = 2048,
@@ -83,9 +66,6 @@ class TransformerModule(nn.Module):
         cross_attention: bool = True,
         add_sinusoid_posenc: bool = True,
         concat_combine_input: bool = False,
-        is_conservative: bool = False,
-        sum_pool_energy: bool = False,
-        separate_energy_force_transformers: bool = True,
         mask_material_coords: bool = True,
         num_rbf: int = 20,
         rbf_max: float = 5.0,
@@ -118,9 +98,6 @@ class TransformerModule(nn.Module):
         self.cross_attention = cross_attention
         self.add_sinusoid_posenc = add_sinusoid_posenc
         self.concat_combine_input = concat_combine_input
-        self.is_conservative = is_conservative
-        self.sum_pool_energy = sum_pool_energy
-        self.separate_energy_force_transformers = separate_energy_force_transformers
         self.mask_material_coords = mask_material_coords
         self.custom_weight_init = custom_weight_init
 
@@ -182,7 +159,6 @@ class TransformerModule(nn.Module):
                 dim=hidden_dim,
                 depth=num_layers,
                 num_heads=num_heads,
-                repr_layer=aux_layer,
             )
         else:
             raise ValueError(f"Invalid implementation: {self.implementation}")
@@ -247,58 +223,6 @@ class TransformerModule(nn.Module):
 
             # Ads cross-attention (atom types are conditioning — no cross-attn head)
             self.pos_cross_attention = decoder_layer()
-
-        # Add auxiliary task heads
-        self.global_property_proj = (
-            nn.Linear(hidden_dim, aux_hidden_dim, bias=False)
-            if hidden_dim != aux_hidden_dim
-            else nn.Identity()
-        )
-        self.global_energy_proj = (
-            nn.Linear(hidden_dim, aux_mlip_hidden_dim, bias=False)
-            if hidden_dim != aux_mlip_hidden_dim
-            else nn.Identity()
-        )
-        self.atomic_forces_proj = (
-            nn.Linear(hidden_dim, aux_mlip_hidden_dim, bias=False)
-            if hidden_dim != aux_mlip_hidden_dim and self.separate_energy_force_transformers
-            else nn.Identity()
-        )
-
-        if self.num_aux_layers > 0:
-            if self.cross_attention:
-                self.global_property_cross_attention = decoder_layer()
-
-            self.global_property_transformer = transformer_class(
-                dim=aux_hidden_dim,
-                num_heads=num_heads,
-                depth=num_aux_layers,
-            )
-
-        if self.num_aux_mlip_layers > 0:
-            if self.cross_attention:
-                self.global_energy_cross_attention = decoder_layer()
-                if self.separate_energy_force_transformers:
-                    self.atomic_forces_cross_attention = decoder_layer()
-
-            self.global_energy_transformer = transformer_class(
-                dim=aux_mlip_hidden_dim,
-                num_heads=num_heads,
-                depth=num_aux_mlip_layers,
-            )
-            if self.separate_energy_force_transformers:
-                self.atomic_forces_transformer = transformer_class(
-                    dim=aux_mlip_hidden_dim,
-                    num_heads=num_heads,
-                    depth=num_aux_mlip_layers,
-                )
-
-        self.global_property_head = nn.Linear(aux_hidden_dim, num_properties, bias=True)
-        self.global_energy_head = nn.Linear(aux_mlip_hidden_dim, 1, bias=True)
-        if not self.is_conservative:
-            self.atomic_forces_head = nn.Linear(aux_mlip_hidden_dim, 3, bias=False)
-
-        self.auxiliary_tasks = ["global_property", "global_energy", "atomic_forces"]
 
         # Initialize weights
         if self.custom_weight_init is not None:
@@ -381,11 +305,6 @@ class TransformerModule(nn.Module):
         Tuple[
             Float["b n 3"],  # type: ignore - ads_pos
         ],
-        Tuple[
-            Float["b 1 p"],  # type: ignore - global_property
-            Float["b 1 1"],  # type: ignore - global_energy
-            Float["b s 3"],  # type: ignore - atomic_forces (s = m + n)
-        ],
     ]:
         """Forward pass of the module.
 
@@ -404,7 +323,7 @@ class TransformerModule(nn.Module):
             ads_padding_mask: True = padding for ads tokens (B, N).
 
         Returns:
-            ``(pred_prim, pred_ads, pred_aux)``
+            ``(pred_prim, pred_ads)``
         """
 
         # primitive cell data at time t
@@ -557,7 +476,7 @@ class TransformerModule(nn.Module):
         # ── Shared transformer trunk ─────────────────────────────────────────
         if self.implementation in ("transformer", "modern_transformer"):
             h_in = self.transformer_norm(h_in)
-            h_out, h_aux = self.transformer(h_in, padding_mask=padding_mask, **attention_kwargs)
+            h_out = self.transformer(h_in, padding_mask=padding_mask, **attention_kwargs)
         else:
             raise ValueError(f"Invalid implementation: {self.implementation}")
 
@@ -648,79 +567,6 @@ class TransformerModule(nn.Module):
 
             out_pos = self.out_pos(h_out_ads)  # (B, N,  3)
 
-        # ── Auxiliary tasks (operate on full combined sequence) ───────────────
-        h_global_property = h_aux
-        h_global_energy = h_aux
-        h_atomic_forces = h_aux
-
-        if self.num_aux_layers > 0:
-            if self.cross_attention:
-                h_global_property = self.global_property_cross_attention(
-                    h_aux, h_in,
-                    tgt_key_padding_mask=padding_mask,
-                    memory_key_padding_mask=padding_mask,
-                    **attention_kwargs,
-                )
-
-            h_global_property = self.global_property_transformer(
-                self.global_property_proj(h_global_property),
-                padding_mask=padding_mask,
-                **attention_kwargs,
-            )
-        else:
-            h_global_property = self.global_property_proj(h_global_property)
-
-        if self.num_aux_mlip_layers > 0:
-            if self.cross_attention:
-                h_global_energy = self.global_energy_cross_attention(
-                    h_aux, h_in,
-                    tgt_key_padding_mask=padding_mask,
-                    memory_key_padding_mask=padding_mask,
-                    **attention_kwargs,
-                )
-                h_atomic_forces = (
-                    self.atomic_forces_cross_attention(
-                        h_aux, h_in,
-                        tgt_key_padding_mask=padding_mask,
-                        memory_key_padding_mask=padding_mask,
-                        **attention_kwargs,
-                    )
-                    if self.separate_energy_force_transformers
-                    else h_global_energy
-                )
-
-            h_global_energy = self.global_energy_transformer(
-                self.global_energy_proj(h_global_energy),
-                padding_mask=padding_mask,
-                **attention_kwargs,
-            )
-            if self.separate_energy_force_transformers:
-                h_atomic_forces = self.atomic_forces_transformer(
-                    self.atomic_forces_proj(h_atomic_forces),
-                    padding_mask=padding_mask,
-                    **attention_kwargs,
-                )
-            else:
-                h_atomic_forces = h_global_energy
-        else:
-            h_global_energy = self.global_energy_proj(h_global_energy)
-            h_atomic_forces = self.atomic_forces_proj(h_atomic_forces)
-
-        combined_mask_f = combined_real_mask.unsqueeze(-1).float()  # (B, M+N,  1)
-        combined_n = combined_mask_f.sum(-2, keepdim=True).clamp(min=1)
-        h_global_property_pooled = (
-            (h_global_property * combined_mask_f).sum(-2, keepdim=True) / combined_n
-        )
-        h_global_energy_pooled = (
-            (h_global_energy * combined_mask_f).sum(-2, keepdim=True)
-            if self.sum_pool_energy
-            else (h_global_energy * combined_mask_f).sum(-2, keepdim=True) / combined_n
-        )
-
-        global_property = self.global_property_head(h_global_property_pooled) * global_mask
-        global_energy = self.global_energy_head(h_global_energy_pooled) * global_mask
-        atomic_forces = self.atomic_forces_head(h_atomic_forces) * combined_real_mask.unsqueeze(-1)
-
         # ── Assemble outputs ─────────────────────────────────────────────────
         pred_prim = (
             out_atom_types * prim_real_mask.unsqueeze(-1),    # (B, M, V)
@@ -732,13 +578,8 @@ class TransformerModule(nn.Module):
         pred_ads = (
             out_pos * ads_real_mask.unsqueeze(-1),   # (B, N,  3)
         )
-        pred_aux_outputs = (
-            global_property,   # (B, 1, P)
-            global_energy,     # (B, 1, 1)
-            atomic_forces,     # (B, M+N,  3)
-        )
 
-        return pred_prim, pred_ads, pred_aux_outputs
+        return pred_prim, pred_ads
 
     @typecheck
     def forward_with_cfg(
@@ -795,11 +636,6 @@ class TransformerModule(nn.Module):
             Float["b 1 3"],  # type: ignore - ads_com
             Float["b n 3"],  # type: ignore - ads_rel_pos
         ],
-        Tuple[
-            Float["b 1 p"],  # type: ignore - global_property
-            Float["b 1 1"],  # type: ignore - global_energy
-            Float["b s 3"],  # type: ignore - atomic_forces (s = m + n)
-        ],
     ]:
         """Classifier-free guidance forward pass.
 
@@ -812,7 +648,7 @@ class TransformerModule(nn.Module):
         half_ads = tuple(x_[: len(x_) // 2] for x_ in x_ads)
         combined_ads = tuple(torch.cat([h, h], dim=0) for h in half_ads)
 
-        pred_prim, pred_ads, pred_aux = self.forward(
+        pred_prim, pred_ads = self.forward(
             combined_prim,
             combined_ads,
             t_prim,
@@ -831,5 +667,5 @@ class TransformerModule(nn.Module):
                 guided.append(torch.cat([half, half], dim=0))
             return tuple(guided)
 
-        return _apply_cfg(pred_prim), _apply_cfg(pred_ads), _apply_cfg(pred_aux)
+        return _apply_cfg(pred_prim), _apply_cfg(pred_ads)
 
