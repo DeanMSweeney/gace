@@ -85,7 +85,7 @@ class LightFlowMatch(LightningModule, Flow):
             interpolate_on_torus: bool=False,
             num_integration_steps: int=1,
             run_mlff: bool=False,
-            batched_relaxation: bool=True,
+            batched_relaxation: bool=False,
             mlff_checkpoint: Optional[str]=None,
             accelerator: str="gpu",
             seed: int=42,
