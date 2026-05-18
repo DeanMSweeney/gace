@@ -232,6 +232,7 @@ def batch_relax_w_mlff(
         return relaxed_atoms
     except Exception as e:
         logging.warning(f"batch_relax_w_mlff failed: {e}")
+        print(type(atoms_list))
         return [None] * len(atoms_list)
 
 
