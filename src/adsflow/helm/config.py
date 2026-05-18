@@ -111,25 +111,6 @@ class SamplerConfig:
 
     # ==================== ODE Solver Settings ====================
 
-    rtol: float = 1e-7
-    """Relative tolerance for adaptive ODE solver (controls accuracy)
-    Smaller values → higher accuracy but slower integration
-    """
-
-    atol: float = 1e-9
-    """Absolute tolerance for adaptive ODE solver (controls accuracy)
-    Smaller values → higher accuracy but slower integration
-    """
-
-    ode_method: str = "dopri5"
-    """
-    ODE integration method for sampling (torchdiffeq):
-    - "dopri5": Dormand-Prince 5th order (adaptive, recommended)
-    - "euler": Forward Euler (fast but inaccurate)
-    - "rk4": 4th order Runge-Kutta (fixed step, accurate)
-    - "adaptive_heun": 2nd order adaptive (good speed/accuracy tradeoff)
-    """
-
     num_integration_steps: int = 100
     """Number of integration steps for ODE solver (for inference)
     - 1: single-step integration
@@ -171,10 +152,6 @@ class SamplerConfig:
     """
 
     # ==================== MLFF Relaxation ====================
-
-    refine_final: bool = False
-    """Whether to run a final refinement forward pass at t=1 after the Euler loop.
-    Uses the model's endpoint prediction directly rather than the Euler-integrated state."""
 
     run_mlff: bool = False
     """Whether to run MLFF relaxation after generation"""
@@ -374,7 +351,7 @@ class Config:
     Whether to use informed priors for the noise x0 (forge variant only).
     """
 
-    operate_on_torus: bool = False
+    interpolate_on_torus: bool = False
     """
     Whether to apply the minimum image convention (MIC) to the velocity u_x
     for catalyst fractional coordinates. When True, u_x is wrapped to [-0.5, 0.5)
