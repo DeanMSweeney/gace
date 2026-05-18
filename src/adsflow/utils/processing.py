@@ -51,9 +51,7 @@ def process_sample(
 
     result = check_validity(atoms, catalyst_dist_cutoff, target_ads_dists=target_ads_dists)
 
-    
-    if result["is_valid"]: 
-        if run_mlff:
+    if result["is_valid"] and run_mlff:
             rlxd_POS = os.path.join(rlxd_POS, f"{batch_idx}_{graph_idx}")
             _csv_path = os.path.join(rlxd_POS, "binding_energies.csv")
             atoms_rlxd, energy_dict = relax_struc(
@@ -63,10 +61,9 @@ def process_sample(
             )
             if atoms_rlxd is None and energy_dict is None: # failed relqaxations shiould be treated as failures
                 result["is_valid"] = False 
-        else: 
-            gen_POS = os.path.join(gen_POS, f"{batch_idx}_{graph_idx}")
-            _csv_path = os.path.join(gen_POS, "binding_energies.csv") 
     else: 
+        gen_POS = os.path.join(gen_POS, f"{batch_idx}_{graph_idx}")
+        _csv_path = os.path.join(gen_POS, "binding_energies.csv") 
         atoms_rlxd  = None 
         energy_dict = None 
 
