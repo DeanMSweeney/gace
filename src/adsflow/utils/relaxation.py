@@ -166,7 +166,6 @@ def _fmt(v: Optional[float]) -> str:
 def relax_struc(
     atoms: Atoms,
     calculator: OCPCalculator,
-    run_mlff: bool = False,
     config_vasp: bool = False,
 ) -> tuple:
     """
@@ -183,8 +182,6 @@ def relax_struc(
     Returns:
         (atoms_relaxed, energy_dict)
     """
-    if not run_mlff:
-        return None, None
 
     atoms_relaxed = relax_w_mlff(
         atoms=atoms,
@@ -195,11 +192,11 @@ def relax_struc(
     )
 
     try:
-        E_slab_ads = atoms_relaxed.get_potential_energy()
+        E_slab_ads = atoms_relaxed.get_potential_energy() 
 
         return atoms_relaxed, {
             "computed_binding_E": E_slab_ads,
         }
     except Exception as e:
-        logging.warning(f"Failed to calculate binding energy: {e}")
+        logging.warning(f">>> Failed to calculate binding energy due to failed relaxation 😢 {e}")
         return atoms_relaxed, None
