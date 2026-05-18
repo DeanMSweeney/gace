@@ -208,12 +208,13 @@ def batch_relax_w_mlff(
     batch = PygBatch.from_data_list(data_list)
 
     try:
-        relaxed_batch = ml_relax(
-            batch=batch,
-            model=calculator.trainer,
-            steps=steps,
-            fmax=fmax,
-        )
+        with Silent():
+            relaxed_batch = ml_relax(
+                batch=batch,
+                model=calculator.trainer,
+                steps=steps,
+                fmax=fmax,
+            )
         results = {
             "energy": relaxed_batch.y,
             "forces": relaxed_batch.force,
