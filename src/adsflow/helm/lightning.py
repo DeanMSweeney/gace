@@ -75,28 +75,22 @@ class LightFlowMatch(LightningModule, Flow):
             model,
             variant: str="forge",
             mode: str="debug",
-            rtol: float = 1e-7,
-            atol: float = 1e-9,
-            ode_method: str = "dopri5",
             track_grad_norms: bool=False,
             in_POS=None,
             gen_POS=None,
             rlxd_POS=None,
             config_vasp: bool=False,
-            threshold: float=0.20,
             x_matching: Literal["flow", "endpoint"]="flow",
             schedule_type: Literal["linear", "cosine"]="linear",
             optimal_transport: bool=False,
             informed_priors: bool=True,
-            operate_on_torus: bool=False,
-            write_eval_metrics: bool=False,
+            interpolate_on_torus: bool=False,
             num_integration_steps: int=1,
             run_mlff: bool=False,
             mlff_checkpoint: Optional[str]=None,
             accelerator: str="gpu",
             seed: int=42,
             num_prim_atoms: Optional[int]=None,
-            refine_final: bool=False,
             target_binding_energy: Optional[float]=None,
             num_generated_samples: int=1,
             catalyst_dist_cutoff: float=0.75,
@@ -121,9 +115,7 @@ class LightFlowMatch(LightningModule, Flow):
         self.loss_fn = nn.MSELoss()  # Base loss function (not directly used, see criterion)
 
         # ODE solver configuration (for inference/testing)
-        self.rtol = rtol
-        self.atol = atol
-        self.ode_method = ode_method
+        self.num_integration_steps = num_integration_steps
 
         # Monitoring and output configuration
         self.track_grad_norms = track_grad_norms
@@ -132,7 +124,6 @@ class LightFlowMatch(LightningModule, Flow):
         self.rlxd_POS = rlxd_POS
 
         self.config_vasp = config_vasp
-        self.threshold = threshold
         self.catalyst_dist_cutoff = catalyst_dist_cutoff
 
         # Flow matching configuration
@@ -140,14 +131,11 @@ class LightFlowMatch(LightningModule, Flow):
         self.schedule_type = schedule_type  # "linear" or "cosine"
         self.optimal_transport = optimal_transport
         self.informed_priors = informed_priors
-        self.operate_on_torus = operate_on_torus
-        self.write_eval_metrics = write_eval_metrics
-        self.num_integration_steps = num_integration_steps
+        self.interpolate_on_torus = interpolate_on_torus
         self.run_mlff = run_mlff
         self.accelerator = accelerator
         self.seed = seed
         self.num_prim_atoms = num_prim_atoms
-        self.refine_final = refine_final
         self.mlff_checkpoint = mlff_checkpoint
 
         self._mlff_calculator = None
@@ -255,7 +243,7 @@ class LightFlowMatch(LightningModule, Flow):
         """
         # Generate interpolated training data at random time t.
         # path() stores supervision targets on the returned data object.
-        data = self.path(input_graph=input_graph) 
+        data = self.build_path(input_graph=input_graph) 
 
         # Model predicts velocity field (or dict for forge with z_logits)
         if self.variant == "forge":
@@ -346,7 +334,7 @@ class LightFlowMatch(LightningModule, Flow):
         if self.target_binding_energy:
             data.ads_binding_energy = torch.ones(B, device=data.pos.device, dtype=data.pos.dtype) * self.target_binding_energy
 
-        opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts, refine_final=self.refine_final)
+        opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts,)
 
         prim_batch = opt_graph.batch[opt_graph.tags == 1]
         ads_batch  = opt_graph.batch[opt_graph.tags == 2]
@@ -407,7 +395,7 @@ class LightFlowMatch(LightningModule, Flow):
         all_metrics = []
         for sample_idx in range(self.num_generated_samples):
             counts = sample_prim_atom_counts(1, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
-            opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts, refine_final=self.refine_final)
+            opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts,)
 
             prim_batch = opt_graph.batch[opt_graph.tags == 1]
             ads_batch  = opt_graph.batch[opt_graph.tags == 2]

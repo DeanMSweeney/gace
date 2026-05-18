@@ -91,7 +91,7 @@ class Flow():
             "M_loss":       M_loss,
         }
 
-    def path(
+    def build_path(
         self,
         input_graph: Data,
         time_dist: Literal["uniform", "beta"] = "beta",
@@ -100,7 +100,6 @@ class Flow():
         """
         Generate interpolated training data along a path from initial to relaxed positions.
 
-        For "refine" variant: interpolates between initial (x0) and relaxed (x1) positions
         For "forge" variant: interpolates from noise/initial positions to relaxed positions
 
         Returns:
@@ -476,7 +475,6 @@ class Flow():
             input_graph: Data,
             t: torch.Tensor,  # Time points, e.g. linspace(0, 1, n_steps)
             num_prim_atoms: Optional[Union[int, torch.Tensor]] = None,
-            refine_final: bool = False,
     ) -> Data:
         """Generate structures for the forge variant via a custom Euler loop.
 
@@ -584,24 +582,6 @@ class Flow():
 
                 # Update discrete atom types (CTMC)
                 data.atomic_numbers_hot = ctmc_step(data.atomic_numbers_hot, pred["z"], t_curr, dt)
-
-        # ── Optional refinement: one final forward at t=1, take endpoint directly ──
-        if refine_final:
-            data.t = torch.full((B, 1), 1.0, device=device, dtype=torch.float32)
-            C_1 = lattice_params_to_matrix(
-                lengths=data.lengths_scaled * n_scale,
-                angles=data.angles_radians,
-            )
-            data.cell             = C_1
-            data.supercell_lattice = torch.bmm(data.transformation_matrix, C_1)
-            with torch.no_grad():
-                pred = self(data)
-            data.pos                   = pred["pos"]
-            data.lengths_scaled        = pred["len"]
-            data.angles_radians        = pred["ang"]
-            data.transformation_matrix = pred["M"]
-            data.ads_pos               = pred["ads_pos"]
-            data.atomic_numbers_hot    = pred["z"]  # argmax taken in output phase below
 
         # ── Store generated outputs ───────────────────────────────────────────
         data.pos_generated             = data.pos
