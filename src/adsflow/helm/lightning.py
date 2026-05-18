@@ -17,13 +17,11 @@ from transformers import get_cosine_schedule_with_warmup, get_polynomial_decay_s
 from tqdm import tqdm
 
 from adsflow.utils.path import Flow
-from adsflow.utils.relaxation import relax_struc, batch_relax_w_mlff, Silent, _fmt
+from adsflow.utils.relaxation import Silent
 from fairchem.core import OCPCalculator
-from adsflow.utils.atoms import write_strucs
 from adsflow.utils.tft.tft_wrapper import PyGToTensorDict
-from adsflow.utils.builder import forge_catalyst, sample_prim_atom_counts
-from adsflow.utils.evaluator import check_validity
-from adsflow.utils.processing import process_sample
+from adsflow.utils.builder import sample_prim_atom_counts
+from adsflow.utils.catalyst_forge import CatalystForge
 import ase.io
 
 from typing import Optional, Literal, Union, Tuple
@@ -338,47 +336,25 @@ class LightFlowMatch(LightningModule, Flow):
 
         opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts,)
 
-        prim_batch = opt_graph.batch[opt_graph.tags == 1]
-        ads_batch  = opt_graph.batch[opt_graph.tags == 2]
-        num_graphs = int(opt_graph.batch.max().item()) + 1
+        B = int(opt_graph.batch.max().item()) + 1
+        binding_energies = [data.ads_binding_energy[b].item() for b in range(B)]
 
-        # Phase 1: build all structures; keep a separate list of non-None ones for batch relax
-        all_entries = []   # (b, atoms_or_None, target_binding_E)
-        valid_entries = []  # (b, atoms, target_binding_E) — non-None only
-        for b in range(num_graphs):
-            atoms = forge_catalyst(opt_graph, b, prim_batch, ads_batch)
-            target_binding_E = data.ads_binding_energy[b].item()
-            all_entries.append((b, atoms, target_binding_E))
-            if atoms is not None:
-                valid_entries.append((b, atoms, target_binding_E))
-
-        # Phase 2: batch relax all valid structures in parallel
-        relaxed_map = {}
-        if self.run_mlff and self.batched_relaxation and valid_entries:
-            relaxed_list = batch_relax_w_mlff(
-                [e[1] for e in valid_entries],
-                self._mlff_calculator
-            )
-            relaxed_map = {e[0]: rlxd for e, rlxd in zip(valid_entries, relaxed_list)}
-
-        # Phase 3: sequential post-processing — all entries including None atoms so they
-        # count as invalid samples in the epoch metrics
-        for b, atoms, target_binding_E in all_entries:
-            _, metrics = process_sample(
-                atoms,
-                graph_idx=b,
-                batch_idx=batch_idx,
-                calculator=self._mlff_calculator,
-                run_mlff=self.run_mlff,
-                config_vasp=self.config_vasp,
-                catalyst_dist_cutoff=self.catalyst_dist_cutoff,
-                gen_POS=self.gen_POS,
-                rlxd_POS=self.rlxd_POS,
-                target_binding_E=target_binding_E,
-                file_ext=".vasp",
-                atoms_rlxd=relaxed_map.get(b), # if not passed, defaults to none 
-                batched_relaxation=self.batched_relaxation,
-            )
+        cf = CatalystForge(
+            opt_graph=opt_graph,
+            binding_energies=binding_energies,
+            batch_idx=batch_idx,
+            calculator=self._mlff_calculator,
+            run_mlff=self.run_mlff,
+            batched_relaxation=self.batched_relaxation,
+            config_vasp=self.config_vasp,
+            catalyst_dist_cutoff=self.catalyst_dist_cutoff,
+            gen_POS=self.gen_POS,
+            rlxd_POS=self.rlxd_POS,
+            file_ext=".vasp",
+        )
+        cf.build()
+        cf.relax()
+        for metrics in cf.evaluate():
             for key, val in metrics.items():
                 if key == "binding_E_diff":
                     self._test_binding_E_diffs.append(val)
@@ -417,44 +393,29 @@ class LightFlowMatch(LightningModule, Flow):
 
         t = torch.linspace(0., 1., self.num_integration_steps,device=data.pos.device, dtype=torch.float32)
 
-        # Phase 1: generate all samples (ODE sampling must stay sequential — each draws fresh noise)
         all_atoms = []
+        all_metrics = []
         for sample_idx in range(self.num_generated_samples):
             counts = sample_prim_atom_counts(1, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
             opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts,)
-            prim_batch = opt_graph.batch[opt_graph.tags == 1]
-            ads_batch  = opt_graph.batch[opt_graph.tags == 2]
-            atoms = forge_catalyst(opt_graph, 0, prim_batch, ads_batch)
-            all_atoms.append(atoms)
 
-        # Phase 2: batch relax all valid structures in parallel
-        valid_indices = [i for i, a in enumerate(all_atoms) if a is not None]
-        relaxed_map = {}
-        if self.run_mlff and self.batched_relaxation and valid_indices:
-            relaxed_list = batch_relax_w_mlff(
-                [all_atoms[i] for i in valid_indices], self._mlff_calculator
-            )
-            relaxed_map = {i: rlxd for i, rlxd in zip(valid_indices, relaxed_list)}
-
-        # Phase 3: process all samples including None so forge failures count as invalid
-        all_metrics = []
-        for sample_idx, atoms in enumerate(all_atoms):
-            _, metrics = process_sample(
-                atoms,
-                graph_idx=sample_idx,
+            cf = CatalystForge(
+                opt_graph=opt_graph,
+                binding_energies=[self.target_binding_energy],
                 batch_idx=batch_idx,
                 calculator=self._mlff_calculator,
                 run_mlff=self.run_mlff,
+                batched_relaxation=self.batched_relaxation,
                 config_vasp=self.config_vasp,
                 catalyst_dist_cutoff=self.catalyst_dist_cutoff,
                 gen_POS=self.gen_POS,
                 rlxd_POS=self.rlxd_POS,
-                target_binding_E=self.target_binding_energy,
                 file_ext=".traj",
-                atoms_rlxd=relaxed_map.get(sample_idx),
-                batched_relaxation=self.batched_relaxation,
             )
-            all_metrics.append(metrics)
+            cf.build()
+            cf.relax()
+            all_metrics.extend(cf.evaluate())
+            all_atoms.extend(cf._all_atoms)
 
         if all_metrics:
             keys = all_metrics[0].keys()
