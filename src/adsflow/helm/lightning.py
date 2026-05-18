@@ -204,7 +204,7 @@ class LightFlowMatch(LightningModule, Flow):
 
         t = t_prim.data["t"].squeeze(-1)  # (B,)
 
-        pred_prim, pred_ads, _ = self.model(
+        pred_prim, pred_ads  = self.model(
             x_prim=(
                 x_prim.data["atomic_numbers_hot"],     # (B, M, 118)
                 x_prim.data["frac_coords"],            # (B, M, 3)
