@@ -47,21 +47,25 @@ def process_sample(
     Returns:
         (atoms_rlxd, metrics) where metrics is a dict of validity floats.
     """
-    _csv_path = (
-        os.path.join(rlxd_POS, "binding_energies.csv")
-        if run_mlff
-        else (os.path.join(gen_POS, "binding_energies.csv"))
-    )
+
 
     result = check_validity(atoms, catalyst_dist_cutoff, target_ads_dists=target_ads_dists)
 
-    if result["is_valid"] == True:
-        atoms_rlxd, energy_dict = relax_struc(
-            atoms=atoms,
-            calculator=calculator,
-            run_mlff=run_mlff,
-            config_vasp=config_vasp,
-    )
+    
+    if result["is_valid"]: 
+        if run_mlff:
+            rlxd_POS = os.path.join(rlxd_POS, f"{batch_idx}_{graph_idx}")
+            _csv_path = os.path.join(rlxd_POS, "binding_energies.csv")
+            atoms_rlxd, energy_dict = relax_struc(
+                atoms=atoms,
+                calculator=calculator,
+                config_vasp=config_vasp,
+            )
+            if atoms_rlxd is None and energy_dict is None: # failed relqaxations shiould be treated as failures
+                result["is_valid"] = False 
+        else: 
+            gen_POS = os.path.join(gen_POS, f"{batch_idx}_{graph_idx}")
+            _csv_path = os.path.join(gen_POS, "binding_energies.csv") 
     else: 
         atoms_rlxd  = None 
         energy_dict = None 
@@ -115,8 +119,8 @@ def process_sample(
         "sample_is_valid_naive":    float(result["is_valid_naive"]),
     }
 
-    if result["ads_dist_mae"] is not None:
-        metrics["ads_dist_mae"] = float(result["ads_dist_mae"])
+    if result["ads_restructure_diff"] is not None:
+        metrics["ads_restructure_diff"] = float(result["ads_restructure_diff"])
         
     if energy_dict is not None and target_binding_E is not None:
         metrics["binding_E_diff"] = energy_dict["binding_E_diff"]
