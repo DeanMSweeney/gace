@@ -155,6 +155,62 @@ def relax_w_mlff(
     return atoms
 
 
+def batch_relax_w_mlff(
+    atoms_list: list[Atoms],
+    calculator: OCPCalculator,
+    fmax: float = 0.05,
+    steps: int = 200,
+) -> list[Optional[Atoms]]:
+    """Relax a list of structures in parallel using fairchem's batched LBFGS optimizer.
+
+    Args:
+        atoms_list: ASE Atoms objects to relax.
+        calculator: OCPCalculator wrapping the MLFF trainer.
+        fmax: Force convergence criterion (eV/Å).
+        steps: Max optimisation steps.
+
+    Returns:
+        List of relaxed Atoms (SinglePointCalculator attached) or None per entry on failure.
+    """
+    from fairchem.core.common.relaxation.ml_relaxation import ml_relax
+    from fairchem.core.common.relaxation.ase_utils import batch_to_atoms
+    from fairchem.core.preprocessing import AtomsToGraphs
+    from torch_geometric.data import Batch as PygBatch
+
+    # r_edges=False → OptimizableBatch sets otf_graph=True and rebuilds edges each step
+    a2g = AtomsToGraphs(
+        r_energy=False, r_forces=False, r_distances=False, r_edges=False, r_fixed=True
+    )
+    data_list = [a2g.convert(atoms, sid=i) for i, atoms in enumerate(atoms_list)]
+    batch = PygBatch.from_data_list(data_list)
+
+    try:
+        relaxed_batch = ml_relax(
+            batch=batch,
+            model=calculator.trainer,
+            steps=steps,
+            fmax=fmax,
+        )
+        results = {
+            "energy": relaxed_batch.y,
+            "forces": relaxed_batch.force,
+        }
+        relaxed_atoms = batch_to_atoms(relaxed_batch, results=results)
+
+        natoms = relaxed_batch.natoms.tolist()
+        forces_per_structure = torch.split(relaxed_batch.force, natoms)
+        for i, f in enumerate(forces_per_structure):
+            max_force = f.norm(dim=-1).max().item()
+            if max_force > fmax:
+                logging.warning(f"structure {i} did not converge: max_force={max_force:.4f} > fmax={fmax}")
+                relaxed_atoms[i] = None
+
+        return relaxed_atoms
+    except Exception as e:
+        logging.warning(f"batch_relax_w_mlff failed: {e}")
+        return [None] * len(atoms_list)
+
+
 _CSV_DECIMALS = 6
 _FMT = f".{_CSV_DECIMALS}f"
 
