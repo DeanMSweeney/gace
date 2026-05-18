@@ -116,8 +116,6 @@ def process_sample(
         "sample_is_valid_naive":    float(result["is_valid_naive"]),
     }
 
-    if result["ads_restructure_diff"] is not None:
-        metrics["ads_restructure_diff"] = float(result["ads_restructure_diff"])
         
     if energy_dict is not None and target_binding_E is not None:
         metrics["binding_E_diff"] = energy_dict["binding_E_diff"]
