@@ -215,24 +215,20 @@ def batch_relax_w_mlff(
                 steps=steps,
                 fmax=fmax,
             )
-        results = {
-            "energy": relaxed_batch.y,
-        }
+        results = calculator.trainer.predict(relaxed_batch, per_image=False, disable_tqdm=True)
         relaxed_atoms = batch_to_atoms(relaxed_batch, results=results)
 
-        """
         natoms = relaxed_batch.natoms.tolist()
-        forces_per_structure = torch.split(relaxed_batch.force, natoms)
+        forces_per_structure = torch.split(results["forces"], natoms)
         for i, f in enumerate(forces_per_structure):
             max_force = f.norm(dim=-1).max().item()
             if max_force > fmax:
                 logging.warning(f"structure {i} did not converge: max_force={max_force:.4f} > fmax={fmax}")
                 relaxed_atoms[i] = None
-        """
+
         return relaxed_atoms
     except Exception as e:
         logging.warning(f"batch_relax_w_mlff failed: {e}")
-        print(type(atoms_list))
         return [None] * len(atoms_list)
 
 
