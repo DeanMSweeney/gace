@@ -1,8 +1,10 @@
 import csv
+import logging
 import os
 
 import ase.io
 import numpy as np
+from ase import Atoms
 
 from adsflow.utils.evaluator import check_validity
 from adsflow.utils.relaxation import _fmt, relax_struc
@@ -12,7 +14,6 @@ _initialized_csvs: set = set()
 
 def process_sample(
     atoms,
-    target_ads_dists: np.ndarray,
     graph_idx: int,
     batch_idx: int,
     *,
@@ -24,6 +25,8 @@ def process_sample(
     rlxd_POS: str | None,
     target_binding_E: float | None,
     file_ext: str = ".vasp",
+    atoms_rlxd: Atoms | None = None,
+    batched_relaxation: bool = False,
 ) -> tuple:
     """Post-process a single generated sample.
 
@@ -32,7 +35,6 @@ def process_sample(
 
     Args:
         atoms: Raw ASE Atoms object from forge_catalyst.
-        target_ads_dists: (N_ads, 15) pairwise distance array for this graph.
         graph_idx: Index of this graph within the batch (used for file naming).
         batch_idx: Index of the batch (used for file naming and CSV).
         calculator: MLFF calculator instance (or None).
@@ -43,29 +45,40 @@ def process_sample(
         rlxd_POS: Directory to write relaxed structures (or None).
         target_binding_E: Target binding energy (or None).
         file_ext: File extension for written structures (".vasp" or ".traj").
+        atoms_rlxd: Pre-relaxed ASE Atoms; when provided, internal relaxation is skipped.
 
     Returns:
         (atoms_rlxd, metrics) where metrics is a dict of validity floats.
     """
 
 
-    result = check_validity(atoms, catalyst_dist_cutoff, target_ads_dists=target_ads_dists)
+    result = check_validity(atoms, catalyst_dist_cutoff)
 
     if result["is_valid"] and run_mlff:
-            rlxd_POS = os.path.join(rlxd_POS, f"{batch_idx}_{graph_idx}")
-            _csv_path = os.path.join(rlxd_POS, "binding_energies.csv")
+        rlxd_POS = os.path.join(rlxd_POS, f"{batch_idx}_{graph_idx}")
+        _csv_path = os.path.join(rlxd_POS, "binding_energies.csv")
+        if batched_relaxation:
+            try:
+                E_slab_ads = atoms_rlxd.get_potential_energy()
+                energy_dict = {"computed_binding_E": E_slab_ads}
+            except Exception as e:
+                logging.warning(f"energy extraction from pre-relaxed atoms failed: {e}")
+                atoms_rlxd = None
+                energy_dict = None
+                result["is_valid"] = False
+        else:
             atoms_rlxd, energy_dict = relax_struc(
                 atoms=atoms,
                 calculator=calculator,
                 config_vasp=config_vasp,
             )
-            if atoms_rlxd is None and energy_dict is None: # failed relqaxations shiould be treated as failures
-                result["is_valid"] = False 
-    else: 
+            if atoms_rlxd is None and energy_dict is None:
+                result["is_valid"] = False
+    else:
         gen_POS = os.path.join(gen_POS, f"{batch_idx}_{graph_idx}")
-        _csv_path = os.path.join(gen_POS, "binding_energies.csv") 
-        atoms_rlxd  = None 
-        energy_dict = None 
+        _csv_path = os.path.join(gen_POS, "binding_energies.csv")
+        atoms_rlxd = None
+        energy_dict = None
 
     if energy_dict is not None and energy_dict["computed_binding_E"] > 10: # discard very unstable structures
         energy_dict = None 

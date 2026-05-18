@@ -13,7 +13,7 @@ from typing import Dict
 from adsflow.utils.invariance import pbc_aware_delta
 
 
-def check_validity(atoms: Atoms, catalyst_dist_cutoff: float = 0.75, target_ads_dists: np.ndarray = None) -> dict:
+def check_validity(atoms: Atoms, catalyst_dist_cutoff: float = 0.75) -> dict:
     """Check structural validity of a single ASE Atoms object.
 
     Runs two checks:
