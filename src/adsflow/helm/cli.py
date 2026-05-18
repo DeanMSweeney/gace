@@ -225,7 +225,7 @@ def main(cfg: Config) -> None:
         variant=cfg.variant,
         optimal_transport=cfg.optimal_transport,
         informed_priors=cfg.informed_priors,
-        operate_on_torus=cfg.operate_on_torus,
+        interpolate_on_torus=cfg.interpolate_on_torus,
         condition_on_binding_E=cfg.condition_on_binding_E,
         standardize_ads_pos=cfg.standardize_ads_pos,
         mode=cfg.mode,
