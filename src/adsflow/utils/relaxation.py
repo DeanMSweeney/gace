@@ -20,6 +20,26 @@ from fairchem.core import OCPCalculator
 from huggingface_hub import hf_hub_download
 
 from adsflow.utils.atoms import data_to_atoms
+from fairchem.core.common.relaxation.optimizable import OptimizableBatch
+
+
+class _PatchedOptimizableBatch(OptimizableBatch):
+    """Adds the ASE >= 3.23 Optimizable abstract methods missing from fairchem's OptimizableBatch."""
+
+    def get_x(self):
+        return self.get_positions().reshape(-1)
+
+    def set_x(self, x):
+        self.set_positions(x.reshape(-1, 3))
+
+    def get_gradient(self):
+        return -self.get_forces().reshape(-1)
+
+    def get_value(self):
+        return self.get_potential_energy()
+
+    def ndofs(self):
+        return len(self)
 
 # OC20 gas-phase reference energies (eV) from H2O/N2/CO/H2 linear combination
 ATOMIC_REFERENCE_ENERGIES = {
@@ -172,10 +192,13 @@ def batch_relax_w_mlff(
     Returns:
         List of relaxed Atoms (SinglePointCalculator attached) or None per entry on failure.
     """
+    import fairchem.core.common.relaxation.ml_relaxation as _ml_relax_mod
     from fairchem.core.common.relaxation.ml_relaxation import ml_relax
     from fairchem.core.common.relaxation.ase_utils import batch_to_atoms
     from fairchem.core.preprocessing import AtomsToGraphs
     from torch_geometric.data import Batch as PygBatch
+
+    _ml_relax_mod.OptimizableBatch = _PatchedOptimizableBatch
 
     # r_edges=False → OptimizableBatch sets otf_graph=True and rebuilds edges each step
     a2g = AtomsToGraphs(
