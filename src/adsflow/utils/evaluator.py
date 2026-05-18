@@ -28,7 +28,7 @@ def check_validity(atoms: Atoms, catalyst_dist_cutoff: float = 0.75, target_ads_
         dict with keys: vol_ok (bool), cat_dist_ok (bool), ads_dist_ok (bool), is_valid (bool).
     """
     if atoms is None:
-        return {"vol_ok": False, "cat_dist_ok": False, "cat_atom_types_ok": False, "ads_dist_ok": False, "ads_dist_mae": None, "cat_ads_dist_ok": False, "is_valid": False, "is_valid_naive": False}
+        return {"vol_ok": False, "cat_dist_ok": False, "cat_atom_types_ok": False, "ads_dist_ok": False, "cat_ads_dist_ok": False, "is_valid": False, "is_valid_naive": False}
 
     # Volume check # intertatomic distance check
     try:
@@ -52,12 +52,13 @@ def check_validity(atoms: Atoms, catalyst_dist_cutoff: float = 0.75, target_ads_
         ads_dist_ok = bool(ads_dists.min() >= 0.5) # makign this too stringent will remove feasible structures
 
         # comapre to reference structure 
+        """
         num_ads_atoms = ads_mask.sum()
         generated_ads_interatomic_dist = dists[np.ix_(ads_idx, ads_idx)].copy()  # N_ads, N_ads
         np.fill_diagonal(generated_ads_interatomic_dist, 0.0)  # undo inf from line 43; self-dist = 0
         target_ads_interatomic_dist = np.asarray(target_ads_dists)[:num_ads_atoms, :num_ads_atoms]  # N_ads, N_ads
         ads_dist_mae = float(np.abs(target_ads_interatomic_dist - generated_ads_interatomic_dist).mean())
-
+        """
 
         # ========================= 
         # Catalyst metrics 
@@ -100,7 +101,6 @@ def check_validity(atoms: Atoms, catalyst_dist_cutoff: float = 0.75, target_ads_
         "cat_dist_ok": cat_dist_ok,
         "cat_atom_types_ok": cat_atom_types_ok, 
         "cat_ads_dist_ok": cat_ads_dist_ok, 
-        "ads_dist_ok": ads_dist_ok,
         "ads_dist_mae": ads_dist_mae,
         "is_valid": vol_ok and cat_dist_ok and ads_dist_ok and cat_ads_dist_ok and cat_atom_types_ok,
         "is_valid_naive": cat_dist_ok_naive and ads_dist_ok and cat_ads_dist_ok and vol_ok,
