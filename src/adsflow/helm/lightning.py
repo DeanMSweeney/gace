@@ -353,6 +353,7 @@ class LightFlowMatch(LightningModule, Flow):
             file_ext=".vasp",
         )
         cf.build()
+        cf.filter()
         cf.relax()
         for metrics in cf.evaluate():
             for key, val in metrics.items():
@@ -413,6 +414,7 @@ class LightFlowMatch(LightningModule, Flow):
                 file_ext=".traj",
             )
             cf.build()
+            cf.filter()
             cf.relax()
             all_metrics.extend(cf.evaluate())
             all_atoms.extend(cf._all_atoms)

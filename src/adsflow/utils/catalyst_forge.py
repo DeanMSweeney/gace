@@ -50,6 +50,7 @@ class CatalystForge:
 
         self._all_atoms: list[Atoms | None] = []
         self._relaxed_atoms: list[Atoms | None] = []
+        self._validity_results: list[dict] = []
         self._metrics: list[dict] = []
 
     def build(self) -> list[Atoms | None]:
@@ -60,6 +61,14 @@ class CatalystForge:
             atoms = forge_catalyst(self.opt_graph, b, prim_batch, ads_batch)
             self._all_atoms.append(atoms)
         return self._all_atoms
+
+    def filter(self) -> list[dict]:
+        for i, atoms in enumerate(self._all_atoms):
+            result = check_validity(atoms, self.catalyst_dist_cutoff)
+            self._validity_results.append(result)
+            if not result["is_valid"]:
+                self._all_atoms[i] = None
+        return self._validity_results
 
     def relax(self) -> list[Atoms | None]:
         self._relaxed_atoms = [None] * len(self._all_atoms)
@@ -88,10 +97,9 @@ class CatalystForge:
         return self._relaxed_atoms
 
     def evaluate(self) -> list[dict]:
-        for i, (atoms, atoms_rlxd, target_E) in enumerate(
-            zip(self._all_atoms, self._relaxed_atoms, self.binding_energies)
+        for i, (atoms, atoms_rlxd, target_E, result) in enumerate(
+            zip(self._all_atoms, self._relaxed_atoms, self.binding_energies, self._validity_results)
         ):
-            result = check_validity(atoms, self.catalyst_dist_cutoff)
             energy_dict = None
 
             if result["is_valid"] and atoms_rlxd is not None:
