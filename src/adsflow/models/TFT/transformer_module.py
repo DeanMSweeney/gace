@@ -43,7 +43,6 @@ class TransformerModule(nn.Module):
         cross_attention: Whether to use cross-attention layers.
         add_sinusoid_posenc: Whether to add sinusoidal positional encoding.
         concat_combine_input: Whether to concatenate and combine inputs.
-        mask_material_coords: Whether or not material coordinates are masked in forward().
         custom_weight_init: Custom weight initialization method (None, "xavier", "kaiming", "orthogonal", "uniform", "eye", "normal").
             NOTE: "uniform" does not work well.
     """
@@ -66,7 +65,6 @@ class TransformerModule(nn.Module):
         cross_attention: bool = True,
         add_sinusoid_posenc: bool = True,
         concat_combine_input: bool = False,
-        mask_material_coords: bool = True,
         num_rbf: int = 20,
         rbf_max: float = 5.0,
         custom_weight_init: Optional[
@@ -75,9 +73,6 @@ class TransformerModule(nn.Module):
         **kwargs,
     ):
         super().__init__()
-
-        if is_conservative and not jvp_attn:
-            log.warning("JVP Flash Attention is recommended when predicting conservative forces.")
 
         # Coerce `custom_weight_init` to `None` if it is passed as a string
         if isinstance(custom_weight_init, str) and custom_weight_init.lower() == "none":
@@ -90,15 +85,12 @@ class TransformerModule(nn.Module):
         self.comb_input_dim = self.input_dim + self.time_dim
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
-        self.num_aux_layers = num_aux_layers
-        self.num_aux_mlip_layers = num_aux_mlip_layers
         self.implementation = implementation
         self.context_length = context_length
         self.jvp_attn = jvp_attn
         self.cross_attention = cross_attention
         self.add_sinusoid_posenc = add_sinusoid_posenc
         self.concat_combine_input = concat_combine_input
-        self.mask_material_coords = mask_material_coords
         self.custom_weight_init = custom_weight_init
 
         # Embeddings for each the primitive cell
