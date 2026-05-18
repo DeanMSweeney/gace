@@ -188,7 +188,7 @@ def main(cfg: Config) -> None:
         declare(f">>> Primitive atom count: {'fixed at ' + str(n) if n is not None else 'sampling from histogram'} 🧙🏽‍♀️")
         ptst = {"src": cfg.oc20_test}
         test_set = LazyLmdbDataset(ptst)
-        test_set = Subset(test_set, indices=range(100))
+        test_set = Subset(test_set, indices=range(10))
         test_loader = DataLoader(
             dataset=test_set,
             batch_size=cfg.batch_size,
@@ -222,7 +222,7 @@ def main(cfg: Config) -> None:
         variant=cfg.variant,
         optimal_transport=cfg.optimal_transport,
         informed_priors=cfg.informed_priors,
-        operate_on_torus=cfg.operate_on_torus,
+        interpolate_on_torus=cfg.interpolate_on_torus,
         condition_on_binding_E=cfg.condition_on_binding_E,
         standardize_ads_pos=cfg.standardize_ads_pos,
         mode=cfg.mode,
