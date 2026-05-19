@@ -203,6 +203,8 @@ def batch_relax_w_mlff(
     batch = PygBatch.from_data_list(data_list)
 
     try:
+        if not hasattr(batch, "pbc"):
+            _PatchedOptimizableBatch.ignored_changes = {"pbc"}
         optimizable = _PatchedOptimizableBatch(batch.clone(), trainer=calculator.trainer)
         with Silent():
             optimizer = LBFGS(optimizable_batch=optimizable, save_full_traj=False, traj_names=batch.sid)
@@ -220,6 +222,8 @@ def batch_relax_w_mlff(
     except Exception as e:
         logging.warning(f"batch_relax_w_mlff failed: {e}")
         return [None] * len(atoms_list)
+    finally:
+        _PatchedOptimizableBatch.ignored_changes = {}
 
 
 _CSV_DECIMALS = 6
