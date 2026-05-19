@@ -345,16 +345,12 @@ class LightFlowMatch(LightningModule, Flow):
             batch_idx=batch_idx,
             calculator=self._mlff_calculator,
             run_mlff=self.run_mlff,
-            batched_relaxation=self.batched_relaxation,
             config_vasp=self.config_vasp,
             catalyst_dist_cutoff=self.catalyst_dist_cutoff,
             gen_POS=self.gen_POS,
             rlxd_POS=self.rlxd_POS,
             file_ext=".vasp",
         )
-        cf.build()
-        cf.filter()
-        cf.relax()
         for metrics in cf.evaluate():
             for key, val in metrics.items():
                 if key == "binding_E_diff":
@@ -406,16 +402,12 @@ class LightFlowMatch(LightningModule, Flow):
                 batch_idx=batch_idx,
                 calculator=self._mlff_calculator,
                 run_mlff=self.run_mlff,
-                batched_relaxation=self.batched_relaxation,
                 config_vasp=self.config_vasp,
                 catalyst_dist_cutoff=self.catalyst_dist_cutoff,
                 gen_POS=self.gen_POS,
                 rlxd_POS=self.rlxd_POS,
                 file_ext=".traj",
             )
-            cf.build()
-            cf.filter()
-            cf.relax()
             all_metrics.extend(cf.evaluate())
             all_atoms.extend(cf._all_atoms)
 
