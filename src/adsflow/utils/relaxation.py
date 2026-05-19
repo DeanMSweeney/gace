@@ -192,15 +192,10 @@ def batch_relax_w_mlff(
     Returns:
         List of relaxed Atoms (SinglePointCalculator attached) or None per entry on failure.
     """
-    import fairchem.core.common.relaxation.ml_relaxation as _ml_relax_mod
-    from fairchem.core.common.relaxation.ml_relaxation import ml_relax
-    from fairchem.core.common.relaxation.ase_utils import batch_to_atoms
+    from fairchem.core.common.relaxation.optimizers.lbfgs_torch import LBFGS
     from fairchem.core.preprocessing import AtomsToGraphs
     from torch_geometric.data import Batch as PygBatch
 
-    _ml_relax_mod.OptimizableBatch = _PatchedOptimizableBatch
-
-    # r_edges=False → OptimizableBatch sets otf_graph=True and rebuilds edges each step
     a2g = AtomsToGraphs(
         r_energy=False, r_forces=False, r_distances=False, r_edges=False, r_fixed=True
     )
@@ -208,22 +203,17 @@ def batch_relax_w_mlff(
     batch = PygBatch.from_data_list(data_list)
 
     try:
+        optimizable = _PatchedOptimizableBatch(batch.clone(), trainer=calculator.trainer)
         with Silent():
-            relaxed_batch = ml_relax(
-                batch=batch,
-                model=calculator.trainer,
-                steps=steps,
-                fmax=fmax,
-            )
-        results = calculator.trainer.predict(relaxed_batch, per_image=False, disable_tqdm=True)
-        relaxed_atoms = batch_to_atoms(relaxed_batch, results=results)
+            optimizer = LBFGS(optimizable_batch=optimizable, save_full_traj=False, traj_names=batch.sid)
+            optimizer.run(fmax=fmax, steps=steps)
 
-        natoms = relaxed_batch.natoms.tolist()
-        forces_per_structure = torch.split(results["forces"], natoms)
-        for i, f in enumerate(forces_per_structure):
-            max_force = f.norm(dim=-1).max().item()
-            if max_force > fmax:
-                logging.warning(f"structure {i} did not converge: max_force={max_force:.4f} > fmax={fmax}")
+        relaxed_atoms = optimizable.get_atoms_list()
+
+        max_forces = optimizable.get_max_forces()
+        for i, mf in enumerate(max_forces.tolist()):
+            if mf > fmax:
+                logging.warning(f"structure {i} did not converge: max_force={mf:.4f} > fmax={fmax}")
                 relaxed_atoms[i] = None
 
         return relaxed_atoms
