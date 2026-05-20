@@ -435,13 +435,14 @@ class Flow():
         # z1 only pertains to the primitive cell 
         z1 = (data.atomic_numbers.long() - 1).unsqueeze(1)  # (N_prim, 1)
 
-        # Prior: random atomic number indices (much more efficient than one-hot)
-        z0 = torch.randint(low=0, high=NUM_CLASSES, size=(z1.size(0), 1), device=device)  # N, 1
+        # Prior: mask token = index NUM_CLASSES (element number 103)
+        z0 = torch.ones_like(z1) * NUM_CLASSES  # N, 1
+        #z0 = torch.randint(low=0, high=NUM_CLASSES, size=(z1.size(0), 1), device=device)  # N, 1
 
-        # Convert to one-hot after alignment
+        # Convert to one-hot after alignment — both use NUM_CLASSES + 1 so shapes match
         # F.one_hot expects (N,) input, so squeeze the (N, 1) tensors
-        z0_hot = F.one_hot(z0.squeeze(1), num_classes=NUM_CLASSES)      # N, NUM_CLASSES
-        z1_hot = F.one_hot(z1.squeeze(1), num_classes=NUM_CLASSES)      # N, NUM_CLASSES
+        z0_hot = F.one_hot(z0.squeeze(1), num_classes=NUM_CLASSES + 1)  # N, 103
+        z1_hot = F.one_hot(z1.squeeze(1), num_classes=NUM_CLASSES + 1)  # N, 103
         
         # Sample per-graph interpolation time
         t_z_per_graph = t
