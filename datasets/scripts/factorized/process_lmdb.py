@@ -39,7 +39,7 @@ from tqdm import tqdm
 # Allow imports from src/
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "src"))
 
-from adsflow.utils.catflow_builders.data_processor import process_sample
+from gace.utils.catflow_builders.data_processor import process_sample
 
 
 def _worker(raw: bytes) -> bytes:

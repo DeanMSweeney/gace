@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import torch
 from tqdm import tqdm
-from adsflow.utils.lmdb_loader import LazyLmdbDataset
+from gace.utils.lmdb_loader import LazyLmdbDataset
 
 
 class AxisStats:
