@@ -308,6 +308,31 @@ def main(cfg: Config) -> None:
         if not any(type(f).__name__ == "_ZatomFinder" for f in sys.meta_path):
             sys.meta_path.insert(0, _ZatomFinder())
 
+        class _AdsflowModule(types.ModuleType):
+            __path__ = []
+            def __getattr__(self, name):
+                if name.startswith("__") and name.endswith("__"):
+                    raise AttributeError(name)
+                cls = type(name, (), {"__module__": self.__name__})
+                setattr(self, name, cls)
+                return cls
+
+        class _AdsflowFinder:
+            def find_module(self, fullname, path=None):
+                if fullname == "adsflow" or fullname.startswith("adsflow."):
+                    return self
+            def load_module(self, fullname):
+                if fullname in sys.modules:
+                    return sys.modules[fullname]
+                mod = _AdsflowModule(fullname)
+                mod.__package__ = fullname
+                mod.__file__ = "<adsflow-mock>"
+                sys.modules[fullname] = mod
+                return mod
+
+        if not any(type(f).__name__ == "_AdsflowFinder" for f in sys.meta_path):
+            sys.meta_path.insert(0, _AdsflowFinder())
+
         checkpoint = torch.load(cfg.ckpt_path, map_location="cpu")
 
         # Zatom saves its model at self.model.model (two levels), giving keys
