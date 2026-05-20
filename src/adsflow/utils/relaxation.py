@@ -20,6 +20,26 @@ from fairchem.core import OCPCalculator
 from huggingface_hub import hf_hub_download
 
 from adsflow.utils.atoms import data_to_atoms
+from fairchem.core.common.relaxation.optimizable import OptimizableBatch
+
+
+class _PatchedOptimizableBatch(OptimizableBatch):
+    """Adds the ASE >= 3.23 Optimizable abstract methods missing from fairchem's OptimizableBatch."""
+
+    def get_x(self):
+        return self.get_positions().reshape(-1)
+
+    def set_x(self, x):
+        self.set_positions(x.reshape(-1, 3))
+
+    def get_gradient(self):
+        return -self.get_forces().reshape(-1)
+
+    def get_value(self):
+        return self.get_potential_energy()
+
+    def ndofs(self):
+        return len(self)
 
 # OC20 gas-phase reference energies (eV) from H2O/N2/CO/H2 linear combination
 ATOMIC_REFERENCE_ENERGIES = {
@@ -155,48 +175,60 @@ def relax_w_mlff(
     return atoms
 
 
+def batch_relax_w_mlff(
+    atoms_list: list[Atoms],
+    calculator: OCPCalculator,
+    fmax: float = 0.05,
+    steps: int = 200,
+) -> list[Optional[Atoms]]:
+    """Relax a list of structures in parallel using fairchem's batched LBFGS optimizer.
+
+    Args:
+        atoms_list: ASE Atoms objects to relax.
+        calculator: OCPCalculator wrapping the MLFF trainer.
+        fmax: Force convergence criterion (eV/Å).
+        steps: Max optimisation steps.
+
+    Returns:
+        List of relaxed Atoms (SinglePointCalculator attached) or None per entry on failure.
+    """
+    from fairchem.core.common.relaxation.optimizers.lbfgs_torch import LBFGS
+    from fairchem.core.preprocessing import AtomsToGraphs
+    from torch_geometric.data import Batch as PygBatch
+
+    a2g = AtomsToGraphs(
+        r_energy=False, r_forces=False, r_distances=False, r_edges=False, r_fixed=True
+    )
+    data_list = [a2g.convert(atoms, sid=i) for i, atoms in enumerate(atoms_list)]
+    batch = PygBatch.from_data_list(data_list)
+
+    try:
+        if not hasattr(batch, "pbc"):
+            _PatchedOptimizableBatch.ignored_changes = {"pbc"}
+        optimizable = _PatchedOptimizableBatch(batch.clone(), trainer=calculator.trainer)
+        with Silent():
+            optimizer = LBFGS(optimizable_batch=optimizable, save_full_traj=False, traj_names=batch.sid)
+            optimizer.run(fmax=fmax, steps=steps)
+
+        relaxed_atoms = optimizable.get_atoms_list()
+
+        max_forces = optimizable.get_max_forces()
+        for i, mf in enumerate(max_forces.tolist()):
+            if mf > fmax:
+                logging.warning(f"structure {i} did not converge: max_force={mf:.4f} > fmax={fmax}")
+                relaxed_atoms[i] = None
+
+        return relaxed_atoms
+    except Exception as e:
+        logging.warning(f"batch_relax_w_mlff failed: {e}")
+        return [None] * len(atoms_list)
+    finally:
+        _PatchedOptimizableBatch.ignored_changes = {}
+
+
 _CSV_DECIMALS = 6
 _FMT = f".{_CSV_DECIMALS}f"
 
 
 def _fmt(v: Optional[float]) -> str:
     return format(v, _FMT) if v is not None else ""
-
-
-def relax_struc(
-    atoms: Atoms,
-    calculator: OCPCalculator,
-    config_vasp: bool = False,
-) -> tuple:
-    """
-    Post-generation relaxation step.
-
-    Applies MLFF relaxation.
-
-    Args:
-        atoms: ASE Atoms (slab + adsorbate; tags 1=slab, 2=adsorbate)
-        calculator: OCP calculator with loaded MLFF model
-        run_mlff: Whether to run MLFF relaxation
-        config_vasp: Whether to configure VASP DFT input files
-
-    Returns:
-        (atoms_relaxed, energy_dict)
-    """
-
-    atoms_relaxed = relax_w_mlff(
-        atoms=atoms,
-        calculator=calculator,
-        fmax=0.05,
-        steps=200,
-        optimizer="BFGS",
-    )
-
-    try:
-        E_slab_ads = atoms_relaxed.get_potential_energy() 
-
-        return atoms_relaxed, {
-            "computed_binding_E": E_slab_ads,
-        }
-    except Exception as e:
-        logging.warning(f">>> Failed to calculate binding energy due to failed relaxation 😢 {e}")
-        return atoms_relaxed, None

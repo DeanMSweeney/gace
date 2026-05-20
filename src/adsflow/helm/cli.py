@@ -62,10 +62,13 @@ from fairchem.core.preprocessing.atoms_to_graphs import AtomsToGraphs
 import ase
 import ase.io
 
+# logging 
+import logging
+
 # Decorator to print model/training config only at rank 0 (main process in distributed training)
 @rank_zero_only
 def declare(statement) -> None:
-    print(statement)
+    logging.info(statement)
     return 
 
 def main(cfg: Config) -> None:
@@ -200,8 +203,8 @@ def main(cfg: Config) -> None:
     # Build Data object from adsorbate molecule POSCAR + target binding energy
     elif cfg.mode == "generate" and cfg.sampler_cfg.in_POS:
         n = cfg.sampler_cfg.get("num_prim_atoms", None)
-        declare(">>> Activated Generation mode with user adsorbate input")
-        declare(f">>> Primitive atom count: {'fixed at ' + str(n) if n is not None else 'sampling from histogram'} 🧙🏽‍♀️")
+        declare("Activated Generation mode with user adsorbate input")
+        declare(f"Primitive atom count: {'fixed at ' + str(n) if n is not None else 'sampling from histogram'} 🧙🏽‍♀️")
         mol_atoms = ase.io.read(cfg.sampler_cfg.in_POS)
         initial_graph = build_graph_from_atoms(
             mol_atoms=mol_atoms,
@@ -332,7 +335,7 @@ def main(cfg: Config) -> None:
                 for key in load_result.unexpected_keys:
                     print(f"  [?] {key}")
         
-        declare(">>> Model weights initialized. Training/Eval will proceed.")
+        declare("Model weights initialized. Training/Eval will proceed.")
         ckpt_path_for_trainer = None
 
 

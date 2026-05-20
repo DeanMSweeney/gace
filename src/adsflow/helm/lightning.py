@@ -17,13 +17,11 @@ from transformers import get_cosine_schedule_with_warmup, get_polynomial_decay_s
 from tqdm import tqdm
 
 from adsflow.utils.path import Flow
-from adsflow.utils.relaxation import relax_struc, Silent, _fmt
+from adsflow.utils.relaxation import Silent
 from fairchem.core import OCPCalculator
-from adsflow.utils.atoms import write_strucs
 from adsflow.utils.tft.tft_wrapper import PyGToTensorDict
-from adsflow.utils.builder import forge_catalyst, sample_prim_atom_counts
-from adsflow.utils.evaluator import check_validity
-from adsflow.utils.processing import process_sample
+from adsflow.utils.builder import sample_prim_atom_counts
+from adsflow.utils.catalyst_forge import CatalystForge
 import ase.io
 
 from typing import Optional, Literal, Union, Tuple
@@ -87,6 +85,7 @@ class LightFlowMatch(LightningModule, Flow):
             interpolate_on_torus: bool=False,
             num_integration_steps: int=1,
             run_mlff: bool=False,
+            batched_relaxation: bool=True,
             mlff_checkpoint: Optional[str]=None,
             accelerator: str="gpu",
             seed: int=42,
@@ -133,6 +132,7 @@ class LightFlowMatch(LightningModule, Flow):
         self.informed_priors = informed_priors
         self.interpolate_on_torus = interpolate_on_torus
         self.run_mlff = run_mlff
+        self.batched_relaxation = batched_relaxation
         self.accelerator = accelerator
         self.seed = seed
         self.num_prim_atoms = num_prim_atoms
@@ -336,28 +336,27 @@ class LightFlowMatch(LightningModule, Flow):
 
         opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts,)
 
-        prim_batch = opt_graph.batch[opt_graph.tags == 1]
-        ads_batch  = opt_graph.batch[opt_graph.tags == 2]
-        num_graphs = int(opt_graph.batch.max().item()) + 1
+        B = int(opt_graph.batch.max().item()) + 1
+        binding_energies = [data.ads_binding_energy[b].item() for b in range(B)]
 
-        for b in range(num_graphs):
-            atoms = forge_catalyst(opt_graph, b, prim_batch, ads_batch)
-
-            if atoms is not None:
-                target_ads_dists = opt_graph.ads_pairwise_dist[ads_batch == b].cpu().numpy()
-                _, metrics = process_sample(
-                    atoms, target_ads_dists, graph_idx=b, batch_idx=batch_idx,
-                    calculator=self._mlff_calculator, run_mlff=self.run_mlff,
-                    config_vasp=self.config_vasp,
-                    catalyst_dist_cutoff=self.catalyst_dist_cutoff,
-                    gen_POS=self.gen_POS, rlxd_POS=self.rlxd_POS,
-                    target_binding_E=data.ads_binding_energy[b].item(), file_ext=".vasp",
-                )
-                for key, val in metrics.items():
-                    if key == "binding_E_diff":
-                        self._test_binding_E_diffs.append(val)
-                    else:
-                        self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
+        cf = CatalystForge(
+            opt_graph=opt_graph,
+            binding_energies=binding_energies,
+            batch_idx=batch_idx,
+            calculator=self._mlff_calculator,
+            run_mlff=self.run_mlff,
+            config_vasp=self.config_vasp,
+            catalyst_dist_cutoff=self.catalyst_dist_cutoff,
+            gen_POS=self.gen_POS,
+            rlxd_POS=self.rlxd_POS,
+            file_ext=".vasp",
+        )
+        for metrics in cf.evaluate():
+            for key, val in metrics.items():
+                if key == "binding_E_diff":
+                    self._test_binding_E_diffs.append(val)
+                else:
+                    self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
 
         return
 
@@ -397,24 +396,20 @@ class LightFlowMatch(LightningModule, Flow):
             counts = sample_prim_atom_counts(1, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
             opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts,)
 
-            prim_batch = opt_graph.batch[opt_graph.tags == 1]
-            ads_batch  = opt_graph.batch[opt_graph.tags == 2]
-
-            atoms = forge_catalyst(opt_graph, 0, prim_batch, ads_batch)
-
-            if atoms is not None:
-                target_ads_dists = opt_graph.ads_pairwise_dist[ads_batch == 0].cpu().numpy()
-                _, metrics = process_sample(
-                    atoms, target_ads_dists, graph_idx=sample_idx, batch_idx=batch_idx,
-                    calculator=self._mlff_calculator, run_mlff=self.run_mlff,
-                    config_vasp=self.config_vasp, 
-                    catalyst_dist_cutoff=self.catalyst_dist_cutoff,
-                    gen_POS=self.gen_POS, rlxd_POS=self.rlxd_POS,
-                    target_binding_E=self.target_binding_energy, file_ext=".traj",
-                )
-                all_metrics.append(metrics)
-
-            all_atoms.append(atoms)
+            cf = CatalystForge(
+                opt_graph=opt_graph,
+                binding_energies=[self.target_binding_energy],
+                batch_idx=batch_idx,
+                calculator=self._mlff_calculator,
+                run_mlff=self.run_mlff,
+                config_vasp=self.config_vasp,
+                catalyst_dist_cutoff=self.catalyst_dist_cutoff,
+                gen_POS=self.gen_POS,
+                rlxd_POS=self.rlxd_POS,
+                file_ext=".traj",
+            )
+            all_metrics.extend(cf.evaluate())
+            all_atoms.extend(cf._all_atoms)
 
         if all_metrics:
             keys = all_metrics[0].keys()
