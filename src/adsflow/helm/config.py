@@ -111,25 +111,6 @@ class SamplerConfig:
 
     # ==================== ODE Solver Settings ====================
 
-    rtol: float = 1e-7
-    """Relative tolerance for adaptive ODE solver (controls accuracy)
-    Smaller values → higher accuracy but slower integration
-    """
-
-    atol: float = 1e-9
-    """Absolute tolerance for adaptive ODE solver (controls accuracy)
-    Smaller values → higher accuracy but slower integration
-    """
-
-    ode_method: str = "dopri5"
-    """
-    ODE integration method for sampling (torchdiffeq):
-    - "dopri5": Dormand-Prince 5th order (adaptive, recommended)
-    - "euler": Forward Euler (fast but inaccurate)
-    - "rk4": 4th order Runge-Kutta (fixed step, accurate)
-    - "adaptive_heun": 2nd order adaptive (good speed/accuracy tradeoff)
-    """
-
     num_integration_steps: int = 100
     """Number of integration steps for ODE solver (for inference)
     - 1: single-step integration
@@ -144,13 +125,13 @@ class SamplerConfig:
     Output files are indexed as {batch_idx}_{sample_idx}_{b}.vasp.
     """
 
-    target_binding_E: Optional[float] = None
+    target_binding_energy: Optional[float] = None
     """Target adsorption binding energy (eV) for structure generation.
     Passed to the model as a conditioning signal during forge sampling."""
 
-    num_prim_atoms: Optional[int] = None
+    num_prim_atoms: Optional[int] = 4
     """Number of primitive atoms per graph to use during forge sampling.
-    If None, uses the atom count from the data. Set to e.g. 3 to force smaller unit cells."""
+    If None, uses the atom count from the data. Set to e.g. 4 to force smaller unit cells."""
 
     # ==================== Structure Generation/Output ====================
 
@@ -172,10 +153,6 @@ class SamplerConfig:
 
     # ==================== MLFF Relaxation ====================
 
-    refine_final: bool = False
-    """Whether to run a final refinement forward pass at t=1 after the Euler loop.
-    Uses the model's endpoint prediction directly rather than the Euler-integrated state."""
-
     run_mlff: bool = False
     """Whether to run MLFF relaxation after generation"""
 
@@ -184,9 +161,9 @@ class SamplerConfig:
 
     # ==================== Evaluation Criteria ================
 
-    covalent_radii_scale: float = 0.75
-    """Scale factor applied to summed covalent radii for the atom-clash distance check (DIST_METHOD=2).
-    A pair is flagged as clashing if its distance is below covalent_radii_scale * (r_i + r_j).
+    catalyst_dist_cutoff: float = 0.75
+    """Scale factor applied to summed covalent radii for the atom-clash distance check.
+    A pair is flagged as clashing if its distance is below catalyst_dist_cutoff * (r_i + r_j).
     Lower values are more permissive; higher values are stricter."""
 
 
@@ -374,7 +351,7 @@ class Config:
     Whether to use informed priors for the noise x0 (forge variant only).
     """
 
-    operate_on_torus: bool = False
+    interpolate_on_torus: bool = False
     """
     Whether to apply the minimum image convention (MIC) to the velocity u_x
     for catalyst fractional coordinates. When True, u_x is wrapped to [-0.5, 0.5)

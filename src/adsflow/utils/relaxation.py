@@ -3,7 +3,7 @@ import logging
 import os
 import shutil
 import subprocess
-import sys  
+import sys
 
 import torch
 from torch import Tensor
@@ -17,7 +17,17 @@ from ase import Atoms
 from ase.optimize import BFGS, LBFGS, FIRE
 from fairchem.core import OCPCalculator
 
+from huggingface_hub import hf_hub_download
+
 from adsflow.utils.atoms import data_to_atoms
+
+# OC20 gas-phase reference energies (eV) from H2O/N2/CO/H2 linear combination
+ATOMIC_REFERENCE_ENERGIES = {
+    "H": -3.477,
+    "N": -8.083,
+    "O": -7.204,
+    "C": -7.282,
+}
 
 class Silent:
     def __enter__(self):
@@ -103,7 +113,7 @@ def config_DFT(
     finally:
         # Always return to the original directory
         os.chdir(original_dir)
-    
+   
 def relax_w_mlff(
     atoms: Atoms,
     calculator: OCPCalculator,
@@ -139,53 +149,54 @@ def relax_w_mlff(
     opt = opt_class(atoms, logfile=None)
     converged = opt.run(fmax=fmax, steps=steps)
 
-    return atoms, converged, opt.nsteps
+    if bool(converged) == False:
+        atoms = None
+
+    return atoms
+
+
+_CSV_DECIMALS = 6
+_FMT = f".{_CSV_DECIMALS}f"
+
+
+def _fmt(v: Optional[float]) -> str:
+    return format(v, _FMT) if v is not None else ""
 
 
 def relax_struc(
     atoms: Atoms,
-    run_mlff: bool = False,
+    calculator: OCPCalculator,
     config_vasp: bool = False,
-    mlff_checkpoint: Optional[str] = None,
-    accelerator: str = "gpu",
-    seed: int = 42,
-) -> Data:
+) -> tuple:
     """
     Post-generation relaxation step.
 
-    Applies either MLFF relaxation or configures DFT input files depending
-    on which option is enabled. If neither is set, returns opt_graph unchanged.
+    Applies MLFF relaxation.
 
     Args:
-        opt_graph: Graph with pos_generated set to the flow-matched positions
+        atoms: ASE Atoms (slab + adsorbate; tags 1=slab, 2=adsorbate)
+        calculator: OCP calculator with loaded MLFF model
         run_mlff: Whether to run MLFF relaxation
         config_vasp: Whether to configure VASP DFT input files
-        mlff_checkpoint: MLFF model checkpoint name (required if run_mlff=True)
-        accelerator: Device type ("gpu" or "cpu") for OCPCalculator
-        seed: Random seed for OCPCalculator
-        gen_POS: Path to generated structure file (required if config_vasp=True)
-        in_POS: Path to initial structure file
-        rlxd_POS: Path to relaxed structure file
 
     Returns:
-        opt_graph with pos_generated updated (MLFF) or DFT inputs written (config_vasp)
+        (atoms_relaxed, energy_dict)
     """
-    if run_mlff:
-        with Silent():
-            calculator = OCPCalculator(
-                model_name=mlff_checkpoint,
-                local_cache="./mlff_checkpoint_cache",
-                cpu=(accelerator == "cpu"),
-                seed=seed,
-            )
-            atoms_relaxed, _, _ = relax_w_mlff(
-                atoms=atoms,
-                calculator=calculator,
-                fmax=0.05,
-                steps=200,
-                optimizer="BFGS",
-            )
-    else:
-        return None
 
-    return atoms_relaxed
+    atoms_relaxed = relax_w_mlff(
+        atoms=atoms,
+        calculator=calculator,
+        fmax=0.05,
+        steps=200,
+        optimizer="BFGS",
+    )
+
+    try:
+        E_slab_ads = atoms_relaxed.get_potential_energy() 
+
+        return atoms_relaxed, {
+            "computed_binding_E": E_slab_ads,
+        }
+    except Exception as e:
+        logging.warning(f">>> Failed to calculate binding energy due to failed relaxation 😢 {e}")
+        return atoms_relaxed, None

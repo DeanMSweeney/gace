@@ -1,5 +1,6 @@
 import numpy as np
 from ase import Atoms
+from ase.constraints import FixAtoms
 from pymatgen.core import Structure, Lattice
 from pymatgen.core.periodic_table import DummySpecie, Element
 from pymatgen.io.ase import AseAtomsAdaptor
@@ -151,7 +152,7 @@ def build_slab_adsorbate(
     Returns:
         ASE Atoms object of the full slab + adsorbate system.
 
-    Adapted from CatFlow (scripts/sampling/assemble.py).
+    Adapted from CatFlow (Catflow/scripts/sampling/assemble.py).
     """
     adaptor = AseAtomsAdaptor()
 
@@ -259,6 +260,8 @@ def forge_catalyst(
             ads_atomic_numbers=opt_graph.ads_atomic_numbers[ads_batch == b] + 1,
             vacuum=15.0,
         )
+
+        atoms.set_constraint(FixAtoms(atoms.get_tags() == 0))
 
         return atoms
 

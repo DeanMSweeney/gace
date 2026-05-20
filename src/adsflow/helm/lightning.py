@@ -1,4 +1,5 @@
 import contextlib
+import csv
 import json
 import logging
 import os
@@ -16,11 +17,13 @@ from transformers import get_cosine_schedule_with_warmup, get_polynomial_decay_s
 from tqdm import tqdm
 
 from adsflow.utils.path import Flow
-from adsflow.utils.relaxation import relax_struc
+from adsflow.utils.relaxation import relax_struc, Silent, _fmt
+from fairchem.core import OCPCalculator
 from adsflow.utils.atoms import write_strucs
 from adsflow.utils.tft.tft_wrapper import PyGToTensorDict
 from adsflow.utils.builder import forge_catalyst, sample_prim_atom_counts
 from adsflow.utils.evaluator import check_validity
+from adsflow.utils.processing import process_sample
 import ase.io
 
 from typing import Optional, Literal, Union, Tuple
@@ -72,31 +75,25 @@ class LightFlowMatch(LightningModule, Flow):
             model,
             variant: str="forge",
             mode: str="debug",
-            rtol: float = 1e-7,
-            atol: float = 1e-9,
-            ode_method: str = "dopri5",
             track_grad_norms: bool=False,
             in_POS=None,
             gen_POS=None,
             rlxd_POS=None,
             config_vasp: bool=False,
-            threshold: float=0.20,
             x_matching: Literal["flow", "endpoint"]="flow",
             schedule_type: Literal["linear", "cosine"]="linear",
             optimal_transport: bool=False,
             informed_priors: bool=True,
-            operate_on_torus: bool=False,
-            write_eval_metrics: bool=False,
+            interpolate_on_torus: bool=False,
             num_integration_steps: int=1,
             run_mlff: bool=False,
             mlff_checkpoint: Optional[str]=None,
             accelerator: str="gpu",
             seed: int=42,
             num_prim_atoms: Optional[int]=None,
-            refine_final: bool=False,
-            target_binding_E: Optional[float]=None,
+            target_binding_energy: Optional[float]=None,
             num_generated_samples: int=1,
-            covalent_radii_scale: float=0.75,
+            catalyst_dist_cutoff: float=0.75,
             condition_on_binding_E: bool=True,
             standardize_ads_pos: bool=False,
             ads_pos_mean: list = [0.02587131, -0.69517581, 0.91811687],
@@ -118,9 +115,7 @@ class LightFlowMatch(LightningModule, Flow):
         self.loss_fn = nn.MSELoss()  # Base loss function (not directly used, see criterion)
 
         # ODE solver configuration (for inference/testing)
-        self.rtol = rtol
-        self.atol = atol
-        self.ode_method = ode_method
+        self.num_integration_steps = num_integration_steps
 
         # Monitoring and output configuration
         self.track_grad_norms = track_grad_norms
@@ -129,24 +124,31 @@ class LightFlowMatch(LightningModule, Flow):
         self.rlxd_POS = rlxd_POS
 
         self.config_vasp = config_vasp
-        self.threshold = threshold
-        self.covalent_radii_scale = covalent_radii_scale
+        self.catalyst_dist_cutoff = catalyst_dist_cutoff
 
         # Flow matching configuration
         self.x_matching = x_matching  # "flow" or "endpoint"
         self.schedule_type = schedule_type  # "linear" or "cosine"
         self.optimal_transport = optimal_transport
         self.informed_priors = informed_priors
-        self.operate_on_torus = operate_on_torus
-        self.write_eval_metrics = write_eval_metrics
-        self.num_integration_steps = num_integration_steps
+        self.interpolate_on_torus = interpolate_on_torus
         self.run_mlff = run_mlff
         self.accelerator = accelerator
         self.seed = seed
         self.num_prim_atoms = num_prim_atoms
-        self.refine_final = refine_final
         self.mlff_checkpoint = mlff_checkpoint
-        self.target_binding_E = target_binding_E
+
+        self._mlff_calculator = None
+        if run_mlff and mlff_checkpoint is not None:
+            with Silent():
+                self._mlff_calculator = OCPCalculator(
+                    model_name=mlff_checkpoint,
+                    local_cache="./mlff_checkpoint_cache",
+                    cpu=(accelerator == "cpu"),
+                    seed=seed,
+                )
+
+        self.target_binding_energy = target_binding_energy
         self.num_generated_samples = num_generated_samples
         self.condition_on_binding_E = condition_on_binding_E
         self.standardize_ads_pos = standardize_ads_pos
@@ -159,7 +161,8 @@ class LightFlowMatch(LightningModule, Flow):
         _hist_path = os.path.join(os.path.dirname(__file__), "primitive_atom_distribution.json")
         with open(_hist_path) as f:
             hist = json.load(f)["prim_slab_num_atoms_hist"]
-        self.prim_atoms_hist = torch.tensor(hist, dtype=torch.float32)
+        #self.prim_atoms_hist = torch.tensor(hist, dtype=torch.float32)
+        self.register_buffer("prim_atoms_hist", torch.tensor(hist, dtype=torch.float32))
 
         # Diagnostic mode: detailed loss analysis for model development
         self._write_f_u = False
@@ -189,7 +192,7 @@ class LightFlowMatch(LightningModule, Flow):
 
         t = t_prim.data["t"].squeeze(-1)  # (B,)
 
-        pred_prim, pred_ads, _ = self.model(
+        pred_prim, pred_ads  = self.model(
             x_prim=(
                 x_prim.data["atomic_numbers_hot"],     # (B, M, 118)
                 x_prim.data["frac_coords"],            # (B, M, 3)
@@ -240,7 +243,7 @@ class LightFlowMatch(LightningModule, Flow):
         """
         # Generate interpolated training data at random time t.
         # path() stores supervision targets on the returned data object.
-        data = self.path(input_graph=input_graph) 
+        data = self.build_path(input_graph=input_graph) 
 
         # Model predicts velocity field (or dict for forge with z_logits)
         if self.variant == "forge":
@@ -327,7 +330,11 @@ class LightFlowMatch(LightningModule, Flow):
         t = torch.linspace(0., 1, self.num_integration_steps, device=data.pos.device, dtype=data.pos.dtype)
         B = int(data.batch.max().item()) + 1
         counts = sample_prim_atom_counts(B, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
-        opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts, refine_final=self.refine_final)
+        
+        if self.target_binding_energy:
+            data.ads_binding_energy = torch.ones(B, device=data.pos.device, dtype=data.pos.dtype) * self.target_binding_energy
+
+        opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts,)
 
         prim_batch = opt_graph.batch[opt_graph.tags == 1]
         ads_batch  = opt_graph.batch[opt_graph.tags == 2]
@@ -336,58 +343,30 @@ class LightFlowMatch(LightningModule, Flow):
         for b in range(num_graphs):
             atoms = forge_catalyst(opt_graph, b, prim_batch, ads_batch)
 
-            if atoms is not None: 
-                atoms_rlxd = relax_struc(
-                        atoms=atoms,
-                        run_mlff=self.run_mlff,
-                        config_vasp=self.config_vasp,
-                        mlff_checkpoint=self.mlff_checkpoint,
-                        accelerator=self.accelerator,
-                        seed=self.seed,
-                    )
-                
-                atoms_rlxd = atoms_rlxd if self.run_mlff else atoms
-                target_ads_dists = opt_graph.ads_pairwise_dist[ads_batch == b].cpu().numpy()  # (N_ads_b, 15)
-                result = check_validity(atoms_rlxd, self.covalent_radii_scale, target_ads_dists=target_ads_dists)
-
-                metrics = {
-                    "vol_ok":      float(result["vol_ok"]),
-                    "cat_dist_ok":     float(result["cat_dist_ok"]),
-                    "ads_dist_ok": float(result["ads_dist_ok"]),
-                    "sample_is_valid":    float(result["is_valid"]),
-                }
-
-                if result["ads_dist_mae"] is not None: 
-                    metrics["ads_dist_mae"] = float(result["ads_dist_mae"])
- 
+            if atoms is not None:
+                target_ads_dists = opt_graph.ads_pairwise_dist[ads_batch == b].cpu().numpy()
+                _, metrics = process_sample(
+                    atoms, target_ads_dists, graph_idx=b, batch_idx=batch_idx,
+                    calculator=self._mlff_calculator, run_mlff=self.run_mlff,
+                    config_vasp=self.config_vasp,
+                    catalyst_dist_cutoff=self.catalyst_dist_cutoff,
+                    gen_POS=self.gen_POS, rlxd_POS=self.rlxd_POS,
+                    target_binding_E=data.ads_binding_energy[b].item(), file_ext=".vasp",
+                )
                 for key, val in metrics.items():
-                    self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
+                    if key == "binding_E_diff":
+                        self._test_binding_E_diffs.append(val)
+                    else:
+                        self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
 
-                if self.gen_POS and result["is_valid"]:
-                    os.makedirs(self.gen_POS, exist_ok=True)
-                    ase.io.write(
-                        os.path.join(self.gen_POS, f'{batch_idx}_{b}.vasp'),
-                        atoms,
-                        format='vasp',
-                    )
+        return
 
-                if self.rlxd_POS and self.run_mlff and result["is_valid"]:
-                    os.makedirs(self.rlxd_POS, exist_ok=True)
-                    ase.io.write(
-                        os.path.join(self.rlxd_POS, f'{batch_idx}_{b}.vasp'),
-                        atoms_rlxd,
-                        format='vasp',
-                    )
+    def on_test_epoch_start(self):
+        self._test_binding_E_diffs = []
 
-                if batch_idx == 2 and b == 13: 
-                    print(opt_graph.ref_ads_pos[ads_batch == b])
-                    print(opt_graph.ads_atomic_numbers[ads_batch == b])
-                
-                if batch_idx == 3 and b == 3: 
-                    print(opt_graph.ref_ads_pos[ads_batch == b])
-                    print(opt_graph.ads_atomic_numbers[ads_batch == b])
-
-        return   
+    def on_test_epoch_end(self):
+        if self._test_binding_E_diffs:
+            self.log("median_binding_E_diff", float(np.median(self._test_binding_E_diffs)))
 
     def predict_step(self, data: Data, batch_idx: int):
         """Generate catalyst structures conditioned on adsorbate molecule and target binding energy.
@@ -403,21 +382,20 @@ class LightFlowMatch(LightningModule, Flow):
         Returns:
             List of ASE Atoms objects (one per graph in the batch).
         """
-        if self.target_binding_E is not None:
+        if self.target_binding_energy is not None:
             data.ads_binding_energy = torch.tensor(
-                [self.target_binding_E], device=data.pos.device, dtype=torch.float32,
+                [self.target_binding_energy], device=data.pos.device, dtype=torch.float32,
             )
+        else:
+            raise ValueError("No target binding energy provided.")
 
-        t = torch.linspace(
-            0., 1., self.num_integration_steps,
-            device=data.pos.device, dtype=torch.float32,
-        )
+        t = torch.linspace(0., 1., self.num_integration_steps,device=data.pos.device, dtype=torch.float32)
 
         all_atoms = []
         all_metrics = []
         for sample_idx in range(self.num_generated_samples):
             counts = sample_prim_atom_counts(1, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
-            opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts, refine_final=self.refine_final)
+            opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts,)
 
             prim_batch = opt_graph.batch[opt_graph.tags == 1]
             ads_batch  = opt_graph.batch[opt_graph.tags == 2]
@@ -425,45 +403,16 @@ class LightFlowMatch(LightningModule, Flow):
             atoms = forge_catalyst(opt_graph, 0, prim_batch, ads_batch)
 
             if atoms is not None:
-                atoms_rlxd = relax_struc(
-                    atoms=atoms,
-                    run_mlff=self.run_mlff,
-                    config_vasp=self.config_vasp,
-                    mlff_checkpoint=self.mlff_checkpoint,
-                    accelerator=self.accelerator,
-                    seed=self.seed,
-                )
-
-                atoms_rlxd = atoms_rlxd if self.run_mlff else atoms
                 target_ads_dists = opt_graph.ads_pairwise_dist[ads_batch == 0].cpu().numpy()
-                result = check_validity(atoms_rlxd, self.covalent_radii_scale, target_ads_dists=target_ads_dists)
-
-                metrics = {
-                    "vol_ok":          float(result["vol_ok"]),
-                    "cat_dist_ok":     float(result["cat_dist_ok"]),
-                    "ads_dist_ok":     float(result["ads_dist_ok"]),
-                    "sample_is_valid": float(result["is_valid"]),
-                }
-                if result["ads_dist_mae"] is not None:
-                    metrics["ads_dist_mae"] = float(result["ads_dist_mae"])
-
+                _, metrics = process_sample(
+                    atoms, target_ads_dists, graph_idx=sample_idx, batch_idx=batch_idx,
+                    calculator=self._mlff_calculator, run_mlff=self.run_mlff,
+                    config_vasp=self.config_vasp, 
+                    catalyst_dist_cutoff=self.catalyst_dist_cutoff,
+                    gen_POS=self.gen_POS, rlxd_POS=self.rlxd_POS,
+                    target_binding_E=self.target_binding_energy, file_ext=".traj",
+                )
                 all_metrics.append(metrics)
-
-                if self.gen_POS and result["is_valid"]:
-                    os.makedirs(self.gen_POS, exist_ok=True)
-                    ase.io.write(
-                        os.path.join(self.gen_POS, f'{batch_idx}_{sample_idx}.vasp'),
-                        atoms,
-                        format='vasp',
-                    )
-
-                if self.rlxd_POS and self.run_mlff and result["is_valid"]:
-                    os.makedirs(self.rlxd_POS, exist_ok=True)
-                    ase.io.write(
-                        os.path.join(self.rlxd_POS, f'{batch_idx}_{sample_idx}.vasp'),
-                        atoms_rlxd,
-                        format='vasp',
-                    )
 
             all_atoms.append(atoms)
 
