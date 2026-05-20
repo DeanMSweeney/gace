@@ -1,10 +1,10 @@
-# AdsFlow
+# GACE
 
-AdsFlow is a **conditional flow matching** model for generating catalyst slab + adsorbate structures de novo. It learns a velocity field that transports from Gaussian noise to real DFT-relaxed structures, conditioned on binding energy and spacegroup.
+GACE (Generative Adsorbate Catalyst Engineer) is a **conditional flow matching** model for generating catalyst slab + adsorbate structures de novo. It learns a velocity field that transports from Gaussian noise to real DFT-relaxed structures, conditioned on binding energy and spacegroup.
 
 ## Overview
 
-AdsFlow uses conditional flow matching (CFM) to model the joint distribution over catalyst primitive-cell geometry (fractional coordinates, atom types, lattice parameters, supercell matrix) and adsorbate geometry (center-of-mass, relative positions). Hungarian-alignment-based optimal transport is applied at training time to handle permutation invariance.
+GACE uses conditional flow matching (CFM) to model the joint distribution over catalyst primitive-cell geometry (fractional coordinates, atom types, lattice parameters, supercell matrix) and adsorbate geometry (center-of-mass, relative positions). Hungarian-alignment-based optimal transport is applied at training time to handle permutation invariance.
 
 ### Variants
 
@@ -28,12 +28,12 @@ AdsFlow uses conditional flow matching (CFM) to model the joint distribution ove
 
 ```bash
 # AMD64 (CUDA 12.4)
-docker build -f Dockerfile.amd64 -t adsflow:amd64 .
-docker run --gpus all -it adsflow:amd64
+docker build -f Dockerfile.amd64 -t gace:amd64 .
+docker run --gpus all -it gace:amd64
 
 # ARM64 (Apple Silicon)
-docker build -f Dockerfile.arm64 -t adsflow:arm64 .
-docker run -it adsflow:arm64
+docker build -f Dockerfile.arm64 -t gace:arm64 .
+docker run -it gace:arm64
 ```
 
 ### Local Installation
@@ -41,13 +41,13 @@ docker run -it adsflow:arm64
 1. **Clone the repository**:
 ```bash
 git clone <repo-url>
-cd AdsFlow
+cd gace
 ```
 
 2. **Create a conda environment**:
 ```bash
-conda create -n adsflow python=3.10
-conda activate adsflow
+conda create -n gace python=3.10
+conda activate gace
 ```
 
 3. **Install PyTorch with CUDA support**:
@@ -71,7 +71,7 @@ pip install --no-deps fairchem-core==1.10.0
 pip install -r requirements.txt
 ```
 
-7. **Install AdsFlow in editable mode**:
+7. **Install GACE in editable mode**:
 ```bash
 pip install -e .
 ```
@@ -124,7 +124,7 @@ python scripts/train.py \
 ### Preprocess LMDB dataset
 
 ```bash
-python -m adsflow.utils.factorized_builders.data_processor \
+python -m gace.utils.factorized_builders.data_processor \
   --src /path/to/raw.lmdb \
   --dst /path/to/processed.lmdb
 ```
@@ -199,8 +199,8 @@ EquiformerV2 with SO(3)-equivariant attention for structure refinement. Also sup
 ## Project Structure
 
 ```
-AdsFlow/
-├── src/adsflow/
+gace/
+├── src/gace/
 │   ├── helm/                       # Training orchestration
 │   │   ├── config.py               # Hydra config dataclasses
 │   │   ├── cli.py                  # Training entry point
