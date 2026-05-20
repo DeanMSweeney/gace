@@ -216,59 +216,6 @@ def build_slab_adsorbate(
     return slab + ads
 
 
-def forge_catalyst(
-    opt_graph,
-    b: int,
-    prim_batch: torch.Tensor,
-    ads_batch: torch.Tensor,
-) -> Tuple[Optional[Atoms], Optional[Atoms]]:
-    """
-    Build a full slab + adsorbate ASE Atoms object for graph index b in a forge batch.
-
-    Reads `*_generated` fields from `opt_graph` (the ODE-sampled output), converts
-    fractional coordinates to Cartesian, and calls `build_slab_adsorbate`.
-
-    Args:
-        opt_graph:   PyG Batch returned by `sample()`, carrying `*_generated` fields.
-        b:           Index of the graph within the batch to build.
-        prim_batch:  Batch indices for primitive-cell atoms (opt_graph.batch[tags == 1]).
-        ads_batch:   Batch indices for adsorbate atoms (opt_graph.batch[tags == 2]).
-
-    Returns:
-        Tuple of (cat_atoms, prim_atoms): full supercell slab+adsorbate and primitive cell,
-        or (None, None) if build fails.
-    """
-    try:
-        lengths = opt_graph.lengths_generated[b]   # (3,)
-        angles  = opt_graph.angles_generated[b]    # (3,)
-        M       = opt_graph.M_generated[b]         # (3, 3)
-
-        cell     = lattice_params_to_matrix(lengths.unsqueeze(0), angles.unsqueeze(0)).squeeze(0)
-        frac     = opt_graph.pos_generated[prim_batch == b]       # (N_prim, 3)
-        prim_pos = frac @ cell                                     # (N_prim, 3) Cartesian
-
-        ads_pos = opt_graph.ads_pos_generated[ads_batch == b]     # (N_ads, 3)
-
-        # atomic_numbers_generated is already 1-indexed (sampler stores argmax + 1)
-        # ads_atomic_numbers is 0-indexed (sampler shifts it down by 1 for internal use)
-        atoms = build_slab_adsorbate(
-            prim_pos=prim_pos,
-            lattice_params=torch.cat([lengths, angles]),           # (6,) radians
-            transformation_matrix=M,
-            ads_pos=ads_pos,
-            prim_atomic_numbers=opt_graph.atomic_numbers_generated[prim_batch == b],
-            ads_atomic_numbers=opt_graph.ads_atomic_numbers[ads_batch == b] + 1,
-            vacuum=15.0,
-        )
-
-        atoms.set_constraint(FixAtoms(atoms.get_tags() == 0))
-
-        return atoms
-
-    except Exception as e:
-        print(f"[forge_catalyst] Failed to build graph {b}: {e}")
-        return None
-
 
 def sample_prim_atom_counts(
     B: int,

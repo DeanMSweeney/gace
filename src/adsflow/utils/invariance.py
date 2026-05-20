@@ -166,34 +166,39 @@ def batched_ot_align(
 def global_ot_align(
     source: Tensor,
     target: Tensor,
+    batch: Tensor,
     pbc_aware: bool = False,
 ) -> Tensor:
     """
-    Cross-batch optimal transport alignment treating all atoms in the batch as one point cloud.
+    Per-graph optimal transport alignment using global (scipy) assignment within each graph.
 
-    Finds the globally optimal permutation of all N_total source atoms to minimise
-    total L2 transport cost to N_total target atoms, ignoring graph boundaries.
-    This is valid because source is pure noise (no graph structure) — only the
-    target carries graph structure. After alignment, source[i] is still used as
-    the noise for target atom i within its original graph.
-
-    Compared to batched_ot_align, this can assign noise from one graph's slot to
-    another graph's atom position, giving straighter cross-batch trajectories.
+    For each graph, finds the permutation of source atoms that minimises total L2
+    transport cost to target atoms within that graph. Unlike batched_ot_align, this
+    uses scipy's linear_sum_assignment (Hungarian) rather than the batched GPU solver,
+    and processes each graph independently in a loop.
 
     Args:
         source:    (N_total, D) noise tensor
         target:    (N_total, D) data tensor
+        batch:     (N_total,) graph index for each atom
         pbc_aware: if True, applies minimum-image convention before computing
                    distances (use for fractional coordinates)
 
     Returns:
-        source_aligned: (N_total, D) source permuted to minimise total transport cost to target
+        source_aligned: (N_total, D) source permuted per-graph to minimise transport cost to target
     """
-    diff = source.unsqueeze(0) - target.unsqueeze(1)  # (N_total, N_total, D): diff[i,j] = src[j] - tgt[i]
-    if pbc_aware:
-        diff = diff - torch.round(diff)
-    cost = torch.linalg.norm(diff, dim=-1).cpu().numpy()  # (N_total, N_total)
+    source_aligned = torch.empty_like(source)
+    for g in batch.unique():
+        mask = batch == g
+        src_g = source[mask]  # (N_g, D)
+        tgt_g = target[mask]  # (N_g, D)
 
-    _, col_indices = linear_sum_assignment(cost)  # col_indices[i] = j: target i matched to source j
+        diff = src_g.unsqueeze(0) - tgt_g.unsqueeze(1)  # (N_g, N_g, D): diff[i,j] = src[j] - tgt[i]
+        if pbc_aware:
+            diff = diff - torch.round(diff)
+        cost = torch.linalg.norm(diff, dim=-1).cpu().numpy()  # (N_g, N_g)
 
-    return source[col_indices]
+        _, col_indices = linear_sum_assignment(cost)  # col_indices[i] = j: target i matched to source j
+        source_aligned[mask] = src_g[col_indices]
+
+    return source_aligned
