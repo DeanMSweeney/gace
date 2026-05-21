@@ -16,6 +16,7 @@ POSCAR*
 *.gz
 *.sh
 *.html
+*.vasp
 core
 out-claude.txt
 selected_frames-old.parquet
@@ -48,7 +49,25 @@ mlff_checkpoint_cache/
 catflow/
 poscar*/
 analysis/
-.claude/CLAUDE.md
+.claude/
 generated_samples/
 datasets/factorized
 *strucs*/
+equiformer_v3/
+
+
+# Data formats
+*.lmdb
+*.pkl
+*.parquet
+*.pt
+
+# Notebooks (strip outputs with nbstripout if you want to track structure)
+*.ipynb
+
+# Depth-independent folder matches (replace existing bare versions)
+**/scratch/
+**/wandb/
+**/logs/
+**/checkpoints/
+**/outputs/

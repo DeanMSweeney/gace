@@ -1,8 +1,8 @@
 import hydra
 import time
 
-from adsflow.helm.config import Config
-from adsflow.helm.cli import main as trainer
+from gace.helm.config import Config
+from gace.helm.cli import main as trainer
 
 
 @hydra.main(config_path=None, config_name=None, version_base=None)

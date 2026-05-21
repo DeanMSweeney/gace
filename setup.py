@@ -2,9 +2,9 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='adsflow',
+    name='gace',
     version='0.1',
     package_dir={"": "src"},
     packages=find_packages(where="src"),
-    package_data={"adsflow": ["helm/*.json"]},
+    package_data={"gace": ["helm/*.json"]},
 )
