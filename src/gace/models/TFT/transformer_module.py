@@ -94,7 +94,7 @@ class TransformerModule(nn.Module):
         self.custom_weight_init = custom_weight_init
 
         # Embeddings for each the primitive cell
-        self.atom_type_embed = nn.Embedding(atom_dim + 1, hidden_dim)  # +1 for mask token; shared with adsorbate
+        self.atom_type_embed = nn.Embedding(atom_dim, hidden_dim)  # for mask token; shared with adsorbate
         self.frac_coords_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
         self.lengths_scaled_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
         self.angles_radians_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
@@ -157,11 +157,10 @@ class TransformerModule(nn.Module):
         
         # ── Prim output heads ────────────────────────────────────────────────
         # Output head predicts real atom types only (0–98); mask token (99) is input-only.
-        out_atom_dim = atom_dim - 1
         self.out_atom_types = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.SiLU(inplace=False),
-            nn.Linear(hidden_dim, out_atom_dim),
+            nn.Linear(hidden_dim, atom_dim),
         )
         self.out_frac_coords = nn.Sequential(
             nn.LayerNorm(hidden_dim),
