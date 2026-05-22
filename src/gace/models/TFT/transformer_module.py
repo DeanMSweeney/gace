@@ -94,7 +94,7 @@ class TransformerModule(nn.Module):
         self.custom_weight_init = custom_weight_init
 
         # Embeddings for each the primitive cell
-        self.atom_type_embed = nn.Embedding(atom_dim, hidden_dim)  # shared with adsorbate
+        self.atom_type_embed = nn.Embedding(atom_dim + 1, hidden_dim)  # +1 for mask token; shared with adsorbate
         self.frac_coords_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
         self.lengths_scaled_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
         self.angles_radians_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
