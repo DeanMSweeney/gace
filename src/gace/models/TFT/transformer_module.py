@@ -156,10 +156,12 @@ class TransformerModule(nn.Module):
             raise ValueError(f"Invalid implementation: {self.implementation}")
         
         # ── Prim output heads ────────────────────────────────────────────────
+        # Output head predicts real atom types only (0–98); mask token (99) is input-only.
+        out_atom_dim = atom_dim - 1
         self.out_atom_types = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.SiLU(inplace=False),
-            nn.Linear(hidden_dim, atom_dim),
+            nn.Linear(hidden_dim, out_atom_dim),
         )
         self.out_frac_coords = nn.Sequential(
             nn.LayerNorm(hidden_dim),
@@ -343,7 +345,7 @@ class TransformerModule(nn.Module):
         global_mask = combined_real_mask.any(-1, keepdim=True).unsqueeze(-1)  # (B, 1, 1)
 
         # ── Prim embeddings ──────────────────────────────────────────────────
-        embed_atom_types = self.atom_type_embed(atom_types.argmax(dim=-1))  # (B, M,  C)
+        embed_atom_types = self.atom_type_embed(atom_types)  # (B, M) long → (B, M, C)
         embed_frac_coords = self.frac_coords_embed(frac_coords)             # (B, M,  C)
         embed_lengths_scaled = self.lengths_scaled_embed(lengths_scaled)    # (B, 1, C)
         embed_angles_radians = self.angles_radians_embed(angles_radians)    # (B, 1, C)
