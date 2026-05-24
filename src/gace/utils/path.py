@@ -383,8 +383,8 @@ class Flow():
             ads_pos1 = (ads_pos1 - self.ads_pos_mean) / self.ads_pos_std
         ads_pos0 = torch.randn_like(ads_pos1)                            # N(0,1) prior
 
-        if self.optimal_transport:
-            ads_pos0 = batched_ot_align(source=ads_pos0, target=ads_pos1, batch=ads_batch, pbc_aware=False)
+        #if self.optimal_transport:
+        #ads_pos0 = batched_ot_align(source=ads_pos0, target=ads_pos1, batch=ads_batch, pbc_aware=False)
 
         t_ads = t[ads_batch]  # (N_ads, 1)
         alpha_t_ads, alpha_t_ads_grad, _ = self._interpolant_schedule(
