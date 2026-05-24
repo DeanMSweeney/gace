@@ -55,10 +55,11 @@ def ctmc_step(zt: Tensor, z_logits: Tensor, t_scalar: float, dt: float) -> Tenso
     x1_probs   = F.softmax(z_logits, dim=-1)                              # (N, 99)
     is_masked  = (zt == NUM_CLASSES - 1)                                  # (N,) bool
 
-    rate_factor = dt / (1 - t_scalar + 1e-8)
-    unmask_prob = (rate_factor * x1_probs.max(dim=-1).values).clamp(max=1.0)  # (N,)
+    # Q1: should this atom unmask? — purely time-dependent, no model confidence involved
+    unmask_prob = min(dt / (1 - t_scalar + 1e-8), 1.0)  # scalar; →1 as t→1
 
-    will_unmask = (torch.rand_like(unmask_prob) < unmask_prob) & is_masked
+    # Q2: if it unmasks, what type? — sampled from model distribution below
+    will_unmask = (torch.rand(zt.shape[0], device=zt.device) < unmask_prob) & is_masked
 
     zt_next = zt.clone()
     if will_unmask.any():
