@@ -1,0 +1,44 @@
+# model configuration
+defaults:
+  - model_cfg: tft-large # direcotry in conf: file name
+  - _self_
+
+# Model mode
+mode: "train"
+x_matching: "flow"
+interpolant_schedule: "linear"
+informed_priors: true
+optimal_transport: true
+
+# datasets
+oc20_train: "/datasets/factorized/train/dataset_processed.lmdb"
+oc20_val: "/datasets/factorized/val_id/dataset_processed.lmdb"
+oc20_test: "/datasets/factorized/val_id/dataset_processed.lmdb"
+
+# training hyperparameters/settings
+batch_size: 128
+num_workers: 8
+accumulate_grad_batches: 2
+
+optim_cfg:
+  weight_decay: 0
+  lr: 0.0005
+  lr_scheduler: "cosine_w_warmup"
+  num_cycles: 0.50
+  warmup_proportion: 0.05
+  max_epochs: 200
+  ema_decay: 0.9999
+  lambda_x: 2.5
+  lambda_ads: 1.0
+  lambda_z: 0.10
+
+# checkpointing/logging
+logger: true
+project: "gace"
+run_name: "OT+Z"
+
+# restart run 
+ckpt_path: "/datasets/checkpoints/zatom/zatom_1_l_joint_pretraining_paper_weights.ckpt"  
+resume_training: false
+run_id: null  # log id from wandb
+
