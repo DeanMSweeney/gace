@@ -284,6 +284,11 @@ class Config:
     run_id: str = None
     """WandB run ID for resuming existing runs (auto-generated if None)"""
 
+    fork_from: Optional[str] = None
+    """Fork a W&B run from a specific step: '<run-id>?_step=<step>'.
+    Creates a new run that inherits history up to that step, then logs independently.
+    Requires wandb >= 0.16.5. When set, run_id and resume are ignored."""
+
     track_grad_norms: bool = True
     """Whether to log gradient norms for monitoring training stability
     Useful for detecting exploding/vanishing gradients

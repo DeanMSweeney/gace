@@ -241,14 +241,23 @@ def main(cfg: Config) -> None:
     # === Logger Setup ===
     # Initialize Weights & Biases logger for experiment tracking (skip for generation mode)
     if cfg.logger and cfg.mode != "generate":
-        logger = WandbLogger(
-            project=cfg.project,
-            name=cfg.run_name,
-            config=OmegaConf.to_container(cfg, resolve=True),
-            log_model=False,
-            resume="allow",  # Allow resuming runs with same run_id
-            id=cfg.run_id,
-        )
+        if cfg.fork_from:
+            logger = WandbLogger(
+                project=cfg.project,
+                name=cfg.run_name,
+                config=OmegaConf.to_container(cfg, resolve=True),
+                log_model=False,
+                fork_from=cfg.fork_from,
+            )
+        else:
+            logger = WandbLogger(
+                project=cfg.project,
+                name=cfg.run_name,
+                config=OmegaConf.to_container(cfg, resolve=True),
+                log_model=False,
+                resume="allow",
+                id=cfg.run_id,
+            )
     else:
         logger = cfg.logger
 
