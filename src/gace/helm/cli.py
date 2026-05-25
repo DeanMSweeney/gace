@@ -248,6 +248,7 @@ def main(cfg: Config) -> None:
                 config=OmegaConf.to_container(cfg, resolve=True),
                 log_model=False,
                 fork_from=cfg.fork_from,
+                resume=None,
             )
         else:
             logger = WandbLogger(
