@@ -126,6 +126,10 @@ class CatalystForge:
                 "sample_is_valid":       float(validity_dict["is_valid"]),
                 "sample_is_valid_naive": float(validity_dict["is_valid_naive"]),
             }
+
+            if not metrics["ads_integrity_ok"]:
+                print(b)
+                
             if energy_dict is not None and target_E is not None:
                 metrics["binding_E_diff"] = energy_dict["binding_E_diff"]
             self._metrics.append(metrics)
