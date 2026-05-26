@@ -128,7 +128,7 @@ class CatalystForge:
             }
 
             if not metrics["ads_integrity_ok"]:
-                ref_np = ref_ads_pos.cpu().float().numpy() if hasattr(ref_ads_pos, "cpu") else np.array(ref_ads_pos, dtype=np.float32)
+                ref_np = self.opt_graph.ref_ads_pos.cpu().float().numpy()
                 ref_atoms = Atoms(numbers=ads_atoms.get_atomic_numbers(), positions=ref_np)
                 ase.io.write(os.path.join(self.gen_POS, f"{self.batch_idx}_{b}_ref.vasp"), ref_atoms)
 
