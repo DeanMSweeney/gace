@@ -36,7 +36,7 @@ class CatalystForge:
         rlxd_POS: str | None,
         file_ext: str = ".vasp",
         energy_cutoff: float = 10.0,
-        ads_integrity_threshold: float = 2.0,
+        ads_integrity_threshold: float = 20.0,
     ):
         self.opt_graph = opt_graph
         self.binding_energies = binding_energies
@@ -129,7 +129,7 @@ class CatalystForge:
 
             if not metrics["ads_integrity_ok"]:
                 print(b)
-                
+
             if energy_dict is not None and target_E is not None:
                 metrics["binding_E_diff"] = energy_dict["binding_E_diff"]
             self._metrics.append(metrics)
