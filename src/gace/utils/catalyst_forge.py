@@ -131,7 +131,7 @@ class CatalystForge:
                 print(b)
                 ref_np = self.opt_graph.ref_ads_pos[ads_batch == b].cpu().float().numpy()
                 ref_atoms = Atoms(numbers=(self.opt_graph.ads_atomic_numbers[ads_batch == b] + 1).cpu().numpy(), positions=ref_np)
-                ase.io.write(os.path.join(self.gen_POS, f"{self.batch_idx}_{b}_ref.xzy"), ref_atoms)
+                ase.io.write(os.path.join(self.gen_POS, f"{self.batch_idx}_{b}_ref.xyz"), ref_atoms)
 
             if energy_dict is not None and target_E is not None:
                 metrics["binding_E_diff"] = energy_dict["binding_E_diff"]

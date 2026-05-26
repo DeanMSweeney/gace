@@ -166,6 +166,10 @@ class SamplerConfig:
     A pair is flagged as clashing if its distance is below catalyst_dist_cutoff * (r_i + r_j).
     Lower values are more permissive; higher values are stricter."""
 
+    ads_integrity_threshold: float = 2.0 
+    """Cutoff distance threshold to indicate whether an adsorabte atom has 
+    dissociated upon adsorption"""
+
 
 
 @dataclass

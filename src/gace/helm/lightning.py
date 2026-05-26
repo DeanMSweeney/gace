@@ -137,6 +137,7 @@ class LightFlowMatch(LightningModule, Flow):
         self.seed = seed
         self.num_prim_atoms = num_prim_atoms
         self.mlff_checkpoint = mlff_checkpoint
+        self.ads_integrity_threshold = ads_integrity_threshold
 
         self._mlff_calculator = None
         if run_mlff and mlff_checkpoint is not None:
