@@ -128,7 +128,9 @@ class CatalystForge:
             }
 
             if not metrics["ads_integrity_ok"]:
-                print(b)
+                ref_np = ref_ads_pos.cpu().float().numpy() if hasattr(ref_ads_pos, "cpu") else np.array(ref_ads_pos, dtype=np.float32)
+                ref_atoms = Atoms(numbers=ads_atoms.get_atomic_numbers(), positions=ref_np)
+                ase.io.write(os.path.join(self.gen_POS, f"{self.batch_idx}_{b}_ref.vasp"), ref_atoms)
 
             if energy_dict is not None and target_E is not None:
                 metrics["binding_E_diff"] = energy_dict["binding_E_diff"]
