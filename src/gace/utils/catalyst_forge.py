@@ -196,7 +196,7 @@ class CatalystForge:
             ref_atoms = Atoms(numbers=ads_atoms.get_atomic_numbers(), positions=ref_np)
             ref_ads_dists = ref_atoms.get_all_distances(mic=False)
             ads_dists_no_mic = ads_atoms.get_all_distances(mic=False)
-            ads_integrity_ok = bool(np.abs(ads_dists_no_mic - ref_ads_dists).max() <= self.ads_integrity_threshold)
+            ads_integrity_ok = bool(np.sqrt((ads_dists_no_mic - ref_ads_dists)**2).max() <= self.ads_integrity_threshold)
 
             # catalyst metrics
             cat_dists = dists[np.ix_(cat_idx, cat_idx)]
