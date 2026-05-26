@@ -73,6 +73,7 @@ class CatalystForge:
 
         fieldnames = ["batch_idx", "graph_idx", "target_binding_E", "computed_binding_E", "binding_E_diff"]
 
+        count = 0 
         for b in range(num_graphs):
             target_E = self.binding_energies[b]
 
