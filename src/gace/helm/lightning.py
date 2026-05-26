@@ -196,7 +196,7 @@ class LightFlowMatch(LightningModule, Flow):
 
         pred_prim, pred_ads  = self.model(
             x_prim=(
-                x_prim.data["atomic_numbers"],          # (B, M) long
+                x_prim.data["atomic_numbers_hot"],          # (B, M) long
                 x_prim.data["frac_coords"],            # (B, M, 3)
                 x_prim.data["lengths_scaled"],         # (B, 1, 3)
                 x_prim.data["angles_radians"],         # (B, 1, 3)
