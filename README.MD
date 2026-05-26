@@ -2,6 +2,8 @@
 
 GACE (Generative Adsorbate Catalyst Engineer) is a **conditional flow matching** model for generating catalyst slab + adsorbate structures de novo. It learns a velocity field that transports from Gaussian noise to real DFT-relaxed structures, conditioned on binding energy and spacegroup.
 
+![alt text](concept_art.png)
+
 ## Overview
 
 GACE uses conditional flow matching (CFM) to model the joint distribution over catalyst primitive-cell geometry (fractional coordinates, atom types, lattice parameters, supercell matrix) and adsorbate geometry (center-of-mass, relative positions). Hungarian-alignment-based optimal transport is applied at training time to handle permutation invariance.
