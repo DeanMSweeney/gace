@@ -17,6 +17,7 @@ POSCAR*
 *.sh
 *.html
 *.vasp
+GACE_PAPER_REFERENCE.md
 core
 out-claude.txt
 selected_frames-old.parquet
