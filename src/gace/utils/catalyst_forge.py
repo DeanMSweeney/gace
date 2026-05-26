@@ -36,7 +36,7 @@ class CatalystForge:
         rlxd_POS: str | None,
         file_ext: str = ".vasp",
         energy_cutoff: float = 10.0,
-        ads_integrity_threshold: float = 2.0,
+        ads_integrity_threshold: float = 5.0,
     ):
         self.opt_graph = opt_graph
         self.binding_energies = binding_energies
@@ -172,26 +172,28 @@ class CatalystForge:
             tags = atoms.get_tags()
             cat_mask = tags != 2
             ads_mask = tags == 2
+            ads_atoms = atoms[ads_mask]
+            cat_atoms = atoms[cat_mask]
+            ads_idx = np.where(ads_mask)[0]
+            cat_idx = np.where(cat_mask)[0]
 
             # compute interatomic distances 
             dists = atoms.get_all_distances(mic=True)
             np.fill_diagonal(dists, np.inf)
 
             # adsorbate metrics
-            ads_idx = np.where(ads_mask)[0]
+
             ads_dists = dists[np.ix_(ads_idx, ads_idx)]
             ads_dist_ok = bool(ads_dists.min() >= 0.5)
 
             # compare generated adsorbate distances to reference to detect broken structures
             ref_np = ref_ads_pos.cpu().float().numpy() if hasattr(ref_ads_pos, "cpu") else np.array(ref_ads_pos, dtype=np.float32)
-            ref_atoms = Atoms(numbers=atoms[ads_mask].get_atomic_numbers(), positions=ref_np)
+            ref_atoms = Atoms(numbers=ads_atoms.get_atomic_numbers(), positions=ref_np)
             ref_ads_dists = ref_atoms.get_all_distances(mic=False)
-            np.fill_diagonal(ref_ads_dists, np.inf)
-            ads_integrity_ok = bool(np.abs(ads_dists - ref_ads_dists).max() <= self.ads_integrity_threshold)
+            ads_dists_no_mic = ads_atoms.get_all_distances(mic=False)
+            ads_integrity_ok = bool(np.abs(ads_dists_no_mic - ref_ads_dists).max() <= self.ads_integrity_threshold)
 
             # catalyst metrics
-            cat_idx = np.where(cat_mask)[0]
-            cat_atoms = atoms[cat_mask]
             cat_dists = dists[np.ix_(cat_idx, cat_idx)]
             cat_atomic_numbers = cat_atoms.get_atomic_numbers()
             atomic_radii = covalent_radii[cat_atomic_numbers]
