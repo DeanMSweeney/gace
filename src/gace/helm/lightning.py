@@ -93,6 +93,7 @@ class LightFlowMatch(LightningModule, Flow):
             target_binding_energy: Optional[float]=None,
             num_generated_samples: int=1,
             catalyst_dist_cutoff: float=0.75,
+            ads_integrity_threshold: float=2.0, 
             condition_on_binding_E: bool=True,
             standardize_ads_pos: bool=False,
             ads_pos_mean: list = [0.02587131, -0.69517581, 0.91811687],
@@ -351,6 +352,7 @@ class LightFlowMatch(LightningModule, Flow):
             gen_POS=self.gen_POS,
             rlxd_POS=self.rlxd_POS,
             file_ext=".vasp",
+            ads_integrity_threshold=self.ads_integrity_threshold, 
         )
         for metrics in cf.evaluate():
             for key, val in metrics.items():
