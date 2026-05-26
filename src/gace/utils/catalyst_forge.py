@@ -36,7 +36,7 @@ class CatalystForge:
         rlxd_POS: str | None,
         file_ext: str = ".vasp",
         energy_cutoff: float = 10.0,
-        ads_integrity_threshold: float = 5.0,
+        ads_integrity_threshold: float = 3.0,
     ):
         self.opt_graph = opt_graph
         self.binding_energies = binding_energies
@@ -182,7 +182,6 @@ class CatalystForge:
             np.fill_diagonal(dists, np.inf)
 
             # adsorbate metrics
-
             ads_dists = dists[np.ix_(ads_idx, ads_idx)]
             ads_dist_ok = bool(ads_dists.min() >= 0.5)
 
