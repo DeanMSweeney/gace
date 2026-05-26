@@ -128,9 +128,10 @@ class CatalystForge:
             }
 
             if not metrics["ads_integrity_ok"]:
+                print(b)
                 ref_np = self.opt_graph.ref_ads_pos[ads_batch == b].cpu().float().numpy()
                 ref_atoms = Atoms(numbers=(self.opt_graph.ads_atomic_numbers[ads_batch == b] + 1).cpu().numpy(), positions=ref_np)
-                ase.io.write(os.path.join(self.gen_POS, f"{self.batch_idx}_{b}_ref.xyz"), ref_atoms)
+                ase.io.write(os.path.join(self.gen_POS, f"{self.batch_idx}_{b}_ref.vasp"), ref_atoms)
 
             if energy_dict is not None and target_E is not None:
                 metrics["binding_E_diff"] = energy_dict["binding_E_diff"]
@@ -196,7 +197,7 @@ class CatalystForge:
             ref_atoms = Atoms(numbers=ads_atoms.get_atomic_numbers(), positions=ref_np)
             ref_ads_dists = ref_atoms.get_all_distances(mic=False)
             ads_dists_no_mic = ads_atoms.get_all_distances(mic=False)
-            ads_integrity_ok = bool(np.sqrt((ads_dists_no_mic - ref_ads_dists)**2).max() <= self.ads_integrity_threshold)
+            ads_integrity_ok = bool(np.abs(ads_dists_no_mic - ref_ads_dists).max() <= self.ads_integrity_threshold)
 
             # catalyst metrics
             cat_dists = dists[np.ix_(cat_idx, cat_idx)]
