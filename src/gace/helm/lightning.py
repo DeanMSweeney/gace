@@ -93,6 +93,7 @@ class LightFlowMatch(LightningModule, Flow):
             target_binding_energy: Optional[float]=None,
             num_generated_samples: int=1,
             catalyst_dist_cutoff: float=0.75,
+            ads_integrity_threshold: float=2.0,
             condition_on_binding_E: bool=True,
             standardize_ads_pos: bool=False,
             ads_pos_mean: list = [0.02587131, -0.69517581, 0.91811687],
@@ -137,6 +138,7 @@ class LightFlowMatch(LightningModule, Flow):
         self.seed = seed
         self.num_prim_atoms = num_prim_atoms
         self.mlff_checkpoint = mlff_checkpoint
+        self.ads_integrity_threshold = ads_integrity_threshold
 
         self._mlff_calculator = None
         if run_mlff and mlff_checkpoint is not None:
@@ -194,7 +196,7 @@ class LightFlowMatch(LightningModule, Flow):
 
         pred_prim, pred_ads  = self.model(
             x_prim=(
-                x_prim.data["atomic_numbers_hot"],     # (B, M, 118)
+                x_prim.data["atomic_numbers_hot"],          # (B, M) long
                 x_prim.data["frac_coords"],            # (B, M, 3)
                 x_prim.data["lengths_scaled"],         # (B, 1, 3)
                 x_prim.data["angles_radians"],         # (B, 1, 3)
@@ -350,6 +352,7 @@ class LightFlowMatch(LightningModule, Flow):
             gen_POS=self.gen_POS,
             rlxd_POS=self.rlxd_POS,
             file_ext=".vasp",
+            ads_integrity_threshold=self.ads_integrity_threshold, 
         )
         for metrics in cf.evaluate():
             for key, val in metrics.items():

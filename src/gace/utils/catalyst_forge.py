@@ -36,6 +36,7 @@ class CatalystForge:
         rlxd_POS: str | None,
         file_ext: str = ".vasp",
         energy_cutoff: float = 10.0,
+        ads_integrity_threshold: float = 2.0,
     ):
         self.opt_graph = opt_graph
         self.binding_energies = binding_energies
@@ -48,6 +49,7 @@ class CatalystForge:
         self.rlxd_POS = rlxd_POS
         self.file_ext = file_ext
         self.energy_cutoff = energy_cutoff
+        self.ads_integrity_threshold = ads_integrity_threshold
 
         self._all_atoms: list[Atoms | None] = []
         self._metrics: list[dict] = []
@@ -71,11 +73,12 @@ class CatalystForge:
 
         fieldnames = ["batch_idx", "graph_idx", "target_binding_E", "computed_binding_E", "binding_E_diff"]
 
+        count = 0 
         for b in range(num_graphs):
             target_E = self.binding_energies[b]
 
             atoms         = self._build(b, prim_batch, ads_batch)
-            validity_dict = self._filter(atoms)
+            validity_dict = self._filter(atoms, self.opt_graph.ref_ads_pos[ads_batch == b])
             atoms_rlxd    = self._relax(atoms, validity_dict)
 
             energy_dict = None
@@ -120,13 +123,24 @@ class CatalystForge:
                 "cat_atom_types_ok":     float(validity_dict["cat_atom_types_ok"]),
                 "cat_ads_dist_ok":       float(validity_dict["cat_ads_dist_ok"]),
                 "ads_dist_ok":           float(validity_dict["ads_dist_ok"]),
+                "ads_integrity_ok":      float(validity_dict["ads_integrity_ok"]),
                 "sample_is_valid":       float(validity_dict["is_valid"]),
                 "sample_is_valid_naive": float(validity_dict["is_valid_naive"]),
             }
+
+            if not metrics["ads_integrity_ok"]:
+                print(b)
+                ref_np = self.opt_graph.ref_ads_pos[ads_batch == b].cpu().float().numpy()
+                ref_atoms = Atoms(numbers=(self.opt_graph.ads_atomic_numbers[ads_batch == b] + 1).cpu().numpy(), positions=ref_np)
+                ase.io.write(os.path.join(self.gen_POS, f"{self.batch_idx}_{b}_ref.xyz"), ref_atoms)
+                count += 1 
+
             if energy_dict is not None and target_E is not None:
                 metrics["binding_E_diff"] = energy_dict["binding_E_diff"]
             self._metrics.append(metrics)
             self._all_atoms.append(atoms)
+
+        print(count)
 
         return self._metrics
 
@@ -153,29 +167,43 @@ class CatalystForge:
             logging.warning(f"[build] graph {b}: {e}")
             return None
 
-    def _filter(self, atoms: Atoms | None) -> dict:
+    def _filter(self, atoms: Atoms | None, ref_ads_pos) -> dict:
         if atoms is None:
             return {
                 "vol_ok": False, "cat_dist_ok": False, "cat_atom_types_ok": False,
-                "ads_dist_ok": False, "cat_ads_dist_ok": False,
+                "ads_dist_ok": False, "cat_ads_dist_ok": False, "ads_integrity_ok": False,
                 "is_valid": False, "is_valid_naive": False,
             }
 
         try:
+            # check volume of the cell to ensure positive and greater than zero 
             vol_ok = float(atoms.get_volume()) >= 0.1
+
+            # tag catalyst and adsorbate atoms
             tags = atoms.get_tags()
             cat_mask = tags != 2
             ads_mask = tags == 2
-
+            ads_atoms = atoms[ads_mask]
             cat_atoms = atoms[cat_mask]
+            ads_idx = np.where(ads_mask)[0]
+            cat_idx = np.where(cat_mask)[0]
+
+            # compute interatomic distances 
             dists = atoms.get_all_distances(mic=True)
             np.fill_diagonal(dists, np.inf)
 
-            ads_idx = np.where(ads_mask)[0]
+            # adsorbate metrics
             ads_dists = dists[np.ix_(ads_idx, ads_idx)]
             ads_dist_ok = bool(ads_dists.min() >= 0.5)
 
-            cat_idx = np.where(cat_mask)[0]
+            # compare generated adsorbate distances to reference to detect broken structures
+            ref_np = ref_ads_pos.cpu().float().numpy() if hasattr(ref_ads_pos, "cpu") else np.array(ref_ads_pos, dtype=np.float32)
+            ref_atoms = Atoms(numbers=ads_atoms.get_atomic_numbers(), positions=ref_np)
+            ref_ads_dists = ref_atoms.get_all_distances(mic=False)
+            ads_dists_no_mic = ads_atoms.get_all_distances(mic=False)
+            ads_integrity_ok = bool(np.abs(ads_dists_no_mic - ref_ads_dists).max() <= self.ads_integrity_threshold)
+
+            # catalyst metrics
             cat_dists = dists[np.ix_(cat_idx, cat_idx)]
             cat_atomic_numbers = cat_atoms.get_atomic_numbers()
             atomic_radii = covalent_radii[cat_atomic_numbers]
@@ -198,6 +226,7 @@ class CatalystForge:
             vol_ok = False
             ads_dist_ok = False
             cat_ads_dist_ok = False
+            ads_integrity_ok = False
 
         return {
             "vol_ok":            vol_ok,
@@ -205,7 +234,8 @@ class CatalystForge:
             "cat_atom_types_ok": cat_atom_types_ok,
             "cat_ads_dist_ok":   cat_ads_dist_ok,
             "ads_dist_ok":       ads_dist_ok,
-            "is_valid":          vol_ok and cat_dist_ok and ads_dist_ok and cat_ads_dist_ok and cat_atom_types_ok,
+            "ads_integrity_ok":  ads_integrity_ok,
+            "is_valid":          vol_ok and cat_dist_ok and ads_dist_ok and cat_ads_dist_ok and cat_atom_types_ok and ads_integrity_ok,
             "is_valid_naive":    cat_dist_ok_naive and ads_dist_ok and cat_ads_dist_ok and vol_ok,
         }
 
