@@ -36,7 +36,7 @@ class CatalystForge:
         rlxd_POS: str | None,
         file_ext: str = ".vasp",
         energy_cutoff: float = 10.0,
-        ads_integrity_threshold: float = 20.0,
+        ads_integrity_threshold: float = 2.0,
     ):
         self.opt_graph = opt_graph
         self.binding_energies = binding_energies
