@@ -55,7 +55,7 @@ generated_samples/
 datasets/factorized
 *strucs*/
 equiformer_v3/
-
+ablation_studies/
 
 # Data formats
 *.lmdb
