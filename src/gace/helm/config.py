@@ -156,7 +156,7 @@ class SamplerConfig:
     run_mlff: bool = False
     """Whether to run MLFF relaxation after generation"""
 
-    mlff_checkpoint: str = "PaiNN-S2EF-OC20-All"
+    mlff_checkpoint: str = "EquiformerV2-31M-S2EF-OC20-All+MD"
     """Path to MLFF checkpoint for relaxation"""
 
     # ==================== Evaluation Criteria ================
@@ -274,7 +274,7 @@ class Config:
 
     # ==================== Logging ====================
 
-    logger: bool = True
+    logger: bool = False
     """Whether to enable Weights & Biases (WandB) logging
     Logs metrics, hyperparameters, and optionally model checkpoints
     """
@@ -309,7 +309,7 @@ class Config:
     - "path/to/checkpoint.ckpt": resume from checkpoint
     """
 
-    resume_training: bool = True
+    resume_training: bool = False
     """Whether to resume training state (optimizer, scheduler, epoch) from checkpoint
     - True: resume training (continues from saved epoch)
     - False: load weights only (restarts training from epoch 0)
@@ -355,7 +355,7 @@ class Config:
     Not applied to atom types (corruption-mask scheme; alignment has no effect).
     """
 
-    informed_priors: bool = False
+    informed_priors: bool = True
     """
     Whether to use informed priors for the noise x0 (forge variant only).
     """
