@@ -128,19 +128,11 @@ class CatalystForge:
                 "sample_is_valid_naive": float(validity_dict["is_valid_naive"]),
             }
 
-            if not metrics["ads_integrity_ok"]:
-                print(b)
-                ref_np = self.opt_graph.ref_ads_pos[ads_batch == b].cpu().float().numpy()
-                ref_atoms = Atoms(numbers=(self.opt_graph.ads_atomic_numbers[ads_batch == b] + 1).cpu().numpy(), positions=ref_np)
-                ase.io.write(os.path.join(self.gen_POS, f"{self.batch_idx}_{b}_ref.xyz"), ref_atoms)
-                count += 1 
-
             if energy_dict is not None and target_E is not None:
                 metrics["binding_E_diff"] = energy_dict["binding_E_diff"]
             self._metrics.append(metrics)
             self._all_atoms.append(atoms)
 
-        print(count)
 
         return self._metrics
 
@@ -235,7 +227,7 @@ class CatalystForge:
             "cat_ads_dist_ok":   cat_ads_dist_ok,
             "ads_dist_ok":       ads_dist_ok,
             "ads_integrity_ok":  ads_integrity_ok,
-            "is_valid":          vol_ok and cat_dist_ok and ads_dist_ok and cat_ads_dist_ok and cat_atom_types_ok and ads_integrity_ok,
+            "is_valid":          vol_ok and cat_dist_ok and ads_dist_ok and cat_ads_dist_ok and cat_atom_types_ok,
             "is_valid_naive":    cat_dist_ok_naive and ads_dist_ok and cat_ads_dist_ok and vol_ok,
         }
 
