@@ -191,7 +191,7 @@ def main(cfg: Config) -> None:
         declare(f">>> Primitive atom count: {'fixed at ' + str(n) if n is not None else 'sampling from histogram'} 🧙🏽‍♀️")
         ptst = {"src": cfg.oc20_test}
         test_set = LazyLmdbDataset(ptst)
-        test_set = Subset(test_set, indices=range(10))
+        #test_set = Subset(test_set, indices=range(100))
         test_loader = DataLoader(
             dataset=test_set,
             batch_size=cfg.batch_size,
@@ -241,24 +241,14 @@ def main(cfg: Config) -> None:
     # === Logger Setup ===
     # Initialize Weights & Biases logger for experiment tracking (skip for generation mode)
     if cfg.logger and cfg.mode != "generate":
-        if cfg.fork_from:
-            logger = WandbLogger(
-                project=cfg.project,
-                name=cfg.run_name,
-                config=OmegaConf.to_container(cfg, resolve=True),
-                log_model=False,
-                fork_from=cfg.fork_from,
-                resume=None,
-            )
-        else:
-            logger = WandbLogger(
-                project=cfg.project,
-                name=cfg.run_name,
-                config=OmegaConf.to_container(cfg, resolve=True),
-                log_model=False,
-                resume="allow",
-                id=cfg.run_id,
-            )
+        logger = WandbLogger(
+            project=cfg.project,
+            name=cfg.run_name,
+            config=OmegaConf.to_container(cfg, resolve=True),
+            log_model=False,
+            resume="allow",  # Allow resuming runs with same run_id
+            id=cfg.run_id,
+        )
     else:
         logger = cfg.logger
 
