@@ -375,7 +375,7 @@ class Config:
     - False: adsorbate positions are used as-is (default)
     """
 
-    cfg_dropout_prob: float = 0.1
+    cfg_dropout_prob: float = 0.0
     """
     Probability of dropping the binding energy condition for a given training sample.
     When dropped, the learnable null binding energy embedding is used instead.
