@@ -29,13 +29,15 @@ def main():
 
     # --- Binding energy diff stats ---
     diffs = []
+    total = 0
     with open(be_csv, newline="") as f:
         for row in csv.DictReader(f):
+            total += 1
             val = row["binding_E_diff"].strip()
             if val:
                 diffs.append(float(val))
 
-    print(f"Binding energy difference stats  (n={len(diffs)} successful relaxations)")
+    print(f"Binding energy difference stats  ({len(diffs)}/{total} structures relaxed)")
     print(f"  mean   : {statistics.mean(diffs):.4f} eV")
     print(f"  median : {statistics.median(diffs):.4f} eV")
     print(f"  std    : {statistics.stdev(diffs):.4f} eV")
