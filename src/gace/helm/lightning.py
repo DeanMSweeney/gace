@@ -94,7 +94,7 @@ class LightFlowMatch(LightningModule, Flow):
             num_generated_samples: int=1,
             catalyst_dist_cutoff: float=0.75,
             ads_integrity_threshold: float=2.0,
-            condition_on_binding_E: bool=True,
+            cfg_dropout_prob: float=0.1,
             standardize_ads_pos: bool=False,
             ads_pos_mean: list = [0.02587131, -0.69517581, 0.91811687],
             ads_pos_std: list = [8.21663071, 9.02733422, 9.86882174],
@@ -152,7 +152,7 @@ class LightFlowMatch(LightningModule, Flow):
 
         self.target_binding_energy = target_binding_energy
         self.num_generated_samples = num_generated_samples
-        self.condition_on_binding_E = condition_on_binding_E
+        self.cfg_dropout_prob = cfg_dropout_prob
         self.standardize_ads_pos = standardize_ads_pos
 
         # Adsorbate position normalization stats (per-axis), computed offline over training set.
@@ -171,6 +171,21 @@ class LightFlowMatch(LightningModule, Flow):
         self.bad_iter, self.good_ter, self.iter = 0, 0, 0
        # ==============================================================================
        
+    def _build_target_props(self, f_prim) -> dict:
+        """Build the target-property conditioning dict for the model forward pass.
+
+        Always passes binding energy. During training, randomly drops a fraction
+        of samples (cfg_dropout_prob) by injecting a boolean mask; the model
+        replaces those samples' embeddings with the learnable null embedding.
+        """
+        feats = {"ads_binding_energy": f_prim.data["ads_binding_energy"]}
+        if self.training and self.cfg_dropout_prob > 0:
+            B = feats["ads_binding_energy"].shape[0]
+            feats["cfg_drop_mask"] = (
+                torch.rand(B, device=feats["ads_binding_energy"].device) < self.cfg_dropout_prob
+            )
+        return feats
+
     def forward(self, data: Data) -> dict:
         """Run the forge model forward pass and return a flat prediction dict.
 
@@ -210,7 +225,7 @@ class LightFlowMatch(LightningModule, Flow):
             ),
             t_prim=(t, t, t, t),
             t_ads=(t,),
-            feats={"ads_binding_energy": f_prim.data["ads_binding_energy"] if self.condition_on_binding_E else None},
+            feats=self._build_target_props(f_prim),
             prim_padding_mask=prim_padding_mask,
             ads_padding_mask=ads_padding_mask,
         )

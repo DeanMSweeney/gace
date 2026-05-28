@@ -119,6 +119,7 @@ class TransformerModule(nn.Module):
 
         self.time_encoding = TimeFourierEncoding(posenc_dim=hidden_dim, max_len=200)
         self.ads_binding_energy_embed = nn.Linear(1, hidden_dim)
+        self.null_binding_energy = nn.Parameter(torch.zeros(hidden_dim))
 
         if activation == "SiLU":
             activation = nn.SiLU(inplace=False)
@@ -387,13 +388,18 @@ class TransformerModule(nn.Module):
             .mean(-2)
         )  # (B, C)
 
-        if feats.get("ads_binding_energy") is not None:
-            embed_binding_energy = self.ads_binding_energy_embed(
-                feats["ads_binding_energy"].unsqueeze(-1)
-            )       
-        else:
-            embed_binding_energy = torch.zeros(batch_size, self.hidden_dim, device=device)
-                                                                                          # (B, C)
+        embed_binding_energy = self.ads_binding_energy_embed(
+            feats["ads_binding_energy"].unsqueeze(-1)
+        )  # (B, C)
+        # CFG training dropout: replace dropped samples with the learnable null embedding.
+        # cfg_drop_mask is a (B,) bool tensor; True = this sample's condition is dropped.
+        # Only present during training steps (injected by LightFlowMatch.forward).
+        drop_mask = feats.get("cfg_drop_mask")
+        if drop_mask is not None:
+            embed_binding_energy = torch.where(
+                drop_mask.unsqueeze(-1), self.null_binding_energy, embed_binding_energy
+            )
+
         embed_conditions = (embed_time + embed_binding_energy).unsqueeze(-2)  # (B, 1, C)
 
         # ── Build h_in for prim sequence ─────────────────────────────────────

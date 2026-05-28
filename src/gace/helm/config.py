@@ -375,11 +375,11 @@ class Config:
     - False: adsorbate positions are used as-is (default)
     """
 
-    condition_on_binding_E: bool = True
+    cfg_dropout_prob: float = 0.1
     """
-    Whether to condition the model on the target adsorption binding energy.
-    - True: binding energy is embedded and added to the conditioning signal
-    - False: binding energy conditioning is disabled (model generates unconditionally)
+    Probability of dropping the binding energy condition for a given training sample.
+    When dropped, the learnable null binding energy embedding is used instead.
+    Set to 0.0 to disable condition dropout (fully conditional training).
     """
 
     # ==================== Sampler Settings (for Inference) ====================
