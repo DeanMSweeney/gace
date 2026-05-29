@@ -47,7 +47,6 @@ ocp_checkpoints/
 plots/
 *_files/
 mlff_checkpoint_cache/ 
-catflow/
 poscar*/
 analysis/
 .claude/
