@@ -39,32 +39,45 @@ class Flow():
         """
         data = input_graph
 
+        prim_batch = data.batch[data.tags == 1]  # (N_prim,)
+        ads_batch  = data.batch[data.tags == 2]  # (N_ads,)
+
         # ── Position loss (endpoint) w/ minimum image convention ─────────────────────────────────────────
         x_pred = pred["pos"].float()
-        x_target = data.pos_target.float() # fractiona coordiantes of primitive cell
+        x_target = data.pos_target.float()
         x_diff = x_pred - x_target
         n0 = torch.round(x_diff)
         x_diff = x_diff - n0
-        x_loss = x_diff.abs().mean()  # scalar
         with torch.no_grad():
-            x_max_L = x_diff.abs().mean(dim=1).max()  # per-atom max for monitoring
+            x_max_L = x_diff.abs().mean(dim=1).max()
+        x_loss_per_graph = scatter(x_diff.abs().mean(dim=1), prim_batch, dim=0, reduce="mean")  # (B,)
+        x_loss = (x_loss_per_graph * self.time_weight).mean()
         # ─────────────────────────────────────────────────────────────────────────────────────────────────
 
         # ── Atom-type loss (catalyst only — adsorbate types are conditioned) ─────────────────────────────
         z_pred   = pred["z"].float()
-        z_target = data.atomic_numbers_target.long().clone()         # (N,)
+        z_target = data.atomic_numbers_target.long().clone()         # (N_prim,)
         z_target[data.atomic_numbers != NUM_CLASSES - 1] = -100      # ignore already-unmasked atoms
-        z_loss = F.cross_entropy(z_pred, z_target, ignore_index=-100)
+        z_loss_atoms = F.cross_entropy(z_pred, z_target, ignore_index=-100, reduction='none')  # (N_prim,)
+        valid = (z_target != -100).float()
+        z_loss_per_graph = (
+            scatter(z_loss_atoms * valid, prim_batch, dim=0, reduce="sum")
+            / scatter(valid, prim_batch, dim=0, reduce="sum").clamp(min=1)
+        )  # (B,)
+        z_loss = (z_loss_per_graph * self.time_weight).mean()
         # ────────────────────────────────────────────────────────────────────────────────────────────────
 
         # ── Lattice losses (endpoint) ───────────────────────────────────────────────────────────────────
-        len_loss = (pred["len"] - data.lengths_scaled_target).abs().mean()
-        ang_loss = (pred["ang"] - data.angles_radians_target).abs().mean()
-        M_loss   = (pred["M"]   - data.transformation_matrix_target).abs().mean()
+        len_loss = ((pred["len"] - data.lengths_scaled_target).abs().mean(dim=1) * self.time_weight).mean()
+        ang_loss = ((pred["ang"] - data.angles_radians_target).abs().mean(dim=1) * self.time_weight).mean()
+        M_loss   = ((pred["M"]   - data.transformation_matrix_target).abs().mean(dim=(1, 2)) * self.time_weight).mean()
         # ────────────────────────────────────────────────────────────────────────────────────────────────
 
         # ── Adsorbate losses (endpoint) ─────────────────────────────────────────────────────────────────
-        ads_pos_loss = (pred["ads_pos"] - data.ads_pos_target).abs().mean()
+        ads_loss_per_graph = scatter(
+            (pred["ads_pos"] - data.ads_pos_target).abs().mean(dim=1), ads_batch, dim=0, reduce="mean"
+        )  # (B,)
+        ads_pos_loss = (ads_loss_per_graph * self.time_weight).mean()
         # ────────────────────────────────────────────────────────────────────────────────────────────────
 
         lambda_x   = float(self.hparams.lambda_x)
@@ -73,7 +86,7 @@ class Flow():
         lambda_lat = float(self.hparams.lambda_lat)
         lambda_M   = float(self.hparams.lambda_M)
 
-        total_loss = self.time_weight * (
+        total_loss = (
               lambda_x   * x_loss
             + lambda_z   * z_loss
             + lambda_ads * ads_pos_loss
@@ -269,7 +282,7 @@ class Flow():
             v=cosine_schd_freq, 
         )
 
-        self.time_weight = alpha_t_M_loss_coeff # store one per graph loss coefficient 
+        self.time_weight = alpha_t_M_loss_coeff.squeeze(-1)  # (B,) or scalar
 
         u_M = M1 - M0
         M_t = M0 + alpha_t_M.unsqueeze(-1) * u_M
