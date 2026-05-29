@@ -20,8 +20,11 @@ positions are used (ads_integrity_ok is trivially True in that case).
 """
 
 import argparse
+import os
 import sys
 from collections import defaultdict
+from functools import partial
+from multiprocessing import Pool
 from pathlib import Path
 
 import numpy as np
@@ -76,6 +79,12 @@ def assess_traj(path: Path, cf: CatalystForge) -> dict | None:
     except Exception as exc:
         print(f"  WARNING: could not process {path}: {exc}", file=sys.stderr)
         return None
+
+
+def _worker(path: Path, cutoff: float, integrity_threshold: float) -> tuple[Path, dict | None]:
+    """Top-level worker function for multiprocessing (must be picklable)."""
+    cf = _make_cf(cutoff, integrity_threshold)
+    return path, assess_traj(path, cf)
 
 
 def _aggregate(results: list[dict]) -> dict[str, float]:
@@ -176,6 +185,10 @@ def main() -> None:
         "--out", type=str, default="validity_results.txt",
         help="Output .txt file path (relative to this script's directory).",
     )
+    parser.add_argument(
+        "--workers", type=int, default=os.cpu_count(),
+        help="Number of parallel worker processes. Defaults to all available CPUs.",
+    )
     args = parser.parse_args()
 
     root = Path(args.path).resolve()
@@ -184,8 +197,6 @@ def main() -> None:
         sys.exit(1)
 
     out_path = Path(__file__).parent / args.out
-
-    cf = _make_cf(args.cutoff, args.integrity_threshold)
 
     traj_files = sorted(root.rglob("*.traj"))
     if not traj_files:
@@ -198,6 +209,7 @@ def main() -> None:
         f"Dataset path : {root}",
         f"Total .traj  : {len(traj_files)}",
         f"Settings     : cutoff={args.cutoff}, integrity_threshold={args.integrity_threshold} A",
+        f"Workers      : {args.workers}",
         "=" * 70,
     ])
     print(header_line)
@@ -206,13 +218,19 @@ def main() -> None:
     all_results: list[dict] = []
     n_errors = 0
 
-    for traj_path in tqdm(traj_files, desc="Assessing"):
-        result = assess_traj(traj_path, cf)
-        if result is not None:
-            per_folder[traj_path.parent].append(result)
-            all_results.append(result)
-        else:
-            n_errors += 1
+    worker_fn = partial(_worker, cutoff=args.cutoff, integrity_threshold=args.integrity_threshold)
+
+    with Pool(processes=args.workers) as pool:
+        for path, result in tqdm(
+            pool.imap_unordered(worker_fn, traj_files),
+            total=len(traj_files),
+            desc="Assessing",
+        ):
+            if result is not None:
+                per_folder[path.parent].append(result)
+                all_results.append(result)
+            else:
+                n_errors += 1
 
     n_ok = len(all_results)
 
