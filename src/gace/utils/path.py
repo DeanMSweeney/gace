@@ -177,7 +177,7 @@ class Flow():
             raise ValueError("Invalid interpolant schedule")
 
         # scale only for endpoint
-        alpha_t_factor = torch.clamp(alpha_t_grad / (1 - alpha_t),  min=None, max=100) if x_matching == "endpoint" \
+        alpha_t_factor = torch.clamp(alpha_t_grad / (1 - alpha_t),  min=None, max=50) if x_matching == "endpoint" \
             else torch.tensor(1.0, device=t.device, dtype=torch.float32)
 
         return alpha_t, alpha_t_grad, alpha_t_factor
