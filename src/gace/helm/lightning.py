@@ -95,6 +95,8 @@ class LightFlowMatch(LightningModule, Flow):
             catalyst_dist_cutoff: float=0.75,
             ads_integrity_threshold: float=2.0,
             cfg_dropout_prob: float=0.1,
+            cfg_w_continuous: float=1.0,
+            cfg_w_discrete: float=1.0,
             standardize_ads_pos: bool=False,
             ads_pos_mean: list = [0.02587131, -0.69517581, 0.91811687],
             ads_pos_std: list = [8.21663071, 9.02733422, 9.86882174],
@@ -153,6 +155,8 @@ class LightFlowMatch(LightningModule, Flow):
         self.target_binding_energy = target_binding_energy
         self.num_generated_samples = num_generated_samples
         self.cfg_dropout_prob = cfg_dropout_prob
+        self.cfg_w_continuous = cfg_w_continuous
+        self.cfg_w_discrete = cfg_w_discrete
         self.standardize_ads_pos = standardize_ads_pos
 
         # Adsorbate position normalization stats (per-axis), computed offline over training set.
@@ -186,7 +190,7 @@ class LightFlowMatch(LightningModule, Flow):
             )
         return feats
 
-    def forward(self, data: Data) -> dict:
+    def forward(self, data: Data, force_unconditional: bool = False) -> dict:
         """Run the forge model forward pass and return a flat prediction dict.
 
         Converts the PyG batch to dense tensors, calls the transformer, and
@@ -197,6 +201,8 @@ class LightFlowMatch(LightningModule, Flow):
 
         Args:
             data: PyG Data/Batch with all forge fields populated.
+            force_unconditional: If True, drop all conditioning (cfg_drop_mask=True for
+                every sample). Used for the unconditional forward pass in CFG guidance.
 
         Returns:
             Dict with keys: pos, z, len, ang, M, ads_pos.
@@ -208,6 +214,15 @@ class LightFlowMatch(LightningModule, Flow):
         ads_padding_mask  = ~x_ads.mask   # (B, N)
 
         t = t_prim.data["t"].squeeze(-1)  # (B,)
+
+        if force_unconditional:
+            B = x_prim.data["atomic_numbers"].shape[0]
+            feats = {
+                "ads_binding_energy": f_prim.data["ads_binding_energy"],
+                "cfg_drop_mask": torch.ones(B, dtype=torch.bool, device=data.pos.device),
+            }
+        else:
+            feats = self._build_target_props(f_prim)
 
         pred_prim, pred_ads  = self.model(
             x_prim=(
@@ -225,7 +240,7 @@ class LightFlowMatch(LightningModule, Flow):
             ),
             t_prim=(t, t, t, t),
             t_ads=(t,),
-            feats=self._build_target_props(f_prim),
+            feats=feats,
             prim_padding_mask=prim_padding_mask,
             ads_padding_mask=ads_padding_mask,
         )

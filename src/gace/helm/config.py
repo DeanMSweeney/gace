@@ -151,6 +151,20 @@ class SamplerConfig:
     Creates INCAR, KPOINTS, POTCAR files for DFT verification workflow
     """
 
+    # ==================== Classifier-Free Guidance (Inference) ====================
+
+    cfg_w_continuous: float = 1.0
+    """CFG guidance weight w1 for continuous modalities (positions, lattice, ads_pos).
+    Applied as: x1_guided = (1 - w1) * x1_uncond + w1 * x1_cond.
+    1.0 = fully conditional (single forward pass, no overhead). >1 = extrapolated guidance.
+    Requires the model to have been trained with cfg_dropout_prob > 0."""
+
+    cfg_w_discrete: float = 1.0
+    """CFG guidance weight w2 for discrete modality (atom types), applied in log-space.
+    Applied as: log_p_guided = (1 - w2) * log_p_uncond + w2 * log_p_cond.
+    1.0 = fully conditional (single forward pass, no overhead). >1 = extrapolated guidance.
+    Requires the model to have been trained with cfg_dropout_prob > 0."""
+
     # ==================== MLFF Relaxation ====================
 
     run_mlff: bool = False

@@ -566,9 +566,25 @@ class Flow():
                 # Per-graph time for the model
                 data.t = torch.full((B, 1), t_curr, device=device, dtype=torch.float32)
 
-                # Model forward
+                # Model forward — optionally apply classifier-free guidance
                 with torch.no_grad():
-                    pred = self(data)
+                    pred_cond = self(data)
+
+                    w1 = self.cfg_w_continuous
+                    w2 = self.cfg_w_discrete
+                    if w1 != 1.0 or w2 != 1.0:
+                        pred_uncond = self(data, force_unconditional=True)
+
+                        pred = {
+                            key: (1 - w1) * pred_uncond[key] + w1 * pred_cond[key]
+                            for key in ("pos", "len", "ang", "M", "ads_pos")
+                        }
+
+                        log_p_cond   = F.log_softmax(pred_cond["z"],   dim=-1)
+                        log_p_uncond = F.log_softmax(pred_uncond["z"], dim=-1)
+                        pred["z"]    = (1 - w2) * log_p_uncond + w2 * log_p_cond
+                    else:
+                        pred = pred_cond
 
                 # Update continuous modalities
                 data.pos               = euler_step(data.pos,               pred["pos"],     t_curr, dt, pbc_aware=True)
