@@ -11,6 +11,7 @@ Usage:
 import argparse
 import csv
 import statistics
+import logging
 
 NON_METALS = {"H", "O", "N", "C"}
 
@@ -43,19 +44,21 @@ def main():
     print(f"  std    : {statistics.stdev(diffs):.4f} eV")
     print(f"  min    : {min(diffs):.4f} eV")
     print(f"  max    : {max(diffs):.4f} eV")
-
+    
     # --- Top-5 metal elements ---
-    metals = []
-    with open(ec_csv, newline="") as f:
-        for row in csv.DictReader(f):
-            el = row["element"].strip()
-            if el not in NON_METALS:
-                metals.append((el, int(row["count"])))
+    try: 
+        metals = []
+        with open(ec_csv, newline="") as f:
+            for row in csv.DictReader(f):
+                el = row["element"].strip()
+                if el not in NON_METALS:
+                    metals.append((el, int(row["count"])))
 
-    print(f"\nTop-5 most common metal elements")
-    for i, (el, count) in enumerate(metals[:5], 1):
-        print(f"  {i}. {el:4s}  {count} structures")
-
+        print(f"\nTop-5 most common metal elements")
+        for i, (el, count) in enumerate(metals[:5], 1):
+            print(f"  {i}. {el:4s}  {count} structures")
+    except Exception:
+        logging.warning(" Cannot find element_counts.csv... skipping")
 
 if __name__ == "__main__":
     main()
