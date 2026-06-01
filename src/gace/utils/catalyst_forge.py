@@ -29,7 +29,7 @@ class CatalystForge:
         binding_energies: list[float],
         batch_idx: int,
         calculator,
-        run_mlff: bool,
+        relax_otf: bool,
         config_vasp,
         catalyst_dist_cutoff: float,
         gen_POS: str | None,
@@ -37,12 +37,13 @@ class CatalystForge:
         file_ext: str = ".vasp",
         energy_cutoff: float = 10.0,
         ads_integrity_threshold: float = 2.0,
+        filter_otf: bool = True,
     ):
         self.opt_graph = opt_graph
         self.binding_energies = binding_energies
         self.batch_idx = batch_idx
         self.calculator = calculator
-        self.run_mlff = run_mlff
+        self.relax_otf = relax_otf
         self.config_vasp = config_vasp
         self.catalyst_dist_cutoff = catalyst_dist_cutoff
         self.gen_POS = gen_POS
@@ -50,6 +51,7 @@ class CatalystForge:
         self.file_ext = file_ext
         self.energy_cutoff = energy_cutoff
         self.ads_integrity_threshold = ads_integrity_threshold
+        self.filter_otf = filter_otf
 
         self._all_atoms: list[Atoms | None] = []
         self._metrics: list[dict] = []
@@ -60,9 +62,9 @@ class CatalystForge:
         num_graphs = int(self.opt_graph.batch.max().item()) + 1
 
         os.makedirs(self.gen_POS, exist_ok=True)
-        if self.run_mlff:
+        if self.relax_otf:
             os.makedirs(self.rlxd_POS, exist_ok=True)
-        csv_dir   = self.rlxd_POS if self.run_mlff else self.gen_POS
+        csv_dir   = self.rlxd_POS if self.relax_otf else self.gen_POS
         _csv_path = os.path.join(csv_dir, "binding_energies.csv")
 
         first_write = _csv_path not in _initialized_csvs
@@ -73,16 +75,38 @@ class CatalystForge:
 
         fieldnames = ["batch_idx", "graph_idx", "target_binding_E", "computed_binding_E", "binding_E_diff"]
 
-        count = 0 
+        count = 0
         for b in range(num_graphs):
             target_E = self.binding_energies[b]
+            atoms = self._build(b, prim_batch, ads_batch)
+            fname = f"{self.batch_idx}_{b}{self.file_ext}"
 
-            atoms         = self._build(b, prim_batch, ads_batch)
+            if not self.filter_otf:
+                # Fast path: write every successfully built structure, no filtering or relaxation.
+                row = {
+                    "batch_idx": self.batch_idx,
+                    "graph_idx": b,
+                    "target_binding_E": _fmt(target_E),
+                    "computed_binding_E": "",
+                    "binding_E_diff": "",
+                }
+                with open(_csv_path, "a", newline="") as f:
+                    w = csv.DictWriter(f, fieldnames=fieldnames)
+                    if first_write:
+                        w.writeheader()
+                        first_write = False
+                    w.writerow(row)
+                if atoms is not None:
+                    ase.io.write(os.path.join(self.gen_POS, fname), atoms)
+                self._metrics.append({})
+                self._all_atoms.append(atoms)
+                continue
+
             validity_dict = self._filter(atoms, self.opt_graph.ref_ads_pos[ads_batch == b])
             atoms_rlxd    = self._relax(atoms, validity_dict)
 
             energy_dict = None
-            if validity_dict["is_valid"] and self.run_mlff:
+            if validity_dict["is_valid"] and self.relax_otf:
                 try:
                     energy_dict = {"computed_binding_E": atoms_rlxd.get_potential_energy()}
                 except Exception as e:
@@ -111,7 +135,6 @@ class CatalystForge:
                     first_write = False
                 w.writerow(row)
 
-            fname = f"{self.batch_idx}_{b}{self.file_ext}"
             if validity_dict["is_valid"] and atoms is not None:
                 ase.io.write(os.path.join(self.gen_POS, fname), atoms)
             if atoms_rlxd is not None:
@@ -232,7 +255,7 @@ class CatalystForge:
         }
 
     def _relax(self, atoms: Atoms | None, validity_dict: dict) -> Atoms | None:
-        if not validity_dict["is_valid"] or not self.run_mlff:
+        if not validity_dict["is_valid"] or not self.relax_otf:
             return None
         return relax_w_mlff(
             atoms=atoms,
