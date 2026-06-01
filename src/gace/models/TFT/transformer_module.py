@@ -94,7 +94,7 @@ class TransformerModule(nn.Module):
         self.custom_weight_init = custom_weight_init
 
         # Embeddings for each the primitive cell
-        self.atom_type_embed = nn.Embedding(atom_dim, hidden_dim)  # shared with adsorbate
+        self.atom_type_embed = nn.Embedding(atom_dim, hidden_dim)  # for mask token; shared with adsorbate
         self.frac_coords_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
         self.lengths_scaled_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
         self.angles_radians_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
@@ -119,6 +119,7 @@ class TransformerModule(nn.Module):
 
         self.time_encoding = TimeFourierEncoding(posenc_dim=hidden_dim, max_len=200)
         self.ads_binding_energy_embed = nn.Linear(1, hidden_dim)
+        self.null_binding_energy = nn.Parameter(torch.zeros(hidden_dim))
 
         if activation == "SiLU":
             activation = nn.SiLU(inplace=False)
@@ -156,6 +157,7 @@ class TransformerModule(nn.Module):
             raise ValueError(f"Invalid implementation: {self.implementation}")
         
         # ── Prim output heads ────────────────────────────────────────────────
+        # Output head predicts real atom types only (0–98); mask token (99) is input-only.
         self.out_atom_types = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.SiLU(inplace=False),
@@ -343,7 +345,7 @@ class TransformerModule(nn.Module):
         global_mask = combined_real_mask.any(-1, keepdim=True).unsqueeze(-1)  # (B, 1, 1)
 
         # ── Prim embeddings ──────────────────────────────────────────────────
-        embed_atom_types = self.atom_type_embed(atom_types.argmax(dim=-1))  # (B, M,  C)
+        embed_atom_types = self.atom_type_embed(atom_types)  # (B, M) long → (B, M, C)
         embed_frac_coords = self.frac_coords_embed(frac_coords)             # (B, M,  C)
         embed_lengths_scaled = self.lengths_scaled_embed(lengths_scaled)    # (B, 1, C)
         embed_angles_radians = self.angles_radians_embed(angles_radians)    # (B, 1, C)
@@ -386,13 +388,18 @@ class TransformerModule(nn.Module):
             .mean(-2)
         )  # (B, C)
 
-        if feats.get("ads_binding_energy") is not None:
-            embed_binding_energy = self.ads_binding_energy_embed(
-                feats["ads_binding_energy"].unsqueeze(-1)
-            )       
-        else:
-            embed_binding_energy = torch.zeros(batch_size, self.hidden_dim, device=device)
-                                                                                          # (B, C)
+        embed_binding_energy = self.ads_binding_energy_embed(
+            feats["ads_binding_energy"].unsqueeze(-1)
+        )  # (B, C)
+        # CFG training dropout: replace dropped samples with the learnable null embedding.
+        # cfg_drop_mask is a (B,) bool tensor; True = this sample's condition is dropped.
+        # Only present during training steps (injected by LightFlowMatch.forward).
+        drop_mask = feats.get("cfg_drop_mask")
+        if drop_mask is not None:
+            embed_binding_energy = torch.where(
+                drop_mask.unsqueeze(-1), self.null_binding_energy, embed_binding_energy
+            )
+
         embed_conditions = (embed_time + embed_binding_energy).unsqueeze(-2)  # (B, 1, C)
 
         # ── Build h_in for prim sequence ─────────────────────────────────────
@@ -573,91 +580,4 @@ class TransformerModule(nn.Module):
 
         return pred_prim, pred_ads
 
-    @typecheck
-    def forward_with_cfg(
-        self,
-        x_prim: (
-            Tuple[
-                Float["b m v"],  # type: ignore - atom_types (soft one-hot simplex)
-                Float["b m 3"],  # type: ignore - frac_coords
-                Float["b 1 3"],  # type: ignore - lengths_scaled
-                Float["b 1 3"],  # type: ignore - angles_radians
-                Float["b 3 3"],  # type: ignore - transformation_matrix
-                Float["b 3 3"],  # type: ignore - supercell_lattice
-            ]
-            | List[torch.Tensor]
-        ),
-        x_ads: (
-            Tuple[
-                Int["b n"],      # type: ignore - ads_atom_types (integer indices, conditioning)
-                Float["b n 3"],  # type: ignore - ads_pos (absolute Cartesian positions)
-                Float["b n 3"],  # type: ignore - ads_ref_centered_pos
-            ]
-            | List[torch.Tensor]
-        ),
-        t_prim: (
-            Tuple[
-                Float[" b"],  # type: ignore - atom_types_t
-                Float[" b"],  # type: ignore - frac_coords_t
-                Float[" b"],  # type: ignore - lengths_scaled_t
-                Float[" b"],  # type: ignore - angles_radians_t
-            ]
-            | List[torch.Tensor]
-        ),
-        t_ads: (
-            Tuple[
-                Float[" b"],  # type: ignore - ads_pos_t
-            ]
-            | List[torch.Tensor]
-        ),
-        feats: Dict[str, Tensor],
-        prim_padding_mask: Bool["b m"],  # type: ignore
-        ads_padding_mask: Bool["b n"],  # type: ignore
-        cfg_scale: float,
-        **kwargs: Any,
-    ) -> Tuple[
-        Tuple[
-            Float["b m v"],  # type: ignore - atom_types
-            Float["b m 3"],  # type: ignore - frac_coords
-            Float["b 1 3"],  # type: ignore - lengths_scaled
-            Float["b 1 3"],  # type: ignore - angles_radians
-            Float["b 1 9"],  # type: ignore - transformation_matrix
-        ],
-        Tuple[
-            Float["b n v"],  # type: ignore - ads_atom_types
-            Float["b 1 3"],  # type: ignore - ads_com
-            Float["b n 3"],  # type: ignore - ads_rel_pos
-        ],
-    ]:
-        """Classifier-free guidance forward pass.
-
-        Doubles the batch (conditional + unconditional) and interpolates
-        outputs with ``cfg_scale``.
-        """
-        half_prim = tuple(x_[: len(x_) // 2] for x_ in x_prim)
-        combined_prim = tuple(torch.cat([h, h], dim=0) for h in half_prim)
-
-        half_ads = tuple(x_[: len(x_) // 2] for x_ in x_ads)
-        combined_ads = tuple(torch.cat([h, h], dim=0) for h in half_ads)
-
-        pred_prim, pred_ads = self.forward(
-            combined_prim,
-            combined_ads,
-            t_prim,
-            t_ads,
-            feats,
-            prim_padding_mask,
-            ads_padding_mask,
-            **kwargs,
-        )
-
-        def _apply_cfg(outputs):
-            guided = []
-            for modal in outputs:
-                cond, uncond = torch.split(modal, len(modal) // 2, dim=0)
-                half = uncond + cfg_scale * (cond - uncond)
-                guided.append(torch.cat([half, half], dim=0))
-            return tuple(guided)
-
-        return _apply_cfg(pred_prim), _apply_cfg(pred_ads)
 

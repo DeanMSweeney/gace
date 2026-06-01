@@ -35,44 +35,34 @@ def euler_step(x_t: Tensor, x1_pred: Tensor, t_scalar: float, dt: float, pbc_awa
     return x_t + velocity * dt
 
 
-def ctmc_step(z_hot: Tensor, z_logits: Tensor, t_scalar: float, dt: float) -> Tensor:
-    """CTMC Euler step for discrete atom types in sparse (N, C) format.
+def ctmc_step(zt: Tensor, z_logits: Tensor, t_scalar: float, dt: float) -> Tensor:
+    """One-way CTMC step for discrete atom types.
 
-    At each step the model predicts the endpoint distribution p(z1 | z_t, t).
-    The CTMC rate for transitioning from state i to state j is:
-        q_{ij}(t) = p(z1=j | ...) / (1 - t)
-    giving a per-step transition probability of dt * q_{ij}.
-
-    Adapted from zatom/flow/interpolants.py::DiscreteInterpolant.step(),
-    flattened to (N, C) without a batch dimension.
+    Only masked atoms (index NUM_CLASSES-1 = 99) may commit to a real type.
+    Atoms that have already committed stay fixed.
 
     Args:
-        z_hot: (N, C) one-hot tensor of current discrete states.
-        z_logits: (N, C) model output logits for the endpoint distribution.
+        zt: (N,) long tensor of current atom type indices (0–98 real, 99 mask).
+        z_logits: (N, 99) model output logits over real atom types only.
         t_scalar: Current time as a Python float.
         dt: Step size as a Python float.
 
     Returns:
-        (N, C) updated one-hot tensor.
+        (N,) updated long tensor.
     """
-    x1_probs = F.softmax(z_logits, dim=-1)           # (N, C)
-    curr_state = z_hot.argmax(dim=-1)                 # (N,)
+    NUM_CLASSES = 100
+    z_logits[:, -1] = -torch.inf  # mask token is never a valid prediction
+    x1_probs   = F.softmax(z_logits, dim=-1)                              # (N, 99)
+    is_masked  = (zt == NUM_CLASSES - 1)                                  # (N,) bool
 
-    rate_factor = dt / (1 - t_scalar + 1e-8)         # scalar
+    # Q1: should this atom unmask? — purely time-dependent, no model confidence involved
+    unmask_prob = min(dt / (1 - t_scalar + 1e-8), 1.0)  # scalar; →1 as t→1
 
-    # Probability of transitioning to each state
-    step_probs = (rate_factor * x1_probs).clamp(max=1.0)  # (N, C)
+    # Q2: if it unmasks, what type? — sampled from model distribution below
+    will_unmask = (torch.rand(zt.shape[0], device=zt.device) < unmask_prob) & is_masked
 
-    # Zero out the diagonal (prob of transitioning to current state)
-    step_probs.scatter_(-1, curr_state.unsqueeze(-1), 0.0)
+    zt_next = zt.clone()
+    if will_unmask.any():
+        zt_next[will_unmask] = torch.distributions.Categorical(x1_probs[will_unmask]).sample()
 
-    # Prob of staying = 1 - sum of off-diagonal transition probs
-    prob_stay = (1.0 - step_probs.sum(dim=-1, keepdim=True))
-    step_probs.scatter_(-1, curr_state.unsqueeze(-1), prob_stay)
-
-    # Numerical stability
-    step_probs = step_probs.clamp(min=0.0)
-    step_probs = step_probs / step_probs.sum(dim=-1, keepdim=True)
-
-    x_next = torch.distributions.Categorical(probs=step_probs).sample()  # (N,)
-    return F.one_hot(x_next, num_classes=z_hot.shape[-1]).float()
+    return zt_next  # (N,) long
