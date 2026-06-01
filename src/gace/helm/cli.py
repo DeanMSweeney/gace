@@ -192,9 +192,9 @@ def main(cfg: Config) -> None:
         ptst = {"src": cfg.oc20_test}
         test_set = LazyLmdbDataset(ptst)
 
-        if cfg.num_of_eval_samples is not None:
-            declare(f">>> Limiting eval to {cfg.num_of_eval_samples} samples")
-            test_set = Subset(test_set, indices=range(cfg.num_of_eval_samples))
+        if cfg.num_eval_samples is not None:
+            declare(f">>> Limiting eval to {cfg.num_eval_samples} samples")
+            test_set = Subset(test_set, indices=range(cfg.num_eval_samples))
 
         test_loader = DataLoader(
             dataset=test_set,

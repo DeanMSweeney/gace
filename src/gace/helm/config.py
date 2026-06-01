@@ -352,7 +352,7 @@ class Config:
     - "debug": debug mode with additional checks
     """
 
-    num_of_eval_samples: Optional[int] = None
+    num_eval_samples: Optional[int] = None
     """Number of samples to use for evaluation (default: use full eval set)"""
 
     x_matching: Literal["flow", "endpoint"] = "endpoint"
