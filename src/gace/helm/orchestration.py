@@ -100,7 +100,7 @@ class LightFlowMatch(LightningModule, Flow):
             standardize_ads_pos: bool=False,
             ads_pos_mean: list = [0.02587131, -0.69517581, 0.91811687],
             ads_pos_std: list = [8.21663071, 9.02733422, 9.86882174],
-            filter_otf: bool=True,
+            sanitize_otf: bool=True,
             **kwargs,
         ):
 
@@ -136,7 +136,7 @@ class LightFlowMatch(LightningModule, Flow):
         self.informed_priors = informed_priors
         self.interpolate_on_torus = interpolate_on_torus
         self.relax_otf = relax_otf
-        self.filter_otf = filter_otf
+        self.sanitize_otf = sanitize_otf
         self.batched_relaxation = batched_relaxation
         self.accelerator = accelerator
         self.seed = seed
@@ -381,9 +381,9 @@ class LightFlowMatch(LightningModule, Flow):
             rlxd_POS=self.rlxd_POS,
             file_ext=".vasp",
             ads_integrity_threshold=self.ads_integrity_threshold,
-            filter_otf=self.filter_otf,
+            sanitize_otf=self.sanitize_otf,
         )
-        for metrics in cf.evaluate():
+        for metrics in cf.run():
             for key, val in metrics.items():
                 if key == "binding_E_diff":
                     self._test_binding_E_diffs.append(val)
@@ -439,9 +439,9 @@ class LightFlowMatch(LightningModule, Flow):
                 gen_POS=self.gen_POS,
                 rlxd_POS=self.rlxd_POS,
                 file_ext=".traj",
-                filter_otf=self.filter_otf,
+                sanitize_otf=self.sanitize_otf,
             )
-            all_metrics.extend(cf.evaluate())
+            all_metrics.extend(cf.run())
             all_atoms.extend(cf._all_atoms)
 
         if all_metrics:

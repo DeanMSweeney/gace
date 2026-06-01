@@ -184,7 +184,7 @@ class SamplerConfig:
     """Cutoff distance threshold to indicate whether an adsorabte atom has
     dissociated upon adsorption"""
 
-    filter_otf: bool = True
+    sanitize_otf: bool = True
     """Whether to apply validity checks on-the-fly during generation.
     - True: filter structures by validity criteria before writing (default)
     - False: write every successfully built structure without filtering
