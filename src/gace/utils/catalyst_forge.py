@@ -101,7 +101,7 @@ class CatalystForge:
 
         rows: list[dict] = []
 
-        for atoms, fname, batch_idx, graph_idx, target_E, ref_ads_pos in tqdm(items, desc="Processing"):
+        for atoms, fname, batch_idx, graph_idx, target_E, ref_ads_pos in tqdm(items, desc="Processing", disable=self.opt_graph is not None):
             row = self._process_one(
                 atoms=atoms,
                 fname=fname,
