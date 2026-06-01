@@ -295,7 +295,6 @@ class CatalystForge:
             vol_ok = float(atoms.get_volume()) >= 0.1
 
             tags = atoms.get_tags()
-            print(tags)
             cat_mask = tags != 2
             ads_mask = tags == 2
             ads_atoms = atoms[ads_mask]
