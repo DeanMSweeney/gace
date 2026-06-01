@@ -84,7 +84,7 @@ class LightFlowMatch(LightningModule, Flow):
             informed_priors: bool=True,
             interpolate_on_torus: bool=False,
             num_integration_steps: int=1,
-            run_mlff: bool=False,
+            relax_otf: bool=False,
             batched_relaxation: bool=True,
             mlff_checkpoint: Optional[str]=None,
             accelerator: str="gpu",
@@ -100,6 +100,7 @@ class LightFlowMatch(LightningModule, Flow):
             standardize_ads_pos: bool=False,
             ads_pos_mean: list = [0.02587131, -0.69517581, 0.91811687],
             ads_pos_std: list = [8.21663071, 9.02733422, 9.86882174],
+            filter_otf: bool=True,
             **kwargs,
         ):
 
@@ -107,7 +108,7 @@ class LightFlowMatch(LightningModule, Flow):
         # Save hyperparameters for logging and checkpointing (ignoring model-specific args)
         self.save_hyperparameters(ignore=["model", "variant", "mode", "rtol", "atol", "ode_method", \
             "track_grad_norms", "in_POS", "gen_POS", "config_vasp", "threshold", "x_matching", \
-            "interpolant_schedule", "write_eval_metrics", "num_integration_steps", "run_mlff", "mlff_checkpoint", \
+            "interpolant_schedule", "write_eval_metrics", "num_integration_steps", "relax_otf", "mlff_checkpoint", \
             "accelerator", "seed", "num_prim_atoms", "optimal_transport"])
 
         # Model and training configuration
@@ -134,7 +135,8 @@ class LightFlowMatch(LightningModule, Flow):
         self.optimal_transport = optimal_transport
         self.informed_priors = informed_priors
         self.interpolate_on_torus = interpolate_on_torus
-        self.run_mlff = run_mlff
+        self.relax_otf = relax_otf
+        self.filter_otf = filter_otf
         self.batched_relaxation = batched_relaxation
         self.accelerator = accelerator
         self.seed = seed
@@ -143,7 +145,7 @@ class LightFlowMatch(LightningModule, Flow):
         self.ads_integrity_threshold = ads_integrity_threshold
 
         self._mlff_calculator = None
-        if run_mlff and mlff_checkpoint is not None:
+        if relax_otf and mlff_checkpoint is not None:
             with Silent():
                 self._mlff_calculator = OCPCalculator(
                     model_name=mlff_checkpoint,
@@ -169,10 +171,6 @@ class LightFlowMatch(LightningModule, Flow):
             hist = json.load(f)["prim_slab_num_atoms_hist"]
         #self.prim_atoms_hist = torch.tensor(hist, dtype=torch.float32)
         self.register_buffer("prim_atoms_hist", torch.tensor(hist, dtype=torch.float32))
-
-        # Diagnostic mode: detailed loss analysis for model development
-        self._write_f_u = False
-        self.bad_iter, self.good_ter, self.iter = 0, 0, 0
        # ==============================================================================
        
     def _build_target_props(self, f_prim) -> dict:
@@ -376,13 +374,14 @@ class LightFlowMatch(LightningModule, Flow):
             binding_energies=binding_energies,
             batch_idx=batch_idx,
             calculator=self._mlff_calculator,
-            run_mlff=self.run_mlff,
+            relax_otf=self.relax_otf,
             config_vasp=self.config_vasp,
             catalyst_dist_cutoff=self.catalyst_dist_cutoff,
             gen_POS=self.gen_POS,
             rlxd_POS=self.rlxd_POS,
             file_ext=".vasp",
-            ads_integrity_threshold=self.ads_integrity_threshold, 
+            ads_integrity_threshold=self.ads_integrity_threshold,
+            filter_otf=self.filter_otf,
         )
         for metrics in cf.evaluate():
             for key, val in metrics.items():
@@ -434,12 +433,13 @@ class LightFlowMatch(LightningModule, Flow):
                 binding_energies=[self.target_binding_energy],
                 batch_idx=batch_idx,
                 calculator=self._mlff_calculator,
-                run_mlff=self.run_mlff,
+                relax_otf=self.relax_otf,
                 config_vasp=self.config_vasp,
                 catalyst_dist_cutoff=self.catalyst_dist_cutoff,
                 gen_POS=self.gen_POS,
                 rlxd_POS=self.rlxd_POS,
                 file_ext=".traj",
+                filter_otf=self.filter_otf,
             )
             all_metrics.extend(cf.evaluate())
             all_atoms.extend(cf._all_atoms)

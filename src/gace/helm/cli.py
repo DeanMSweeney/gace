@@ -48,7 +48,7 @@ from dataclasses import dataclass, asdict
 from typing import Optional, Literal, Union, Tuple
 
 # GACE modules
-from gace.helm.lightning import LightFlowMatch
+from gace.helm.orchestration import LightFlowMatch
 from gace.utils.builder import build_graph_from_atoms
 from gace.helm.callbacks import EMACallback
 from gace.utils.lmdb_loader import LazyLmdbDataset

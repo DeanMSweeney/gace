@@ -167,8 +167,8 @@ class SamplerConfig:
 
     # ==================== MLFF Relaxation ====================
 
-    run_mlff: bool = False
-    """Whether to run MLFF relaxation after generation"""
+    relax_otf: bool = False
+    """Whether to run MLFF relaxation on-the-fly after generation"""
 
     mlff_checkpoint: str = "EquiformerV2-31M-S2EF-OC20-All+MD"
     """Path to MLFF checkpoint for relaxation"""
@@ -180,9 +180,15 @@ class SamplerConfig:
     A pair is flagged as clashing if its distance is below catalyst_dist_cutoff * (r_i + r_j).
     Lower values are more permissive; higher values are stricter."""
 
-    ads_integrity_threshold: float = 2.0 
-    """Cutoff distance threshold to indicate whether an adsorabte atom has 
+    ads_integrity_threshold: float = 2.0
+    """Cutoff distance threshold to indicate whether an adsorabte atom has
     dissociated upon adsorption"""
+
+    filter_otf: bool = True
+    """Whether to apply validity checks on-the-fly during generation.
+    - True: filter structures by validity criteria before writing (default)
+    - False: write every successfully built structure without filtering
+    """
 
 
 
