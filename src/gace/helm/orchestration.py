@@ -385,9 +385,9 @@ class LightFlowMatch(LightningModule, Flow):
         )
         for metrics in cf.run():
             for key, val in metrics.items():
-                if key == "binding_E_diff":
+                if key == "binding_E_diff" and isinstance(val, float):
                     self._test_binding_E_diffs.append(val)
-                else:
+                elif isinstance(val, float):
                     self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
 
         return
@@ -446,7 +446,8 @@ class LightFlowMatch(LightningModule, Flow):
 
         if all_metrics:
             keys = all_metrics[0].keys()
-            avgs = {k: np.mean([m[k] for m in all_metrics if k in m]) for k in keys}
+            avgs = {k: np.mean([m[k] for m in all_metrics if isinstance(m.get(k), float)]) for k in keys
+                    if any(isinstance(m.get(k), float) for m in all_metrics)}
             print(f"[predict batch={batch_idx} avg over {len(all_metrics)} samples] " +
                   " ".join(f"{k}={v:.4f}" for k, v in avgs.items()))
 
