@@ -333,7 +333,7 @@ class CatalystForge:
             cat_ads_dist_ok = bool(cat_ads_dists.min() >= 0.5)
 
         except Exception:
-            print("Failed")
+            logging.warning(f"batch_relax_w_mlff failed: {e}")
             vol_ok = False
             cat_dist_ok = False
             cat_dist_ok_naive = False
