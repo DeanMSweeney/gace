@@ -195,14 +195,13 @@ class CatalystForge:
             if atoms is not None:
                 ase.io.write(os.path.join(self.gen_POS, fname), atoms)
             return base_row
-
+        print(atoms)
         validity_dict = self.sanitize(
             atoms=atoms,
             catalyst_dist_cutoff=self.catalyst_dist_cutoff,
             # ads_integrity_threshold=self.ads_integrity_threshold,
             # ref_ads_pos=ref_ads_pos,
         )
-        print(validity_dict["is_valid"])
         atoms_rlxd = self.relax(
             atoms=atoms,
             validity_dict=validity_dict,
