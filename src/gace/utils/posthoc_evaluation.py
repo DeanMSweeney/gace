@@ -209,7 +209,7 @@ def parse_args():
     import argparse
     p = argparse.ArgumentParser(description="Evaluate forge-generated structures.")
     p.add_argument("--gen_strucs", default="./gen_strucs", help="Directory of generated structure files")
-    p.add_argument("--sanitize", default=False, action="store_true",
+    p.add_argument("--sanitize", default=True, action="store_true",
                    help="Run validity checks (and optionally MLFF relaxation) on structures")
     p.add_argument("--relax", default=False, action="store_true", help="Run MLFF relaxation step")
     p.add_argument("--rlxd_strucs", default="./rlxd_strucs", help="Output directory for relaxed structures")
@@ -258,7 +258,7 @@ def main():
             batch_idx=0,
             calculator=calculator,
             catalyst_dist_cutoff=0.75,
-            sanitize_otf=True,
+            sanitize_otf=args.sanitize,
             relax_otf=args.relax,
             energy_cutoff=args.energy_cutoff,
             gen_POS=args.gen_strucs,
