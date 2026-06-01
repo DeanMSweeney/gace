@@ -195,7 +195,7 @@ class CatalystForge:
             if atoms is not None:
                 ase.io.write(os.path.join(self.gen_POS, fname), atoms)
             return base_row
-        print(atoms)
+
         validity_dict = self.sanitize(
             atoms=atoms,
             catalyst_dist_cutoff=self.catalyst_dist_cutoff,
@@ -333,6 +333,7 @@ class CatalystForge:
             cat_ads_dist_ok = bool(cat_ads_dists.min() >= 0.5)
 
         except Exception:
+            print("Failed")
             vol_ok = False
             cat_dist_ok = False
             cat_dist_ok_naive = False
