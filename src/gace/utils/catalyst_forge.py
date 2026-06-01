@@ -202,6 +202,7 @@ class CatalystForge:
             # ads_integrity_threshold=self.ads_integrity_threshold,
             # ref_ads_pos=ref_ads_pos,
         )
+        print(validity_dict["is_valid"])
         atoms_rlxd = self.relax(
             atoms=atoms,
             validity_dict=validity_dict,
