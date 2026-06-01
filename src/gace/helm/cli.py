@@ -191,7 +191,11 @@ def main(cfg: Config) -> None:
         declare(f">>> Primitive atom count: {'fixed at ' + str(n) if n is not None else 'sampling from histogram'} 🧙🏽‍♀️")
         ptst = {"src": cfg.oc20_test}
         test_set = LazyLmdbDataset(ptst)
-        test_set = Subset(test_set, indices=range(20))
+
+        if cfg.num_of_eval_samples is not None:
+            declare(f">>> Limiting eval to {cfg.num_of_eval_samples} samples")
+            test_set = Subset(test_set, indices=range(cfg.num_of_eval_samples))
+
         test_loader = DataLoader(
             dataset=test_set,
             batch_size=cfg.batch_size,
