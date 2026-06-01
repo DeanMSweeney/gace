@@ -379,7 +379,7 @@ class LightFlowMatch(LightningModule, Flow):
             catalyst_dist_cutoff=self.catalyst_dist_cutoff,
             gen_POS=self.gen_POS,
             rlxd_POS=self.rlxd_POS,
-            file_ext=".vasp",
+            file_ext=".traj",
             ads_integrity_threshold=self.ads_integrity_threshold,
             sanitize_otf=self.sanitize_otf,
         )
