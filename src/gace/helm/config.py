@@ -98,6 +98,17 @@ class OptimizerConfig:
     lambda_M: float = 1.0
     """Loss weight for supercell transformation matrix loss (M_loss)"""
 
+    lambda_energy: float = 0.1
+    """Loss weight for auxiliary adsorption energy prediction (energy_loss)"""
+
+    binding_energy_mean: float = -1.54790583
+    """Mean of adsorption binding energy over the training set (eV).
+    Update this after running collect_dataset_stats.py."""
+
+    binding_energy_std: float = 2.27278609
+    """Std of adsorption binding energy over the training set (eV).
+    Update this after running collect_dataset_stats.py."""
+
 
     
 @dataclass

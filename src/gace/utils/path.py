@@ -80,18 +80,30 @@ class Flow():
         ads_pos_loss = (ads_loss_per_graph * self.time_weight).mean()
         # ────────────────────────────────────────────────────────────────────────────────────────────────
 
-        lambda_x   = float(self.hparams.lambda_x)
-        lambda_z   = float(self.hparams.lambda_z)
-        lambda_ads = float(self.hparams.lambda_ads)
-        lambda_lat = float(self.hparams.lambda_lat)
-        lambda_M   = float(self.hparams.lambda_M)
+        # ── Energy prediction loss (auxiliary task) ─────────────────────────
+        # Predict the binding energy from the pooled transformer representation.
+        # Normalize the target to match the normalized space the model predicts in
+        # (same normalization applied in _build_target_props before embedding).
+        # Small lambda avoids large gradients flowing back through embed_conditions,
+        # which already receives the energy as a conditioning input.
+        energy_target = (data.ads_binding_energy.float() - self.binding_energy_mean) / self.binding_energy_std
+        energy_loss = (pred["energy"] - energy_target).abs().mean()
+        # ────────────────────────────────────────────────────────────────────
+
+        lambda_x      = float(self.hparams.lambda_x)
+        lambda_z      = float(self.hparams.lambda_z)
+        lambda_ads    = float(self.hparams.lambda_ads)
+        lambda_lat    = float(self.hparams.lambda_lat)
+        lambda_M      = float(self.hparams.lambda_M)
+        lambda_energy = float(self.hparams.lambda_energy)
 
         total_loss = (
-              lambda_x   * x_loss
-            + lambda_z   * z_loss
-            + lambda_ads * ads_pos_loss
-            + lambda_lat * (len_loss + ang_loss)
-            + lambda_M   * M_loss
+              lambda_x      * x_loss
+            + lambda_z      * z_loss
+            + lambda_ads    * ads_pos_loss
+            + lambda_lat    * (len_loss + ang_loss)
+            + lambda_M      * M_loss
+            + lambda_energy * energy_loss
         )
 
         return {
@@ -102,6 +114,7 @@ class Flow():
             "len_loss":     len_loss,
             "ang_loss":     ang_loss,
             "M_loss":       M_loss,
+            "energy_loss":  energy_loss,
         }
 
     def build_path(

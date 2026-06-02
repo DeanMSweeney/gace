@@ -186,6 +186,9 @@ class TransformerModule(nn.Module):
             nn.Linear(hidden_dim, spatial_dim, bias=False),
         )
 
+        # ── Energy prediction head (graph-level auxiliary task) ─────────────
+        self.energy_head = nn.Linear(hidden_dim, 1)
+
         # ── Cross attention layers ───────────────────────────────────────────
         if self.cross_attention:
             decoder_layer = partial(
@@ -299,6 +302,7 @@ class TransformerModule(nn.Module):
         Tuple[
             Float["b n 3"],  # type: ignore - ads_pos
         ],
+        Float[" b"],  # type: ignore - pred_energy
     ]:
         """Forward pass of the module.
 
@@ -481,6 +485,14 @@ class TransformerModule(nn.Module):
 
         h_out = h_out * combined_real_mask.unsqueeze(-1)  # (B, M+N,  C)
 
+        # ── Energy prediction (graph-level) ──────────────────────────────────
+        # Pool over all real tokens (prim + ads) — binding energy depends on both.
+        # Same masked-mean pattern used for lattice predictions.
+        combined_real_mask_f = combined_real_mask.unsqueeze(-1).float()  # (B, M+N, 1)
+        n_real = combined_real_mask_f.sum(1).clamp(min=1)                # (B, 1)
+        h_pool = (h_out * combined_real_mask_f).sum(1) / n_real          # (B, C)
+        pred_energy = self.energy_head(h_pool).squeeze(-1)               # (B,)
+
         # ── Split transformer output back into prim / ads ────────────────────
         h_out_prim = h_out[:, :prim_seq_len, :]  # (B, M, C)
         h_out_ads = h_out[:, prim_seq_len:, :]   # (B, N,  C)
@@ -578,6 +590,6 @@ class TransformerModule(nn.Module):
             out_pos * ads_real_mask.unsqueeze(-1),   # (B, N,  3)
         )
 
-        return pred_prim, pred_ads
+        return pred_prim, pred_ads, pred_energy
 
 

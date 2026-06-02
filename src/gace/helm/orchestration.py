@@ -101,6 +101,8 @@ class LightFlowMatch(LightningModule, Flow):
             standardize_ads_pos: bool=False,
             ads_pos_mean: list = [0.02587131, -0.69517581, 0.91811687],
             ads_pos_std: list = [8.21663071, 9.02733422, 9.86882174],
+            binding_energy_mean: float = 0.0,
+            binding_energy_std: float = 1.0,
             sanitize_otf: bool=True,
             **kwargs,
         ):
@@ -167,6 +169,8 @@ class LightFlowMatch(LightningModule, Flow):
         # Path, loss, and Euler integration run in normalized space; denormalize only at sampling output.
         self.register_buffer("ads_pos_mean", torch.tensor(ads_pos_mean, dtype=torch.float32))
         self.register_buffer("ads_pos_std", torch.tensor(ads_pos_std, dtype=torch.float32))
+        self.register_buffer("binding_energy_mean", torch.tensor(binding_energy_mean, dtype=torch.float32))
+        self.register_buffer("binding_energy_std", torch.tensor(binding_energy_std, dtype=torch.float32))
 
         _hist_path = os.path.join(os.path.dirname(__file__), "primitive_atom_distribution.json")
         with open(_hist_path) as f:
@@ -182,7 +186,9 @@ class LightFlowMatch(LightningModule, Flow):
         of samples (cfg_dropout_prob) by injecting a boolean mask; the model
         replaces those samples' embeddings with the learnable null embedding.
         """
-        feats = {"ads_binding_energy": f_prim.data["ads_binding_energy"]}
+        energy = f_prim.data["ads_binding_energy"]
+        energy = (energy - self.binding_energy_mean) / self.binding_energy_std
+        feats = {"ads_binding_energy": energy}
         if self.training and self.cfg_dropout_prob > 0:
             B = feats["ads_binding_energy"].shape[0]
             feats["cfg_drop_mask"] = (
@@ -224,7 +230,7 @@ class LightFlowMatch(LightningModule, Flow):
         else:
             feats = self._build_target_props(f_prim)
 
-        pred_prim, pred_ads  = self.model(
+        pred_prim, pred_ads, pred_energy = self.model(
             x_prim=(
                 x_prim.data["atomic_numbers"],          # (B, M) long
                 x_prim.data["frac_coords"],            # (B, M, 3)
@@ -252,6 +258,7 @@ class LightFlowMatch(LightningModule, Flow):
             "ang":     pred_prim[3].squeeze(1),          # (B, 3)
             "M":       pred_prim[4],                     # (B, 3, 3)
             "ads_pos": x_ads.to_sparse(pred_ads[0]),     # (N_ads, 3)
+            "energy":  pred_energy,                      # (B,)
         }
 
     def _transport_loss(self, input_graph: Data) -> torch.Tensor:
