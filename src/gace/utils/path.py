@@ -587,7 +587,7 @@ class Flow():
                         pred = pred_cond
 
                 # Update continuous modalities
-                noise_scale = self.hparams.sampler_cfg.sde_noise_scale
+                noise_scale = self.sde_noise_factor
                 data.pos               = euler_step(data.pos,               pred["pos"],     t_curr, dt, pbc_aware=True,  noise_scale=noise_scale)
                 data.lengths_scaled    = euler_step(data.lengths_scaled,    pred["len"],     t_curr, dt, pbc_aware=False, noise_scale=noise_scale)
                 data.angles_radians    = euler_step(data.angles_radians,    pred["ang"],     t_curr, dt, pbc_aware=False, noise_scale=noise_scale)
