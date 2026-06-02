@@ -488,6 +488,12 @@ Primitive-cell element presence (graphs containing element)
     Z=  5  B            121 graphs
 
 ======================================================================
+Adsorption binding energy (ads_binding_energy) statistics (across full dataset)
+======================================================================
+Total samples: 455492
+  mean=   -1.54790583  std=    2.27278609  min=   -9.992999  max=    9.963571
+
+======================================================================
 Adsorbate Cartesian positions (ads_pos) statistics (across full dataset)
 ======================================================================
 Total adsorbate atoms: 2126414
