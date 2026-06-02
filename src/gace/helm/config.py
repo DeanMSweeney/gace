@@ -117,6 +117,13 @@ class SamplerConfig:
     - >1: multi-step integration for higher accuracy
     """
 
+    sde_noise_scale: float = 0.0
+    """Standard deviation of Brownian noise injected at each Euler step (Euler-Maruyama).
+    Noise is tapered by (1 - t) so it vanishes as t → 1.
+    0.0 (default) gives the standard deterministic Euler step.
+    Typical range to explore: 0.01 – 0.1.
+    """
+
     # ==================== Structure Generation ====================
 
     num_generated_samples: int = 1
