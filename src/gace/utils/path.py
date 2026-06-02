@@ -587,11 +587,12 @@ class Flow():
                         pred = pred_cond
 
                 # Update continuous modalities
-                data.pos               = euler_step(data.pos,               pred["pos"],     t_curr, dt, pbc_aware=True)
-                data.lengths_scaled    = euler_step(data.lengths_scaled,    pred["len"],     t_curr, dt, pbc_aware=False)
-                data.angles_radians    = euler_step(data.angles_radians,    pred["ang"],     t_curr, dt, pbc_aware=False)
-                data.transformation_matrix = euler_step(data.transformation_matrix, pred["M"], t_curr, dt, pbc_aware=False)
-                data.ads_pos = euler_step(data.ads_pos, pred["ads_pos"], t_curr, dt, pbc_aware=False)
+                noise_scale = self.hparams.sampler_cfg.sde_noise_scale
+                data.pos               = euler_step(data.pos,               pred["pos"],     t_curr, dt, pbc_aware=True,  noise_scale=noise_scale)
+                data.lengths_scaled    = euler_step(data.lengths_scaled,    pred["len"],     t_curr, dt, pbc_aware=False, noise_scale=noise_scale)
+                data.angles_radians    = euler_step(data.angles_radians,    pred["ang"],     t_curr, dt, pbc_aware=False, noise_scale=noise_scale)
+                data.transformation_matrix = euler_step(data.transformation_matrix, pred["M"], t_curr, dt, pbc_aware=False, noise_scale=noise_scale)
+                data.ads_pos = euler_step(data.ads_pos, pred["ads_pos"], t_curr, dt, pbc_aware=False, noise_scale=noise_scale)
 
                 # Update discrete atom types (CTMC)
                 data.atomic_numbers = ctmc_step(data.atomic_numbers, pred["z"], t_curr, dt)
