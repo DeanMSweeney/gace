@@ -97,7 +97,7 @@ class LightFlowMatch(LightningModule, Flow):
             cfg_dropout_prob: float=0.1,
             cfg_w_continuous: float=1.0,
             cfg_w_discrete: float=1.0,
-            sde_noise_factor: float=0.0,
+            sde_noise_scale: float=0.0,
             standardize_ads_pos: bool=False,
             ads_pos_mean: list = [0.02587131, -0.69517581, 0.91811687],
             ads_pos_std: list = [8.21663071, 9.02733422, 9.86882174],
@@ -160,7 +160,7 @@ class LightFlowMatch(LightningModule, Flow):
         self.cfg_dropout_prob = cfg_dropout_prob
         self.cfg_w_continuous = cfg_w_continuous
         self.cfg_w_discrete = cfg_w_discrete
-        self.sde_noise_factor = sde_noise_factor
+        self.sde_noise_scale = sde_noise_scale
         self.standardize_ads_pos = standardize_ads_pos
 
         # Adsorbate position normalization stats (per-axis), computed offline over training set.
