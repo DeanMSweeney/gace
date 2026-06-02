@@ -14,6 +14,7 @@ import time
 from multiprocessing import Pool
 
 import ase.io
+from ase import Atoms
 from pymatgen.analysis.structure_matcher import StructureMatcher
 from pymatgen.io.ase import AseAtomsAdaptor
 from tqdm import tqdm
@@ -58,31 +59,45 @@ def collect_structure_files(directory: str) -> list[str]:
 # Uniqueness
 # ---------------------------------------------------------------------------
 
-def _load_slab_structure(path):
-    """Worker: strip adsorbate (tags==2) and return a pymatgen Structure."""
+def _load_full_atoms(path: str) -> tuple[str, "Atoms | None"]:
+    """Worker: load full atoms (with adsorbate) and return (path, atoms)."""
     try:
-        atoms = ase.io.read(path)
-        slab = atoms[atoms.get_tags() != 2]
-        if len(slab) == 0:
-            return None
-        return AseAtomsAdaptor().get_structure(slab)
+        return path, ase.io.read(path)
     except Exception:
-        return None
+        return path, None
 
 
-def compute_uniqueness(files: list[str], num_workers: int) -> dict:
-    """Structural uniqueness via StructureMatcher on slab-only structures.
-
-    File loading is parallelised; StructureMatcher runs in the main process.
-    """
-    log.info(f"Uniqueness: loading {len(files)} structures ({num_workers} workers)...")
+def load_atoms_parallel(files: list[str], num_workers: int) -> dict[str, "Atoms | None"]:
+    """Load all structure files in parallel. Returns path → Atoms mapping."""
+    log.info(f"Loading {len(files)} structures ({num_workers} workers)...")
     t0 = time.time()
     with Pool(processes=num_workers) as pool:
-        results = list(tqdm(pool.imap(_load_slab_structure, files),
-                            total=len(files), desc="Loading slabs"))
-    structures = [s for s in results if s is not None]
+        pairs = list(tqdm(pool.imap(_load_full_atoms, files),
+                          total=len(files), desc="Loading structures"))
+    log.info(f"Loaded in {time.time() - t0:.1f}s")
+    return dict(pairs)
+
+
+def compute_uniqueness(atoms_map: dict[str, "Atoms | None"], num_workers: int) -> dict:
+    """Structural uniqueness via StructureMatcher on slab-only structures.
+
+    Accepts pre-loaded full Atoms objects (with adsorbate); strips tags==2 here.
+    StructureMatcher runs in the main process.
+    """
+    t0 = time.time()
+    structures = []
+    for atoms in atoms_map.values():
+        if atoms is None:
+            continue
+        try:
+            slab = atoms[atoms.get_tags() != 2]
+            if len(slab) == 0:
+                continue
+            structures.append(AseAtomsAdaptor().get_structure(slab))
+        except Exception:
+            continue
     load_time = time.time() - t0
-    log.info(f"Loaded {len(structures)}/{len(files)} ({load_time:.1f}s)")
+    log.info(f"Converted {len(structures)}/{len(atoms_map)} slabs ({load_time:.1f}s)")
 
     log.info("Running StructureMatcher...")
     t1 = time.time()
@@ -230,8 +245,9 @@ def main():
     args = parse_args()
 
     files = collect_structure_files(args.gen_strucs)
+    preloaded = load_atoms_parallel(files, args.num_workers)
 
-    uniqueness = compute_uniqueness(files, args.num_workers)
+    uniqueness = compute_uniqueness(preloaded, args.num_workers)
 
     sanitisation = None
     if args.sanitize or args.relax:
@@ -263,6 +279,7 @@ def main():
             energy_cutoff=args.energy_cutoff,
             gen_POS=args.gen_strucs,
             rlxd_POS=args.rlxd_strucs,
+            preloaded_atoms=preloaded,
             n_strucs=args.n_strucs,
             seed=args.seed,
         )

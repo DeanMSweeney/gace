@@ -1,5 +1,4 @@
 import csv
-import glob
 import logging
 import os
 import random
@@ -21,16 +20,17 @@ _initialized_csvs: set = set()
 class CatalystForge:
     """Build, sanitize, relax, and write generated catalyst structures.
 
-    Two modes controlled by whether opt_graph is provided:
-        OTF  — opt_graph is set; builds structures from model output batch.
-        Disk — opt_graph is None; globs structures from gen_POS directory.
+    Two modes controlled by what is provided at construction:
+        OTF        — opt_graph is set; builds structures from model output batch.
+        Preloaded  — preloaded_atoms is set; dict[path, Atoms] supplied by caller.
 
     Usage (OTF):
         cf = CatalystForge(opt_graph=opt_graph, binding_energies=..., batch_idx=..., ...)
         metrics = cf.run()
 
     Usage (post-processing):
-        cf = CatalystForge(gen_POS="./gen_strucs", ...)
+        preloaded = load_atoms_parallel(files, num_workers)
+        cf = CatalystForge(preloaded_atoms=preloaded, gen_POS="./gen_strucs", ...)
         rows = cf.run()
     """
 
@@ -43,6 +43,7 @@ class CatalystForge:
         gen_POS: str | None,
         rlxd_POS: str | None,
         opt_graph=None,
+        preloaded_atoms: dict[str, "Atoms | None"] | None = None,
         file_ext: str = ".vasp",
         energy_cutoff: float = 10.0,
         ads_integrity_threshold: float = 2.0,
@@ -53,6 +54,7 @@ class CatalystForge:
         seed: int = 42,
     ):
         self.opt_graph = opt_graph
+        self.preloaded_atoms = preloaded_atoms
         self.binding_energies = binding_energies
         self.batch_idx = batch_idx
         self.calculator = calculator
@@ -79,7 +81,7 @@ class CatalystForge:
         if self.opt_graph is not None:
             items = self._items_from_graph()
         else:
-            items = self._items_from_files()
+            items = self._items_from_preloaded()
 
         os.makedirs(self.gen_POS, exist_ok=True)
         if self.relax_otf:
@@ -150,15 +152,11 @@ class CatalystForge:
             items.append((atoms, fname, self.batch_idx, b, target_E, ref_ads_pos))
         return items
 
-    def _items_from_files(self):
-        vasp = sorted(glob.glob(os.path.join(self.gen_POS, "*.vasp")))
-        files = vasp if vasp else sorted(glob.glob(os.path.join(self.gen_POS, "*.traj")))
-        if not files:
-            raise FileNotFoundError(f"No .vasp or .traj files found in {self.gen_POS}")
-
+    def _items_from_preloaded(self):
+        files = sorted(self.preloaded_atoms.keys())
         n = len(files) if self.n_strucs is None else min(self.n_strucs, len(files))
         sample = sorted(random.Random(self.seed).sample(files, n))
-        logging.info(f"Processing {len(sample)} structures (seed={self.seed})")
+        logging.info(f"Processing {len(sample)} structures (preloaded, seed={self.seed})")
 
         items = []
         for path in sample:
@@ -166,11 +164,7 @@ class CatalystForge:
             batch_idx, graph_idx = key if key else (None, None)
             target_E = self.binding_energies.get(key) if key and isinstance(self.binding_energies, dict) else None
             fname = os.path.basename(path)
-            try:
-                atoms = ase.io.read(path)
-            except Exception as e:
-                logging.warning(f"Failed to read {path}: {e}")
-                atoms = None
+            atoms = self.preloaded_atoms.get(path)
             items.append((atoms, fname, batch_idx, graph_idx, target_E, None))
         return items
 
