@@ -84,7 +84,7 @@ class LightFlowMatch(LightningModule, Flow):
             informed_priors: bool=True,
             interpolate_on_torus: bool=False,
             num_integration_steps: int=1,
-            run_mlff: bool=False,
+            relax_otf: bool=False,
             batched_relaxation: bool=True,
             mlff_checkpoint: Optional[str]=None,
             accelerator: str="gpu",
@@ -94,10 +94,13 @@ class LightFlowMatch(LightningModule, Flow):
             num_generated_samples: int=1,
             catalyst_dist_cutoff: float=0.75,
             ads_integrity_threshold: float=2.0,
-            condition_on_binding_E: bool=True,
+            cfg_dropout_prob: float=0.1,
+            cfg_w_continuous: float=1.0,
+            cfg_w_discrete: float=1.0,
             standardize_ads_pos: bool=False,
             ads_pos_mean: list = [0.02587131, -0.69517581, 0.91811687],
             ads_pos_std: list = [8.21663071, 9.02733422, 9.86882174],
+            sanitize_otf: bool=True,
             **kwargs,
         ):
 
@@ -105,7 +108,7 @@ class LightFlowMatch(LightningModule, Flow):
         # Save hyperparameters for logging and checkpointing (ignoring model-specific args)
         self.save_hyperparameters(ignore=["model", "variant", "mode", "rtol", "atol", "ode_method", \
             "track_grad_norms", "in_POS", "gen_POS", "config_vasp", "threshold", "x_matching", \
-            "interpolant_schedule", "write_eval_metrics", "num_integration_steps", "run_mlff", "mlff_checkpoint", \
+            "interpolant_schedule", "write_eval_metrics", "num_integration_steps", "relax_otf", "mlff_checkpoint", \
             "accelerator", "seed", "num_prim_atoms", "optimal_transport"])
 
         # Model and training configuration
@@ -132,7 +135,8 @@ class LightFlowMatch(LightningModule, Flow):
         self.optimal_transport = optimal_transport
         self.informed_priors = informed_priors
         self.interpolate_on_torus = interpolate_on_torus
-        self.run_mlff = run_mlff
+        self.relax_otf = relax_otf
+        self.sanitize_otf = sanitize_otf
         self.batched_relaxation = batched_relaxation
         self.accelerator = accelerator
         self.seed = seed
@@ -141,7 +145,7 @@ class LightFlowMatch(LightningModule, Flow):
         self.ads_integrity_threshold = ads_integrity_threshold
 
         self._mlff_calculator = None
-        if run_mlff and mlff_checkpoint is not None:
+        if relax_otf and mlff_checkpoint is not None:
             with Silent():
                 self._mlff_calculator = OCPCalculator(
                     model_name=mlff_checkpoint,
@@ -152,7 +156,9 @@ class LightFlowMatch(LightningModule, Flow):
 
         self.target_binding_energy = target_binding_energy
         self.num_generated_samples = num_generated_samples
-        self.condition_on_binding_E = condition_on_binding_E
+        self.cfg_dropout_prob = cfg_dropout_prob
+        self.cfg_w_continuous = cfg_w_continuous
+        self.cfg_w_discrete = cfg_w_discrete
         self.standardize_ads_pos = standardize_ads_pos
 
         # Adsorbate position normalization stats (per-axis), computed offline over training set.
@@ -165,13 +171,24 @@ class LightFlowMatch(LightningModule, Flow):
             hist = json.load(f)["prim_slab_num_atoms_hist"]
         #self.prim_atoms_hist = torch.tensor(hist, dtype=torch.float32)
         self.register_buffer("prim_atoms_hist", torch.tensor(hist, dtype=torch.float32))
-
-        # Diagnostic mode: detailed loss analysis for model development
-        self._write_f_u = False
-        self.bad_iter, self.good_ter, self.iter = 0, 0, 0
        # ==============================================================================
        
-    def forward(self, data: Data) -> dict:
+    def _build_target_props(self, f_prim) -> dict:
+        """Build the target-property conditioning dict for the model forward pass.
+
+        Always passes binding energy. During training, randomly drops a fraction
+        of samples (cfg_dropout_prob) by injecting a boolean mask; the model
+        replaces those samples' embeddings with the learnable null embedding.
+        """
+        feats = {"ads_binding_energy": f_prim.data["ads_binding_energy"]}
+        if self.training and self.cfg_dropout_prob > 0:
+            B = feats["ads_binding_energy"].shape[0]
+            feats["cfg_drop_mask"] = (
+                torch.rand(B, device=feats["ads_binding_energy"].device) < self.cfg_dropout_prob
+            )
+        return feats
+
+    def forward(self, data: Data, force_unconditional: bool = False) -> dict:
         """Run the forge model forward pass and return a flat prediction dict.
 
         Converts the PyG batch to dense tensors, calls the transformer, and
@@ -182,6 +199,8 @@ class LightFlowMatch(LightningModule, Flow):
 
         Args:
             data: PyG Data/Batch with all forge fields populated.
+            force_unconditional: If True, drop all conditioning (cfg_drop_mask=True for
+                every sample). Used for the unconditional forward pass in CFG guidance.
 
         Returns:
             Dict with keys: pos, z, len, ang, M, ads_pos.
@@ -194,9 +213,18 @@ class LightFlowMatch(LightningModule, Flow):
 
         t = t_prim.data["t"].squeeze(-1)  # (B,)
 
+        if force_unconditional:
+            B = x_prim.data["atomic_numbers"].shape[0]
+            feats = {
+                "ads_binding_energy": f_prim.data["ads_binding_energy"],
+                "cfg_drop_mask": torch.ones(B, dtype=torch.bool, device=data.pos.device),
+            }
+        else:
+            feats = self._build_target_props(f_prim)
+
         pred_prim, pred_ads  = self.model(
             x_prim=(
-                x_prim.data["atomic_numbers_hot"],          # (B, M) long
+                x_prim.data["atomic_numbers"],          # (B, M) long
                 x_prim.data["frac_coords"],            # (B, M, 3)
                 x_prim.data["lengths_scaled"],         # (B, 1, 3)
                 x_prim.data["angles_radians"],         # (B, 1, 3)
@@ -210,7 +238,7 @@ class LightFlowMatch(LightningModule, Flow):
             ),
             t_prim=(t, t, t, t),
             t_ads=(t,),
-            feats={"ads_binding_energy": f_prim.data["ads_binding_energy"] if self.condition_on_binding_E else None},
+            feats=feats,
             prim_padding_mask=prim_padding_mask,
             ads_padding_mask=ads_padding_mask,
         )
@@ -346,19 +374,20 @@ class LightFlowMatch(LightningModule, Flow):
             binding_energies=binding_energies,
             batch_idx=batch_idx,
             calculator=self._mlff_calculator,
-            run_mlff=self.run_mlff,
+            relax_otf=self.relax_otf,
             config_vasp=self.config_vasp,
             catalyst_dist_cutoff=self.catalyst_dist_cutoff,
             gen_POS=self.gen_POS,
             rlxd_POS=self.rlxd_POS,
-            file_ext=".vasp",
-            ads_integrity_threshold=self.ads_integrity_threshold, 
+            file_ext=".traj",
+            ads_integrity_threshold=self.ads_integrity_threshold,
+            sanitize_otf=self.sanitize_otf,
         )
-        for metrics in cf.evaluate():
+        for metrics in cf.run():
             for key, val in metrics.items():
-                if key == "binding_E_diff":
+                if key == "binding_E_diff" and isinstance(val, float):
                     self._test_binding_E_diffs.append(val)
-                else:
+                elif isinstance(val, float):
                     self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
 
         return
@@ -404,19 +433,21 @@ class LightFlowMatch(LightningModule, Flow):
                 binding_energies=[self.target_binding_energy],
                 batch_idx=batch_idx,
                 calculator=self._mlff_calculator,
-                run_mlff=self.run_mlff,
+                relax_otf=self.relax_otf,
                 config_vasp=self.config_vasp,
                 catalyst_dist_cutoff=self.catalyst_dist_cutoff,
                 gen_POS=self.gen_POS,
                 rlxd_POS=self.rlxd_POS,
                 file_ext=".traj",
+                sanitize_otf=self.sanitize_otf,
             )
-            all_metrics.extend(cf.evaluate())
+            all_metrics.extend(cf.run())
             all_atoms.extend(cf._all_atoms)
 
         if all_metrics:
             keys = all_metrics[0].keys()
-            avgs = {k: np.mean([m[k] for m in all_metrics if k in m]) for k in keys}
+            avgs = {k: np.mean([m[k] for m in all_metrics if isinstance(m.get(k), float)]) for k in keys
+                    if any(isinstance(m.get(k), float) for m in all_metrics)}
             print(f"[predict batch={batch_idx} avg over {len(all_metrics)} samples] " +
                   " ".join(f"{k}={v:.4f}" for k, v in avgs.items()))
 

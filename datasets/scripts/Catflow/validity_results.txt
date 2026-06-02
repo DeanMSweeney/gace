@@ -1,0 +1,35 @@
+======================================================================
+CatalystForge Validity Assessment
+Dataset path : /datasets/CatFlow/samples_energies/dng_results/initial_structures
+Total .traj  : 24671
+Settings     : cutoff=0.75, integrity_threshold=2.0 A
+Workers      : 288
+======================================================================
+
+======================================================================
+OVERALL SUMMARY
+======================================================================
+  .traj files found   : 24671
+  Successfully parsed : 24671
+  Check                                       Pass %  (Pass / Total)
+  --------------------------------------------------------
+  Volume ok             (>=0.1 A^3)          100.00%  (24671 / 24671)
+  Cat. dist ok          (cov-radii cutoff)    56.09%  (13838 / 24671)
+  Cat. atom types ok    (OC20 elements Z22-83)  96.32%  (23763 / 24671)
+  Cat-ads dist ok       (>=0.5 A)             98.57%  (24317 / 24671)
+  Ads. dist ok          (>=0.5 A)             98.77%  (24368 / 24671)
+  Ads. integrity ok     (vs first frame)     100.00%  (24671 / 24671)
+  VALID                 (all strict checks)   52.88%  (13046 / 24671)
+  VALID (naive)         (simple dist checks)  97.36%  (24019 / 24671)
+
+======================================================================
+Failure mode breakdown  (structures that fail VALID, by root cause)
+======================================================================
+  Volume ok             (>=0.1 A^3)               0 failing  (0.0%)
+  Cat. dist ok          (cov-radii cutoff)    10833 failing  (43.9%)
+  Cat. atom types ok    (OC20 elements Z22-83)    908 failing  (3.7%)
+  Cat-ads dist ok       (>=0.5 A)               354 failing  (1.4%)
+  Ads. dist ok          (>=0.5 A)               303 failing  (1.2%)
+
+  Total valid  : 13046 / 24671  (52.9%)
+  Total invalid: 11625 / 24671  (47.1%)

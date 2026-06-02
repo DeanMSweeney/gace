@@ -48,7 +48,7 @@ from dataclasses import dataclass, asdict
 from typing import Optional, Literal, Union, Tuple
 
 # GACE modules
-from gace.helm.lightning import LightFlowMatch
+from gace.helm.orchestration import LightFlowMatch
 from gace.utils.builder import build_graph_from_atoms
 from gace.helm.callbacks import EMACallback
 from gace.utils.lmdb_loader import LazyLmdbDataset
@@ -191,7 +191,11 @@ def main(cfg: Config) -> None:
         declare(f">>> Primitive atom count: {'fixed at ' + str(n) if n is not None else 'sampling from histogram'} 🧙🏽‍♀️")
         ptst = {"src": cfg.oc20_test}
         test_set = LazyLmdbDataset(ptst)
-        test_set = Subset(test_set, indices=range(10))
+
+        if cfg.num_eval_samples is not None:
+            declare(f">>> Limiting eval to {cfg.num_eval_samples} samples")
+            test_set = Subset(test_set, indices=range(cfg.num_eval_samples))
+
         test_loader = DataLoader(
             dataset=test_set,
             batch_size=cfg.batch_size,
@@ -226,11 +230,11 @@ def main(cfg: Config) -> None:
         optimal_transport=cfg.optimal_transport,
         informed_priors=cfg.informed_priors,
         interpolate_on_torus=cfg.interpolate_on_torus,
-        condition_on_binding_E=cfg.condition_on_binding_E,
         standardize_ads_pos=cfg.standardize_ads_pos,
         mode=cfg.mode,
         track_grad_norms=cfg.track_grad_norms,
         x_matching=cfg.x_matching,
+        cfg_dropout_prob=cfg.cfg_dropout_prob,
         schedule_type=cfg.interpolant_schedule,
         accelerator=cfg.accelerator,
         seed=cfg.seed,

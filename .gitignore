@@ -47,7 +47,6 @@ ocp_checkpoints/
 plots/
 *_files/
 mlff_checkpoint_cache/ 
-catflow/
 poscar*/
 analysis/
 .claude/
@@ -55,8 +54,9 @@ generated_samples/
 datasets/factorized
 *strucs*/
 equiformer_v3/
-
-
+ablation_studies/
+datasets/CatFlow/
+uncond/
 # Data formats
 *.lmdb
 *.pkl

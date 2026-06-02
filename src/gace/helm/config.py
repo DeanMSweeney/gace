@@ -117,6 +117,13 @@ class SamplerConfig:
     - >1: multi-step integration for higher accuracy
     """
 
+    sde_noise_scale: float = 0.0
+    """Standard deviation of Brownian noise injected at each Euler step (Euler-Maruyama).
+    Noise is tapered by (1 - t) so it vanishes as t → 1.
+    0.0 (default) gives the standard deterministic Euler step.
+    Typical range to explore: 0.01 – 0.1.
+    """
+
     # ==================== Structure Generation ====================
 
     num_generated_samples: int = 1
@@ -151,12 +158,26 @@ class SamplerConfig:
     Creates INCAR, KPOINTS, POTCAR files for DFT verification workflow
     """
 
+    # ==================== Classifier-Free Guidance (Inference) ====================
+
+    cfg_w_continuous: float = 1.0
+    """CFG guidance weight w1 for continuous modalities (positions, lattice, ads_pos).
+    Applied as: x1_guided = (1 - w1) * x1_uncond + w1 * x1_cond.
+    1.0 = fully conditional (single forward pass, no overhead). >1 = extrapolated guidance.
+    Requires the model to have been trained with cfg_dropout_prob > 0."""
+
+    cfg_w_discrete: float = 1.0
+    """CFG guidance weight w2 for discrete modality (atom types), applied in log-space.
+    Applied as: log_p_guided = (1 - w2) * log_p_uncond + w2 * log_p_cond.
+    1.0 = fully conditional (single forward pass, no overhead). >1 = extrapolated guidance.
+    Requires the model to have been trained with cfg_dropout_prob > 0."""
+
     # ==================== MLFF Relaxation ====================
 
-    run_mlff: bool = False
-    """Whether to run MLFF relaxation after generation"""
+    relax_otf: bool = False
+    """Whether to run MLFF relaxation on-the-fly after generation"""
 
-    mlff_checkpoint: str = "PaiNN-S2EF-OC20-All"
+    mlff_checkpoint: str = "EquiformerV2-31M-S2EF-OC20-All+MD"
     """Path to MLFF checkpoint for relaxation"""
 
     # ==================== Evaluation Criteria ================
@@ -166,9 +187,15 @@ class SamplerConfig:
     A pair is flagged as clashing if its distance is below catalyst_dist_cutoff * (r_i + r_j).
     Lower values are more permissive; higher values are stricter."""
 
-    ads_integrity_threshold: float = 2.0 
-    """Cutoff distance threshold to indicate whether an adsorabte atom has 
+    ads_integrity_threshold: float = 2.0
+    """Cutoff distance threshold to indicate whether an adsorabte atom has
     dissociated upon adsorption"""
+
+    sanitize_otf: bool = True
+    """Whether to apply validity checks on-the-fly during generation.
+    - True: filter structures by validity criteria before writing (default)
+    - False: write every successfully built structure without filtering
+    """
 
 
 
@@ -274,7 +301,7 @@ class Config:
 
     # ==================== Logging ====================
 
-    logger: bool = True
+    logger: bool = False
     """Whether to enable Weights & Biases (WandB) logging
     Logs metrics, hyperparameters, and optionally model checkpoints
     """
@@ -309,7 +336,7 @@ class Config:
     - "path/to/checkpoint.ckpt": resume from checkpoint
     """
 
-    resume_training: bool = True
+    resume_training: bool = False
     """Whether to resume training state (optimizer, scheduler, epoch) from checkpoint
     - True: resume training (continues from saved epoch)
     - False: load weights only (restarts training from epoch 0)
@@ -331,6 +358,9 @@ class Config:
     - "generate": generate structures from checkpoint (ODE integration)
     - "debug": debug mode with additional checks
     """
+
+    num_eval_samples: Optional[int] = None
+    """Number of samples to use for evaluation (default: use full eval set)"""
 
     x_matching: Literal["flow", "endpoint"] = "endpoint"
     """
@@ -355,7 +385,7 @@ class Config:
     Not applied to atom types (corruption-mask scheme; alignment has no effect).
     """
 
-    informed_priors: bool = False
+    informed_priors: bool = True
     """
     Whether to use informed priors for the noise x0 (forge variant only).
     """
@@ -375,11 +405,11 @@ class Config:
     - False: adsorbate positions are used as-is (default)
     """
 
-    condition_on_binding_E: bool = True
+    cfg_dropout_prob: float = 0.0
     """
-    Whether to condition the model on the target adsorption binding energy.
-    - True: binding energy is embedded and added to the conditioning signal
-    - False: binding energy conditioning is disabled (model generates unconditionally)
+    Probability of dropping the binding energy condition for a given training sample.
+    When dropped, the learnable null binding energy embedding is used instead.
+    Set to 0.0 to disable condition dropout (fully conditional training).
     """
 
     # ==================== Sampler Settings (for Inference) ====================

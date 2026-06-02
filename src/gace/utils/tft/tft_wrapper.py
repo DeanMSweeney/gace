@@ -187,9 +187,9 @@ class PyGToTensorDict:
                 max_num_nodes=max_num_nodes,
             ) # B, N, 3
 
-            # Node-level: atomic_numbers_hot
-            sd["atomic_numbers_hot"], mask = to_dense_batch(
-                data.atomic_numbers_hot,
+            # Node-level: atomic numbers (long indices, mask token = NUM_CLASSES-1 = 99)
+            sd["atomic_numbers"], mask = to_dense_batch(
+                data.atomic_numbers,
                 atom_batch,
                 max_num_nodes=max_num_nodes,
             )
