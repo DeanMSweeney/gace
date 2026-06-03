@@ -233,6 +233,7 @@ class CatalystForge:
         return {
             **base_row,
             "computed_binding_E": _fmt(energy_dict["computed_binding_E"]) if energy_dict else "",
+            "binding_E_error":    abs(target_E - regressed_E) if target_E is not None and regressed_E is not None else "",
             "binding_E_diff":     energy_dict["binding_E_diff"] if energy_dict and energy_dict["binding_E_diff"] is not None else "",
             "vol_ok":             float(validity_dict["vol_ok"]),
             "cat_dist_ok":        float(validity_dict["cat_dist_ok"]),
