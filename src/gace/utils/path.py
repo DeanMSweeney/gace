@@ -422,55 +422,35 @@ class Flow():
 
     def _build_atom_type_path(self, data: Data, t: Tensor, cosine_schd_freq: Tensor=1) -> Data:
         """
-        Simplex flow-matching for catalyst atom types (forge variant only).
+        CTMC corruption for catalyst atom types (forge variant), following zatom.
 
-        z0 = random one-hot, Hungarian-aligned to z1 for permutation invariance.
-        z1 = true atomic numbers (one-hot).
-        zt = (1-t)*z0 + t*z1   (stays on simplex by convexity).
-        Adsorbate atom types are conditioned (fixed to their true value).
+        Prior z0 = uniform random element (0–99). Each atom is independently
+        corrupted: with probability (1 - alpha_t) it takes z0, otherwise z1.
 
         Stores on data:
-            data.atomic_numbers_noisy  ← argmax(zt)  (integer, for embedding)
-            data.atomic_numbers        ← same as above (replaces clean labels)
-            data.atomic_numbers_true   ← z1 indices (cross-entropy target)
-            data.atomic_numbers_hot    ← zt  (soft distribution for soft embedding)
-            data.t_z                   ← per-atom interpolation time
+            data.atomic_numbers        ← zt  (N_prim,) long — corrupted model input
+            data.atomic_numbers_target ← z1  (N_prim,) long — cross-entropy target
         """
 
         device = data.pos.device
 
-        # shift atomic numbers to start from 0, not 1 
-        # z1 only pertains to the primitive cell 
-        z1 = (data.atomic_numbers.long() - 1).unsqueeze(1)  # (N_prim, 1)
+        z1 = (data.atomic_numbers.long() - 1)  # (N_prim,) 0-indexed true types
+        z0 = torch.randint(0, NUM_CLASSES, (z1.shape[0],), device=device)  # (N_prim,) random prior
 
-        # Prior: random atomic number indices (much more efficient than one-hot)
-        z0 = torch.randint(low=0, high=NUM_CLASSES, size=(z1.size(0), 1), device=device)  # N, 1
-
-        # Convert to one-hot after alignment
-        # F.one_hot expects (N,) input, so squeeze the (N, 1) tensors
-        z0_hot = F.one_hot(z0.squeeze(1), num_classes=NUM_CLASSES)      # N, NUM_CLASSES
-        z1_hot = F.one_hot(z1.squeeze(1), num_classes=NUM_CLASSES)      # N, NUM_CLASSES
-        
         # Sample per-graph interpolation time
         t_z_per_graph = t
-        t_z = t_z_per_graph[data.batch[self.primitive_mask]] # Nprim, 1
+        t_z = t_z_per_graph[data.batch[self.primitive_mask]]  # (N_prim, 1)
 
         alpha_t_z, alpha_t_z_grad, alpha_t_z_loss_coeff = self._interpolant_schedule(
             t=t_z,
             schedule_type=self.schedule_type,
-            x_matching="endpoint", # atomic numbers must always use endpoint matching 
-            v=cosine_schd_freq, 
+            x_matching="endpoint",
+            v=cosine_schd_freq,
         )
 
-        # Use corruption probbability to randomly mask certain atoms 
-        # Becomes less likely as t -> 1 (true sample)
-        corruption_prob = torch.rand(t_z.size(), device=device) # B, 1
-        corrupt_mask = (corruption_prob > t_z).int() # Nprim, 1
-        zt_hot = z0_hot * corrupt_mask + z1_hot * (1 - corrupt_mask)
-
-        data.atomic_numbers        = zt_hot.argmax(dim=-1)   # (N_prim,) long — noisy model input
-        data.atomic_numbers_target = z1.squeeze(1)            # (N_prim,) long — CE loss target
-        data.atomic_numbers_hot    = zt_hot                   # (N_prim, NUM_CLASSES) — kept for reference
+        corrupt_mask = torch.rand(z1.shape, device=device) > t_z.squeeze(1)  # (N_prim,) bool
+        data.atomic_numbers        = torch.where(corrupt_mask, z0, z1)        # (N_prim,) long
+        data.atomic_numbers_target = z1                                        # (N_prim,) long
 
         # Condition on adsorbate atom types 
         z1_ads = data.ads_atomic_numbers.long() - 1  # N_ads, shift 1-90 → 0-89
