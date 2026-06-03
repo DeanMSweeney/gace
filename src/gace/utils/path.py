@@ -617,12 +617,9 @@ class Flow():
         data.angles_generated          = data.angles_radians
         data.transformation_matrix     = data.transformation_matrix.round().long()
         data.M_generated               = data.transformation_matrix
+        data.ads_pos_generated = data.ads_pos
 
-        
-        # Denormalize adsorbate positions back to raw Å for output (only if standardized)
-        if self.standardize_ads_pos:
-            data.ads_pos_generated = data.ads_pos * self.ads_pos_std + self.ads_pos_mean
-        else:
-            data.ads_pos_generated = data.ads_pos
+        if "energy" in pred:
+            data.binding_energy_generated = pred["energy"] * self.binding_energy_std + self.binding_energy_mean
 
         return data

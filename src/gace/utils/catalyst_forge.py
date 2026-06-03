@@ -37,6 +37,7 @@ class CatalystForge:
     def __init__(
         self,
         binding_energies: list[float],
+        regressed_binding_energies: list[float],
         batch_idx: int,
         calculator,
         catalyst_dist_cutoff: float,
@@ -56,6 +57,7 @@ class CatalystForge:
         self.opt_graph = opt_graph
         self.preloaded_atoms = preloaded_atoms
         self.binding_energies = binding_energies
+        self.regressed_binding_energies = regressed_binding_energies
         self.batch_idx = batch_idx
         self.calculator = calculator
         self.relax_otf = relax_otf
@@ -99,17 +101,18 @@ class CatalystForge:
                 if os.path.isfile(otf_csv_path):
                     os.remove(otf_csv_path)
 
-        be_fieldnames = ["batch_idx", "graph_idx", "target_binding_E", "computed_binding_E", "binding_E_diff"]
+        be_fieldnames = ["batch_idx", "graph_idx", "target_binding_E", "regressed_binding_E", "binding_E_error", "computed_binding_E", "binding_E_diff"]
 
         rows: list[dict] = []
 
-        for atoms, fname, batch_idx, graph_idx, target_E, ref_ads_pos in tqdm(items, desc="Processing", disable=self.opt_graph is not None):
+        for atoms, fname, batch_idx, graph_idx, target_E, regressed_E, ref_ads_pos in tqdm(items, desc="Processing", disable=self.opt_graph is not None):
             row = self._process_one(
                 atoms=atoms,
                 fname=fname,
                 batch_idx=batch_idx,
                 graph_idx=graph_idx,
                 target_E=target_E,
+                regressed_E=regressed_E,
                 ref_ads_pos=ref_ads_pos,
             )
             rows.append(row)
@@ -128,7 +131,7 @@ class CatalystForge:
         if self.opt_graph is None:
             out_dir = self.rlxd_POS if self.relax_otf else self.gen_POS
             eval_fieldnames = [
-                "batch_idx", "graph_idx", "target_binding_E", "computed_binding_E", "binding_E_diff",
+                "batch_idx", "graph_idx", "target_binding_E", "regressed_binding_E", "binding_E_error", "computed_binding_E", "binding_E_diff",
                 "vol_ok", "cat_dist_ok", "cat_atom_types_ok", "cat_ads_dist_ok", "ads_dist_ok",
                 "is_valid", "is_valid_naive",
             ]
@@ -148,8 +151,9 @@ class CatalystForge:
             atoms       = self._build(b, prim_batch, ads_batch)
             fname       = f"{self.batch_idx}_{b}{self.file_ext}"
             target_E    = self.binding_energies[b]
+            regressed_E = self.regressed_binding_energies[b]
             ref_ads_pos = self.opt_graph.ref_ads_pos[ads_batch == b]
-            items.append((atoms, fname, self.batch_idx, b, target_E, ref_ads_pos))
+            items.append((atoms, fname, self.batch_idx, b, target_E, regressed_E, ref_ads_pos))
         return items
 
     def _items_from_preloaded(self):
@@ -175,12 +179,15 @@ class CatalystForge:
         batch_idx: int | None,
         graph_idx: int | None,
         target_E: float | None,
+        regressed_E: float | None,
         ref_ads_pos,
     ) -> dict:
         base_row = {
             "batch_idx":          batch_idx,
             "graph_idx":          graph_idx,
             "target_binding_E":   _fmt(target_E) if target_E is not None else "",
+            "regressed_binding_E": _fmt(regressed_E) if regressed_E is not None else "",
+            "binding_E_error":    _fmt(abs(target_E - regressed_E)) if target_E is not None and regressed_E is not None else "",
             "computed_binding_E": "",
             "binding_E_diff":     "",
         }

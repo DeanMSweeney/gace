@@ -377,10 +377,12 @@ class LightFlowMatch(LightningModule, Flow):
 
         B = int(opt_graph.batch.max().item()) + 1
         binding_energies = [data.ads_binding_energy[b].item() for b in range(B)]
+        regressed_binding_energies = [data.binding_energy_generated[b].item() for b in range(B)]
 
         cf = CatalystForge(
             opt_graph=opt_graph,
             binding_energies=binding_energies,
+            regressed_binding_energies=regressed_binding_energies,
             batch_idx=batch_idx,
             calculator=self._mlff_calculator,
             relax_otf=self.relax_otf,
