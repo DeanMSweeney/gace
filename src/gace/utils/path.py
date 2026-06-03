@@ -46,10 +46,7 @@ class Flow():
         x_pred = pred["pos"].float()
         x_target = data.pos_target.float()
         x_diff = x_pred - x_target
-        n0 = torch.round(x_diff)
-        x_diff = x_diff - n0
-        with torch.no_grad():
-            x_max_L = x_diff.abs().mean(dim=1).max()
+        x_diff = x_diff - torch.round(x_diff) if self.informed_priors else x_diff
         x_loss_per_graph = scatter(x_diff.abs().mean(dim=1), prim_batch, dim=0, reduce="mean")  # (B,)
         x_loss = (x_loss_per_graph * self.time_weight).mean()
         # ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -345,9 +342,7 @@ class Flow():
                 x0 = batched_ot_align(source=x0, target=x1, batch=data.batch[self.primitive_mask], pbc_aware=True)
 
             u_x = x1 - x0
-
-            if not self.interpolate_on_torus:
-                u_x = u_x - torch.round(u_x)
+            u_x = u_x - torch.round(u_x) if self.informed_priors else u_x
 
             # Sample per-graph interpolation time
             t_x_per_graph = t # B, 1 
@@ -392,8 +387,6 @@ class Flow():
 
         # Read absolute Cartesian target; optionally z-score with dataset stats
         ads_pos1 = data.ads_pos.float()                                  # (N_ads, 3) raw Å
-        if self.standardize_ads_pos:
-            ads_pos1 = (ads_pos1 - self.ads_pos_mean) / self.ads_pos_std
         ads_pos0 = torch.randn_like(ads_pos1)                            # N(0,1) prior
 
         #if self.optimal_transport:
@@ -605,11 +598,5 @@ class Flow():
         data.transformation_matrix     = data.transformation_matrix.round().long()
         data.M_generated               = data.transformation_matrix
 
-        
-        # Denormalize adsorbate positions back to raw Å for output (only if standardized)
-        if self.standardize_ads_pos:
-            data.ads_pos_generated = data.ads_pos * self.ads_pos_std + self.ads_pos_mean
-        else:
-            data.ads_pos_generated = data.ads_pos
 
         return data
