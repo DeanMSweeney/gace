@@ -387,19 +387,8 @@ class LightFlowMatch(LightningModule, Flow):
         )
         for metrics in cf.run():
             for key, val in metrics.items():
-                if key == "binding_E_diff" and isinstance(val, float):
-                    self._test_binding_E_diffs.append(val)
-                elif isinstance(val, float):
-                    self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
-
+                self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
         return
-
-    def on_test_epoch_start(self):
-        self._test_binding_E_diffs = []
-
-    def on_test_epoch_end(self):
-        if self._test_binding_E_diffs:
-            self.log("median_binding_E_diff", float(np.median(self._test_binding_E_diffs)))
 
     def predict_step(self, data: Data, batch_idx: int):
         """Generate catalyst structures conditioned on adsorbate molecule and target binding energy.
