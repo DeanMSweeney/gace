@@ -387,7 +387,8 @@ class LightFlowMatch(LightningModule, Flow):
         )
         for metrics in cf.run():
             for key, val in metrics.items():
-                self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
+                if isinstance(val, float):
+                    self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
         return
 
     def predict_step(self, data: Data, batch_idx: int):
