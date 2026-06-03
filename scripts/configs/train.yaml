@@ -5,10 +5,6 @@ defaults:
 
 # Model mode
 mode: "train"
-x_matching: "flow"
-interpolant_schedule: "linear"
-informed_priors: true
-optimal_transport: true
 
 # datasets
 oc20_train: "/datasets/factorized/train/dataset_processed.lmdb"
@@ -19,6 +15,13 @@ oc20_test: "/datasets/factorized/val_id/dataset_processed.lmdb"
 batch_size: 128
 num_workers: 8
 accumulate_grad_batches: 2
+
+# flow matching serttings 
+path_cfg: 
+  x_matching: "endpoint"
+  interpolant_schedule: "linear"
+  informed_priors: true
+  optimal_transport: true
 
 optim_cfg:
   weight_decay: 0
