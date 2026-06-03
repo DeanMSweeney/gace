@@ -82,7 +82,6 @@ class LightFlowMatch(LightningModule, Flow):
             schedule_type: Literal["linear", "cosine"]="linear",
             optimal_transport: bool=False,
             informed_priors: bool=True,
-            interpolate_on_torus: bool=False,
             num_integration_steps: int=1,
             relax_otf: bool=False,
             batched_relaxation: bool=True,
@@ -98,7 +97,6 @@ class LightFlowMatch(LightningModule, Flow):
             cfg_w_continuous: float=1.0,
             cfg_w_discrete: float=1.0,
             sde_noise_scale: float=0.0,
-            standardize_ads_pos: bool=False,
             ads_pos_mean: list = [0.02587131, -0.69517581, 0.91811687],
             ads_pos_std: list = [8.21663071, 9.02733422, 9.86882174],
             sanitize_otf: bool=True,
@@ -135,7 +133,6 @@ class LightFlowMatch(LightningModule, Flow):
         self.schedule_type = schedule_type  # "linear" or "cosine"
         self.optimal_transport = optimal_transport
         self.informed_priors = informed_priors
-        self.interpolate_on_torus = interpolate_on_torus
         self.relax_otf = relax_otf
         self.sanitize_otf = sanitize_otf
         self.batched_relaxation = batched_relaxation
@@ -161,7 +158,6 @@ class LightFlowMatch(LightningModule, Flow):
         self.cfg_w_continuous = cfg_w_continuous
         self.cfg_w_discrete = cfg_w_discrete
         self.sde_noise_scale = sde_noise_scale
-        self.standardize_ads_pos = standardize_ads_pos
 
         # Adsorbate position normalization stats (per-axis), computed offline over training set.
         # Path, loss, and Euler integration run in normalized space; denormalize only at sampling output.
