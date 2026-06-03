@@ -156,7 +156,7 @@ def summarize_results(rows: list[dict]) -> dict:
 
 def format_report(
     directory: str,
-    uniqueness: dict,
+    uniqueness: dict | None,
     sanitisation: dict | None,
     n_strucs: int | None,
     seed: int | None,
@@ -168,14 +168,17 @@ def format_report(
         f"Generated : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         f"Directory : {directory}",
         "=" * 50,
-        "",
-        "Uniqueness",
-        f"  Total loaded  : {uniqueness['total']}",
-        f"  Unique groups : {uniqueness['unique']}",
-        f"  Score         : {uniqueness['uniqueness']:.4f}",
-        f"  Load time     : {uniqueness['load_time']:.1f}s",
-        f"  Match time    : {uniqueness['match_time']:.1f}s",
     ]
+    if uniqueness is not None:
+        lines += [
+            "",
+            "Uniqueness",
+            f"  Total loaded  : {uniqueness['total']}",
+            f"  Unique groups : {uniqueness['unique']}",
+            f"  Score         : {uniqueness['uniqueness']:.4f}",
+            f"  Load time     : {uniqueness['load_time']:.1f}s",
+            f"  Match time    : {uniqueness['match_time']:.1f}s",
+        ]
 
     if sanitisation is not None:
         validity = sanitisation["validity"]
@@ -223,11 +226,11 @@ def write_report(report: str, output_path: str) -> None:
 def parse_args():
     import argparse
     p = argparse.ArgumentParser(description="Evaluate forge-generated structures.")
-    p.add_argument("--gen_strucs", default="./gen_strucs", help="Directory of generated structure files")
+    p.add_argument("--strucs_for_eval", help="Directory of generated structure files")
+    p.add_argument("--check_novelty", default=True, action="store_true", help="Run structural uniqueness check via StructureMatcher")
     p.add_argument("--sanitize", default=True, action="store_true",
                    help="Run validity checks (and optionally MLFF relaxation) on structures")
     p.add_argument("--relax", default=False, action="store_true", help="Run MLFF relaxation step")
-    p.add_argument("--rlxd_strucs", default="./rlxd_strucs", help="Output directory for relaxed structures")
     p.add_argument("--n_strucs", type=int, default=None, help="Number of structures to process (default: all)")
     p.add_argument("--mlff_checkpoint", default="EquiformerV2-31M-S2EF-OC20-All+MD")
     p.add_argument("--energy_cutoff", type=float, default=10.0, help="Max binding energy (eV)")
@@ -236,18 +239,20 @@ def parse_args():
     p.add_argument("--cpu", action="store_true", help="Force CPU for MLFF")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--num_workers", type=int, default=8, help="Parallel workers for uniqueness")
-    p.add_argument("--output", default="./eval_report.txt", help="Path for output report")
+    p.add_argument("--output", default="./report.txt", help="Path for output report")
     return p.parse_args()
 
 
-def main():
+def main(**kwargs):
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     args = parse_args()
+    for k, v in kwargs.items():
+        setattr(args, k, v)
 
     files = collect_structure_files(args.gen_strucs)
     preloaded = load_atoms_parallel(files, args.num_workers)
 
-    uniqueness = compute_uniqueness(preloaded, args.num_workers)
+    uniqueness = compute_uniqueness(preloaded, args.num_workers) if args.novelty else None
 
     sanitisation = None
     if args.sanitize or args.relax:
@@ -277,8 +282,9 @@ def main():
             sanitize_otf=args.sanitize,
             relax_otf=args.relax,
             energy_cutoff=args.energy_cutoff,
-            gen_POS=args.gen_strucs,
-            rlxd_POS=args.rlxd_strucs,
+            generated_strucs=args.gen_strucs,
+            relaxed_strucs="./relaxed_strucs",
+            sanitized_strucs="./sanitized_strucs",
             preloaded_atoms=preloaded,
             n_strucs=args.n_strucs,
             seed=args.seed,

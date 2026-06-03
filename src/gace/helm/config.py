@@ -147,11 +147,14 @@ class SamplerConfig:
     path for saving during testing (POSCAR format).
     """
 
-    gen_POS: Optional[str] = "gen_strucs/" 
+    generated_strucs: Optional[str] = "generated_strucs/" 
     """Output path for saving generated (model-predicted) structures during testing"""
 
-    rlxd_POS: Optional[str] = "rlxd_strucs/"
+    relaxed_strucs: Optional[str] = "relaxed_strucs/"
     """Output path for saving relaxed structures (model-predicted) structures during testing"""
+
+    sanitized_strucs: Optional[str] = "sanitized_strucs/"
+    """Output path for saving sanitized structures (model-predicted) structures during testing"""
 
     config_vasp: bool = False
     """Whether to generate VASP DFT input files for generated structures

@@ -74,9 +74,9 @@ class LightFlowMatch(LightningModule, Flow):
             variant: str="forge",
             mode: str="debug",
             track_grad_norms: bool=False,
-            in_POS=None,
-            gen_POS=None,
-            rlxd_POS=None,
+            generated_strucs=None,
+            relaxed_strucs=None,
+            sanitized_strucs=None,
             config_vasp: bool=False,
             x_matching: Literal["flow", "endpoint"]="flow",
             schedule_type: Literal["linear", "cosine"]="linear",
@@ -106,7 +106,7 @@ class LightFlowMatch(LightningModule, Flow):
         super().__init__()
         # Save hyperparameters for logging and checkpointing (ignoring model-specific args)
         self.save_hyperparameters(ignore=["model", "variant", "mode", "rtol", "atol", "ode_method", \
-            "track_grad_norms", "in_POS", "gen_POS", "config_vasp", "threshold", "x_matching", \
+            "track_grad_norms", "generated_strucs", "relaxed_strucs", "sanitized_strucs", "config_vasp", "threshold", "x_matching", \
             "interpolant_schedule", "write_eval_metrics", "num_integration_steps", "relax_otf", "mlff_checkpoint", \
             "accelerator", "seed", "num_prim_atoms", "optimal_transport"])
 
@@ -121,9 +121,9 @@ class LightFlowMatch(LightningModule, Flow):
 
         # Monitoring and output configuration
         self.track_grad_norms = track_grad_norms
-        self.in_POS = in_POS
-        self.gen_POS = gen_POS
-        self.rlxd_POS = rlxd_POS
+        self.generated_strucs = generated_strucs
+        self.relaxed_strucs = relaxed_strucs
+        self.sanitized_strucs = sanitized_strucs
 
         self.config_vasp = config_vasp
         self.catalyst_dist_cutoff = catalyst_dist_cutoff
@@ -375,8 +375,8 @@ class LightFlowMatch(LightningModule, Flow):
             relax_otf=self.relax_otf,
             config_vasp=self.config_vasp,
             catalyst_dist_cutoff=self.catalyst_dist_cutoff,
-            gen_POS=self.gen_POS,
-            rlxd_POS=self.rlxd_POS,
+            generated_strucs=self.generated_strucs,
+            relaxed_strucs=self.relaxed_strucs,
             file_ext=".traj",
             ads_integrity_threshold=self.ads_integrity_threshold,
             sanitize_otf=self.sanitize_otf,
@@ -424,8 +424,8 @@ class LightFlowMatch(LightningModule, Flow):
                 relax_otf=self.relax_otf,
                 config_vasp=self.config_vasp,
                 catalyst_dist_cutoff=self.catalyst_dist_cutoff,
-                gen_POS=self.gen_POS,
-                rlxd_POS=self.rlxd_POS,
+                generated_strucs=self.generated_strucs,
+                relaxed_strucs=self.relaxed_strucs,
                 file_ext=".traj",
                 sanitize_otf=self.sanitize_otf,
             )

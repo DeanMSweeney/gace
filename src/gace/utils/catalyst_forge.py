@@ -40,8 +40,9 @@ class CatalystForge:
         batch_idx: int,
         calculator,
         catalyst_dist_cutoff: float,
-        gen_POS: str | None,
-        rlxd_POS: str | None,
+        generated_strucs: str | None,
+        relaxed_strucs: str | None,
+        sanitized_strucs: str | None,
         opt_graph=None,
         preloaded_atoms: dict[str, "Atoms | None"] | None = None,
         file_ext: str = ".vasp",
@@ -61,8 +62,9 @@ class CatalystForge:
         self.relax_otf = relax_otf
         self.config_vasp = config_vasp
         self.catalyst_dist_cutoff = catalyst_dist_cutoff
-        self.gen_POS = gen_POS
-        self.rlxd_POS = rlxd_POS
+        self.generated_strucs = generated_strucs
+        self.relaxed_strucs = relaxed_strucs
+        self.sanitized_strucs = sanitized_strucs
         self.file_ext = file_ext
         self.energy_cutoff = energy_cutoff
         # self.ads_integrity_threshold = ads_integrity_threshold
@@ -80,18 +82,19 @@ class CatalystForge:
         """
         if self.opt_graph is not None:
             items = self._items_from_graph()
+            os.makedirs(self.generated_strucs, exist_ok=True)
         else:
             items = self._items_from_preloaded()
+            os.makedirs(self.sanitized_strucs, exist_ok=True)
 
-        os.makedirs(self.gen_POS, exist_ok=True)
         if self.relax_otf:
-            os.makedirs(self.rlxd_POS, exist_ok=True)
+            os.makedirs(self.relaxed_strucs, exist_ok=True)
 
         # OTF: set up append-mode CSV for binding energies
         otf_csv_path = None
         otf_first_write = False
         if self.opt_graph is not None:
-            csv_dir = self.rlxd_POS if self.relax_otf else self.gen_POS
+            csv_dir = self.relaxed_strucs if self.relax_otf else self.generated_strucs
             otf_csv_path = os.path.join(csv_dir, "binding_energies.csv")
             otf_first_write = otf_csv_path not in _initialized_csvs
             if otf_first_write:
@@ -126,7 +129,7 @@ class CatalystForge:
 
         # Disk: write full evaluation CSV at the end
         if self.opt_graph is None:
-            out_dir = self.rlxd_POS if self.relax_otf else self.gen_POS
+            out_dir = self.relaxed_strucs if self.relax_otf else self.sanitized_strucs
             eval_fieldnames = [
                 "batch_idx", "graph_idx", "target_binding_E", "computed_binding_E", "binding_E_diff",
                 "vol_ok", "cat_dist_ok", "cat_atom_types_ok", "cat_ads_dist_ok", "ads_dist_ok",
@@ -186,8 +189,34 @@ class CatalystForge:
         }
 
         if not self.sanitize_otf:
-            if atoms is not None:
-                ase.io.write(os.path.join(self.gen_POS, fname), atoms)
+            if atoms is not None and self.opt_graph:
+                ase.io.write(os.path.join(self.generated_strucs, fname), atoms) 
+            atoms_rlxd = self.relax(
+                atoms=atoms,
+                validity_dict={"is_valid": True},
+                calculator=self.calculator,
+                do_relax=self.relax_otf,
+            )
+            if atoms_rlxd is not None:
+                energy_dict = None
+                try:
+                    computed_E = atoms_rlxd.get_potential_energy()
+                    if computed_E <= self.energy_cutoff:
+                        diff = abs(computed_E - target_E) if target_E is not None else None
+                        energy_dict = {"computed_binding_E": computed_E, "binding_E_diff": diff}
+                    else:
+                        atoms_rlxd = None
+                except Exception as e:
+                    logging.warning(f"Energy extraction failed for {fname}: {e}")
+                    atoms_rlxd = None
+                if atoms_rlxd is not None:
+                    ase.io.write(os.path.join(self.relaxed_strucs, fname), atoms_rlxd)
+                if energy_dict:
+                    return {
+                        **base_row,
+                        "computed_binding_E": _fmt(energy_dict["computed_binding_E"]),
+                        "binding_E_diff":     energy_dict["binding_E_diff"] if energy_dict["binding_E_diff"] is not None else "",
+                    }
             return base_row
 
         validity_dict = self.sanitize(
@@ -219,9 +248,9 @@ class CatalystForge:
                 validity_dict["is_valid"] = False
 
         if validity_dict["is_valid"] and atoms is not None:
-            ase.io.write(os.path.join(self.gen_POS, fname), atoms)
+            ase.io.write(os.path.join(self.sanitized_strucs, fname), atoms)
         if atoms_rlxd is not None:
-            ase.io.write(os.path.join(self.rlxd_POS, fname), atoms_rlxd)
+            ase.io.write(os.path.join(self.relaxed_strucs, fname), atoms_rlxd)
 
         return {
             **base_row,
