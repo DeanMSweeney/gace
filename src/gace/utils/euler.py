@@ -59,33 +59,34 @@ def euler_step(
 
 
 def ctmc_step(zt: Tensor, z_logits: Tensor, t_scalar: float, dt: float) -> Tensor:
-    """One-way CTMC step for discrete atom types.
+    """Full CTMC Euler step for discrete atom types, following zatom's DiscreteInterpolant.step().
 
-    Only masked atoms (index NUM_CLASSES-1 = 99) may commit to a real type.
-    Atoms that have already committed stay fixed.
+    At each step the model predicts the endpoint distribution p(z1 | z_t, t).
+    Every atom may transition to any class. The rate of transitioning to class c is
+    proportional to p(c | z_t, t), giving a per-step transition probability of
+    dt * p(c) / (1 - t). The probability of staying is 1 minus the sum of all
+    off-diagonal transition probabilities.
 
     Args:
-        zt: (N,) long tensor of current atom type indices (0–98 real, 99 mask).
-        z_logits: (N, 99) model output logits over real atom types only.
+        zt: (N,) long tensor of current atom type indices.
+        z_logits: (N, C) model output logits for the endpoint distribution.
         t_scalar: Current time as a Python float.
         dt: Step size as a Python float.
 
     Returns:
         (N,) updated long tensor.
     """
-    NUM_CLASSES = 100
-    z_logits[:, -1] = -torch.inf  # mask token is never a valid prediction
-    z1_probs   = F.softmax(z_logits, dim=-1)                              # (N, 99)
-    is_masked  = (zt == NUM_CLASSES - 1)                                  # (N,) bool
+    z1_probs = F.softmax(z_logits, dim=-1)                        # (N, C)
 
-    # Q1: should this atom unmask? — purely time-dependent, no model confidence involved
-    unmask_prob = min(dt / (1 - t_scalar + 1e-8), 1.0)  # scalar; →1 as t→1
+    rate_factor = dt / (1 - t_scalar + 1e-8)
+    step_probs = (rate_factor * z1_probs).clamp(max=1.0)          # (N, C)
 
-    # Q2: if it unmasks, what type? — sampled from model distribution below
-    will_unmask = (torch.rand(zt.shape[0], device=zt.device) < unmask_prob) & is_masked
+    # Zero self-transition, fill with stay probability
+    step_probs.scatter_(-1, zt.unsqueeze(-1), 0.0)
+    prob_stay = (1.0 - step_probs.sum(dim=-1, keepdim=True))
+    step_probs.scatter_(-1, zt.unsqueeze(-1), prob_stay)
 
-    zt_next = zt.clone()
-    if will_unmask.any():
-        zt_next[will_unmask] = torch.distributions.Categorical(z1_probs[will_unmask]).sample()
+    step_probs = step_probs.clamp(min=0.0)
+    step_probs = step_probs / step_probs.sum(dim=-1, keepdim=True)
 
-    return zt_next  # (N,) long
+    return torch.distributions.Categorical(probs=step_probs).sample()  # (N,)
