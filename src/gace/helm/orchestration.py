@@ -377,7 +377,7 @@ class LightFlowMatch(LightningModule, Flow):
 
         B = int(opt_graph.batch.max().item()) + 1
         binding_energies = [data.ads_binding_energy[b].item() for b in range(B)]
-        regressed_binding_energies = [data.binding_energy_generated[b].item() for b in range(B)]
+        regressed_binding_energies = [opt_graph.binding_energy_generated[b].item() for b in range(B)]
 
         cf = CatalystForge(
             opt_graph=opt_graph,
