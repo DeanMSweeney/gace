@@ -531,9 +531,9 @@ class Flow():
             identity = torch.eye(3, device=device).unsqueeze(0).expand(B, -1, -1)
             data.transformation_matrix = (identity + 0.1 * torch.randn(B, 3, 3, device=device)).float()   # (B, 3, 3)
 
-            # Discrete: all atoms start as mask token
+            # Discrete: all atoms start as random real elements (uniform prior, matching training)
             N_prim = int(self.primitive_mask.sum().item())
-            data.atomic_numbers = torch.full((N_prim,), NUM_CLASSES - 1, dtype=torch.long, device=device)
+            data.atomic_numbers = torch.randint(0, NUM_CLASSES - 1, (N_prim,), dtype=torch.long, device=device)
 
         # N^(1/3) scale factor for length denormalisation — lengths_scaled is in normalised space
         n_scale = (num_prim_atoms.float() ** (1 / 3)).unsqueeze(1)  # (B, 1)
