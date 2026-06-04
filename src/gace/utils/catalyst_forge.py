@@ -2,6 +2,7 @@ import csv
 import logging
 import os
 import random
+import re
 
 import numpy as np
 import torch
@@ -14,7 +15,7 @@ from tqdm import tqdm
 from gace.utils.builder import build_slab_adsorbate, lattice_params_to_matrix
 from gace.utils.relaxation import _fmt, relax_w_mlff
 
-_initialized_csvs: set = set()
+_FILE_KEY_RE = re.compile(r"^(\d+)_(\d+)")
 
 
 class CatalystForge:
@@ -53,6 +54,8 @@ class CatalystForge:
         config_vasp: bool = False,
         n_strucs: int | None = None,
         seed: int = 42,
+        fmax: float = 0.05,
+        steps: int = 200,
     ):
         self.opt_graph = opt_graph
         self.preloaded_atoms = preloaded_atoms
@@ -67,10 +70,11 @@ class CatalystForge:
         self.sanitized_strucs = sanitized_strucs
         self.file_ext = file_ext
         self.energy_cutoff = energy_cutoff
-        # self.ads_integrity_threshold = ads_integrity_threshold
         self.sanitize_otf = sanitize_otf
         self.n_strucs = n_strucs
         self.seed = seed
+        self.fmax = fmax
+        self.steps = steps
 
         self._all_atoms: list[Atoms | None] = []
 
@@ -90,17 +94,14 @@ class CatalystForge:
         if self.relax_otf:
             os.makedirs(self.relaxed_strucs, exist_ok=True)
 
-        # OTF: set up append-mode CSV for binding energies
         otf_csv_path = None
         otf_first_write = False
         if self.opt_graph is not None:
             csv_dir = self.relaxed_strucs if self.relax_otf else self.generated_strucs
             otf_csv_path = os.path.join(csv_dir, "binding_energies.csv")
-            otf_first_write = otf_csv_path not in _initialized_csvs
-            if otf_first_write:
-                _initialized_csvs.add(otf_csv_path)
-                if os.path.isfile(otf_csv_path):
-                    os.remove(otf_csv_path)
+            otf_first_write = self.batch_idx == 0
+            if otf_first_write and os.path.isfile(otf_csv_path):
+                os.remove(otf_csv_path)
 
         be_fieldnames = ["batch_idx", "graph_idx", "target_binding_E", "computed_binding_E", "binding_E_diff"]
 
@@ -118,7 +119,6 @@ class CatalystForge:
             rows.append(row)
             self._all_atoms.append(atoms)
 
-            # OTF: write one CSV row immediately (append mode, one row per graph)
             if otf_csv_path is not None:
                 with open(otf_csv_path, "a", newline="") as f:
                     w = csv.DictWriter(f, fieldnames=be_fieldnames)
@@ -127,7 +127,6 @@ class CatalystForge:
                         otf_first_write = False
                     w.writerow({k: row.get(k, "") for k in be_fieldnames})
 
-        # Disk: write full evaluation CSV at the end
         if self.opt_graph is None:
             out_dir = self.relaxed_strucs if self.relax_otf else self.sanitized_strucs
             eval_fieldnames = [
@@ -171,6 +170,28 @@ class CatalystForge:
             items.append((atoms, fname, batch_idx, graph_idx, target_E, None))
         return items
 
+    def _compute_energy(
+        self,
+        atoms_rlxd: "Atoms | None",
+        target_E: float | None,
+        fname: str,
+    ) -> tuple[dict | None, "Atoms | None"]:
+        """Extract energy from relaxed atoms, apply cutoff filter.
+
+        Returns (energy_dict_or_None, atoms_or_None).
+        """
+        if atoms_rlxd is None:
+            return None, None
+        try:
+            computed_E = atoms_rlxd.get_potential_energy()
+            if computed_E <= self.energy_cutoff:
+                diff = abs(computed_E - target_E) if target_E is not None else None
+                return {"computed_binding_E": computed_E, "binding_E_diff": diff}, atoms_rlxd
+            return None, None
+        except Exception as e:
+            logging.warning(f"Energy extraction failed for {fname}: {e}")
+            return None, None
+
     def _process_one(
         self,
         atoms: Atoms | None,
@@ -190,62 +211,42 @@ class CatalystForge:
 
         if not self.sanitize_otf:
             if atoms is not None and self.opt_graph:
-                ase.io.write(os.path.join(self.generated_strucs, fname), atoms) 
+                ase.io.write(os.path.join(self.generated_strucs, fname), atoms)
             atoms_rlxd = self.relax(
                 atoms=atoms,
                 validity_dict={"is_valid": True},
                 calculator=self.calculator,
                 do_relax=self.relax_otf,
+                fmax=self.fmax,
+                steps=self.steps,
             )
+            energy_dict, atoms_rlxd = self._compute_energy(atoms_rlxd, target_E, fname)
             if atoms_rlxd is not None:
-                energy_dict = None
-                try:
-                    computed_E = atoms_rlxd.get_potential_energy()
-                    if computed_E <= self.energy_cutoff:
-                        diff = abs(computed_E - target_E) if target_E is not None else None
-                        energy_dict = {"computed_binding_E": computed_E, "binding_E_diff": diff}
-                    else:
-                        atoms_rlxd = None
-                except Exception as e:
-                    logging.warning(f"Energy extraction failed for {fname}: {e}")
-                    atoms_rlxd = None
-                if atoms_rlxd is not None:
-                    ase.io.write(os.path.join(self.relaxed_strucs, fname), atoms_rlxd)
-                if energy_dict:
-                    return {
-                        **base_row,
-                        "computed_binding_E": _fmt(energy_dict["computed_binding_E"]),
-                        "binding_E_diff":     energy_dict["binding_E_diff"] if energy_dict["binding_E_diff"] is not None else "",
-                    }
+                ase.io.write(os.path.join(self.relaxed_strucs, fname), atoms_rlxd)
+            if energy_dict:
+                return {
+                    **base_row,
+                    "computed_binding_E": _fmt(energy_dict["computed_binding_E"]),
+                    "binding_E_diff":     energy_dict["binding_E_diff"] if energy_dict["binding_E_diff"] is not None else "",
+                }
             return base_row
 
         validity_dict = self.sanitize(
             atoms=atoms,
             catalyst_dist_cutoff=self.catalyst_dist_cutoff,
-            # ads_integrity_threshold=self.ads_integrity_threshold,
-            # ref_ads_pos=ref_ads_pos,
         )
         atoms_rlxd = self.relax(
             atoms=atoms,
             validity_dict=validity_dict,
             calculator=self.calculator,
             do_relax=self.relax_otf,
+            fmax=self.fmax,
+            steps=self.steps,
         )
 
-        energy_dict = None
-        if atoms_rlxd is not None:
-            try:
-                computed_E = atoms_rlxd.get_potential_energy()
-                if computed_E <= self.energy_cutoff:
-                    diff = abs(computed_E - target_E) if target_E is not None else None
-                    energy_dict = {"computed_binding_E": computed_E, "binding_E_diff": diff}
-                else:
-                    atoms_rlxd = None
-                    validity_dict["is_valid"] = False
-            except Exception as e:
-                logging.warning(f"Energy extraction failed for {fname}: {e}")
-                atoms_rlxd = None
-                validity_dict["is_valid"] = False
+        energy_dict, atoms_rlxd = self._compute_energy(atoms_rlxd, target_E, fname)
+        if atoms_rlxd is None and self.relax_otf:
+            validity_dict["is_valid"] = False
 
         if validity_dict["is_valid"] and atoms is not None:
             ase.io.write(os.path.join(self.sanitized_strucs, fname), atoms)
@@ -261,7 +262,6 @@ class CatalystForge:
             "cat_atom_types_ok":  float(validity_dict["cat_atom_types_ok"]),
             "cat_ads_dist_ok":    float(validity_dict["cat_ads_dist_ok"]),
             "ads_dist_ok":        float(validity_dict["ads_dist_ok"]),
-            # "ads_integrity_ok":   float(validity_dict["ads_integrity_ok"]) if validity_dict["ads_integrity_ok"] is not None else -1.0,
             "is_valid":           float(validity_dict["is_valid"]),
             "is_valid_naive":     float(validity_dict["is_valid_naive"]),
         }
@@ -269,13 +269,8 @@ class CatalystForge:
     @staticmethod
     def _parse_file_key(path: str) -> tuple[int, int] | None:
         stem = os.path.splitext(os.path.basename(path))[0]
-        parts = stem.split("_")
-        if len(parts) < 2:
-            return None
-        try:
-            return int(parts[0]), int(parts[1])
-        except ValueError:
-            return None
+        m = _FILE_KEY_RE.match(stem)
+        return (int(m.group(1)), int(m.group(2))) if m else None
 
     def _build(self, b: int, prim_batch, ads_batch) -> Atoms | None:
         try:
@@ -304,8 +299,6 @@ class CatalystForge:
     def sanitize(
         atoms: Atoms | None,
         catalyst_dist_cutoff: float,
-        # ads_integrity_threshold: float,
-        # ref_ads_pos=None,
     ) -> dict:
         if atoms is None:
             return {
@@ -331,15 +324,6 @@ class CatalystForge:
             ads_dists = dists[np.ix_(ads_idx, ads_idx)]
             ads_dist_ok = bool(ads_dists.min() >= 0.5)
 
-            # if ref_ads_pos is not None:
-            #     ref_np = ref_ads_pos.cpu().float().numpy() if hasattr(ref_ads_pos, "cpu") else np.array(ref_ads_pos, dtype=np.float32)
-            #     ref_atoms = Atoms(numbers=ads_atoms.get_atomic_numbers(), positions=ref_np)
-            #     ref_ads_dists = ref_atoms.get_all_distances(mic=False)
-            #     ads_dists_no_mic = ads_atoms.get_all_distances(mic=False)
-            #     ads_integrity_ok = bool(np.abs(ads_dists_no_mic - ref_ads_dists).max() <= ads_integrity_threshold)
-            # else:
-            #     ads_integrity_ok = False
-
             cat_dists = dists[np.ix_(cat_idx, cat_idx)]
             cat_atomic_numbers = cat_atoms.get_atomic_numbers()
             atomic_radii = covalent_radii[cat_atomic_numbers]
@@ -363,7 +347,6 @@ class CatalystForge:
             cat_atom_types_ok = False
             ads_dist_ok = False
             cat_ads_dist_ok = False
-            # ads_integrity_ok = False
 
         is_valid = vol_ok and cat_dist_ok and ads_dist_ok and cat_ads_dist_ok and cat_atom_types_ok
 
@@ -373,7 +356,6 @@ class CatalystForge:
             "cat_atom_types_ok": cat_atom_types_ok,
             "cat_ads_dist_ok":   cat_ads_dist_ok,
             "ads_dist_ok":       ads_dist_ok,
-            # "ads_integrity_ok":  ads_integrity_ok,
             "is_valid":          is_valid,
             "is_valid_naive":    cat_dist_ok_naive and ads_dist_ok and cat_ads_dist_ok and vol_ok,
         }
@@ -384,13 +366,15 @@ class CatalystForge:
         validity_dict: dict,
         calculator,
         do_relax: bool,
+        fmax: float = 0.05,
+        steps: int = 200,
     ) -> Atoms | None:
         if not do_relax or not validity_dict["is_valid"] or atoms is None:
             return None
         return relax_w_mlff(
             atoms=atoms,
             calculator=calculator,
-            fmax=0.05,
-            steps=200,
+            fmax=fmax,
+            steps=steps,
             optimizer="BFGS",
         )

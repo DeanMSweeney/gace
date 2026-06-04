@@ -7,16 +7,22 @@ Arguments
 --strucs_for_eval  Directory containing generated structure files (.vasp preferred, .traj fallback).
 
 --check_novelty    Flag. If set, runs structural uniqueness check via StructureMatcher and
-                   reports total/unique counts and uniqueness score. Default: True.
+                   reports total/unique counts and uniqueness score. Default: False.
 
 --sanitize         Flag. If set, runs CatalystForge validity checks on structures and reports
-                   per-criterion pass rates (vol_ok, cat_dist_ok, etc.). Disabled by default.
+                   per-criterion pass rates (vol_ok, cat_dist_ok, etc.). Default: False.
 
 --relax            Flag. If set, runs MLFF relaxation on structures without requiring sanitization
                    and reports binding energy statistics. Disabled by default.
 
---rlxd_strucs      Output directory for relaxed .vasp files and evaluation CSVs.
-                   Default: ./rlxd_strucs
+--relaxed_strucs   Output directory for relaxed .vasp files and evaluation CSVs.
+                   Default: ./relaxed_strucs
+
+--sanitized_strucs Output directory for sanitized .vasp files.
+                   Default: ./sanitized_strucs
+
+--catalyst_dist_cutoff  Catalyst inter-atom distance cutoff as a fraction of the sum of
+                   covalent radii. Default: 0.75
 
 --n_strucs         Number of structures to randomly sample for sanitisation/relaxation.
                    Default: all structures in gen_strucs.

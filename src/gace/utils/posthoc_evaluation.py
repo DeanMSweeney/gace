@@ -78,7 +78,7 @@ def load_atoms_parallel(files: list[str], num_workers: int) -> dict[str, "Atoms 
     return dict(pairs)
 
 
-def compute_uniqueness(atoms_map: dict[str, "Atoms | None"], num_workers: int) -> dict:
+def compute_uniqueness(atoms_map: dict[str, "Atoms | None"]) -> dict:
     """Structural uniqueness via StructureMatcher on slab-only structures.
 
     Accepts pre-loaded full Atoms objects (with adsorbate); strips tags==2 here.
@@ -227,8 +227,8 @@ def parse_args():
     import argparse
     p = argparse.ArgumentParser(description="Evaluate forge-generated structures.")
     p.add_argument("--strucs_for_eval", help="Directory of generated structure files")
-    p.add_argument("--check_novelty", default=True, action="store_true", help="Run structural uniqueness check via StructureMatcher")
-    p.add_argument("--sanitize", default=True, action="store_true",
+    p.add_argument("--check_novelty", default=False, action="store_true", help="Run structural uniqueness check via StructureMatcher")
+    p.add_argument("--sanitize", default=False, action="store_true",
                    help="Run validity checks (and optionally MLFF relaxation) on structures")
     p.add_argument("--relax", default=False, action="store_true", help="Run MLFF relaxation step")
     p.add_argument("--n_strucs", type=int, default=None, help="Number of structures to process (default: all)")
@@ -236,9 +236,12 @@ def parse_args():
     p.add_argument("--energy_cutoff", type=float, default=10.0, help="Max binding energy (eV)")
     p.add_argument("--fmax", type=float, default=0.05, help="Force convergence criterion (eV/Å)")
     p.add_argument("--steps", type=int, default=200, help="Max optimizer steps")
+    p.add_argument("--catalyst_dist_cutoff", type=float, default=0.75, help="Catalyst inter-atom distance cutoff (fraction of covalent radii sum)")
     p.add_argument("--cpu", action="store_true", help="Force CPU for MLFF")
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--num_workers", type=int, default=8, help="Parallel workers for uniqueness")
+    p.add_argument("--num_workers", type=int, default=8, help="Parallel workers for structure loading")
+    p.add_argument("--relaxed_strucs", default="./relaxed_strucs", help="Output directory for relaxed structures")
+    p.add_argument("--sanitized_strucs", default="./sanitized_strucs", help="Output directory for sanitized structures")
     p.add_argument("--output", default="./report.txt", help="Path for output report")
     return p.parse_args()
 
@@ -252,7 +255,7 @@ def main(**kwargs):
     files = collect_structure_files(args.strucs_for_eval)
     preloaded = load_atoms_parallel(files, args.num_workers)
 
-    uniqueness = compute_uniqueness(preloaded, args.num_workers) if args.check_novelty else None
+    uniqueness = compute_uniqueness(preloaded) if args.check_novelty else None
 
     sanitisation = None
     if args.sanitize or args.relax:
@@ -278,13 +281,15 @@ def main(**kwargs):
             binding_energies=binding_energies,
             batch_idx=0,
             calculator=calculator,
-            catalyst_dist_cutoff=0.75,
+            catalyst_dist_cutoff=args.catalyst_dist_cutoff,
             sanitize_otf=args.sanitize,
             relax_otf=args.relax,
             energy_cutoff=args.energy_cutoff,
+            fmax=args.fmax,
+            steps=args.steps,
             generated_strucs=args.strucs_for_eval,
-            relaxed_strucs="./relaxed_strucs",
-            sanitized_strucs="./sanitized_strucs",
+            relaxed_strucs=args.relaxed_strucs,
+            sanitized_strucs=args.sanitized_strucs,
             preloaded_atoms=preloaded,
             n_strucs=args.n_strucs,
             seed=args.seed,
