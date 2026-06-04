@@ -377,6 +377,7 @@ class LightFlowMatch(LightningModule, Flow):
             catalyst_dist_cutoff=self.catalyst_dist_cutoff,
             generated_strucs=self.generated_strucs,
             relaxed_strucs=self.relaxed_strucs,
+            sanitized_strucs=self.sanitized_strucs,
             file_ext=".traj",
             ads_integrity_threshold=self.ads_integrity_threshold,
             sanitize_otf=self.sanitize_otf,
@@ -426,6 +427,7 @@ class LightFlowMatch(LightningModule, Flow):
                 catalyst_dist_cutoff=self.catalyst_dist_cutoff,
                 generated_strucs=self.generated_strucs,
                 relaxed_strucs=self.relaxed_strucs,
+                sanitized_strucs=self.sanitized_strucs,
                 file_ext=".traj",
                 sanitize_otf=self.sanitize_otf,
             )
