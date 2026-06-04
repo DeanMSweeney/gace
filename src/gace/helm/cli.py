@@ -227,18 +227,12 @@ def main(cfg: Config) -> None:
     lightning = LightFlowMatch(
         model=model,
         variant=cfg.variant,
-        optimal_transport=cfg.optimal_transport,
-        informed_priors=cfg.informed_priors,
-        interpolate_on_torus=cfg.interpolate_on_torus,
-        standardize_ads_pos=cfg.standardize_ads_pos,
         mode=cfg.mode,
         track_grad_norms=cfg.track_grad_norms,
-        x_matching=cfg.x_matching,
-        cfg_dropout_prob=cfg.cfg_dropout_prob,
-        schedule_type=cfg.interpolant_schedule,
         accelerator=cfg.accelerator,
         seed=cfg.seed,
-        **cfg.sampler_cfg,           # All sampler/generation/MLFF settings
+        **cfg.path_cfg,      # x_matching, interpolant_schedule, optimal_transport, informed_priors, cfg_dropout_prob
+        **cfg.sampler_cfg,   # All sampler/generation/MLFF settings
         **cfg.optim_cfg,     # Optimizer hyperparameters (lr, weight_decay, etc.)
     )
 

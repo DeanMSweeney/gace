@@ -74,15 +74,14 @@ class LightFlowMatch(LightningModule, Flow):
             variant: str="forge",
             mode: str="debug",
             track_grad_norms: bool=False,
-            in_POS=None,
-            gen_POS=None,
-            rlxd_POS=None,
+            generated_strucs=None,
+            relaxed_strucs=None,
+            sanitized_strucs=None,
             config_vasp: bool=False,
             x_matching: Literal["flow", "endpoint"]="flow",
             schedule_type: Literal["linear", "cosine"]="linear",
             optimal_transport: bool=False,
             informed_priors: bool=True,
-            interpolate_on_torus: bool=False,
             num_integration_steps: int=1,
             relax_otf: bool=False,
             batched_relaxation: bool=True,
@@ -97,9 +96,7 @@ class LightFlowMatch(LightningModule, Flow):
             cfg_dropout_prob: float=0.1,
             cfg_w_continuous: float=1.0,
             cfg_w_discrete: float=1.0,
-            standardize_ads_pos: bool=False,
-            ads_pos_mean: list = [0.02587131, -0.69517581, 0.91811687],
-            ads_pos_std: list = [8.21663071, 9.02733422, 9.86882174],
+            sde_noise_scale: float=0.0,
             sanitize_otf: bool=True,
             **kwargs,
         ):
@@ -107,7 +104,7 @@ class LightFlowMatch(LightningModule, Flow):
         super().__init__()
         # Save hyperparameters for logging and checkpointing (ignoring model-specific args)
         self.save_hyperparameters(ignore=["model", "variant", "mode", "rtol", "atol", "ode_method", \
-            "track_grad_norms", "in_POS", "gen_POS", "config_vasp", "threshold", "x_matching", \
+            "track_grad_norms", "generated_strucs", "relaxed_strucs", "sanitized_strucs", "config_vasp", "threshold", "x_matching", \
             "interpolant_schedule", "write_eval_metrics", "num_integration_steps", "relax_otf", "mlff_checkpoint", \
             "accelerator", "seed", "num_prim_atoms", "optimal_transport"])
 
@@ -122,9 +119,9 @@ class LightFlowMatch(LightningModule, Flow):
 
         # Monitoring and output configuration
         self.track_grad_norms = track_grad_norms
-        self.in_POS = in_POS
-        self.gen_POS = gen_POS
-        self.rlxd_POS = rlxd_POS
+        self.generated_strucs = generated_strucs
+        self.relaxed_strucs = relaxed_strucs
+        self.sanitized_strucs = sanitized_strucs
 
         self.config_vasp = config_vasp
         self.catalyst_dist_cutoff = catalyst_dist_cutoff
@@ -134,7 +131,6 @@ class LightFlowMatch(LightningModule, Flow):
         self.schedule_type = schedule_type  # "linear" or "cosine"
         self.optimal_transport = optimal_transport
         self.informed_priors = informed_priors
-        self.interpolate_on_torus = interpolate_on_torus
         self.relax_otf = relax_otf
         self.sanitize_otf = sanitize_otf
         self.batched_relaxation = batched_relaxation
@@ -159,17 +155,11 @@ class LightFlowMatch(LightningModule, Flow):
         self.cfg_dropout_prob = cfg_dropout_prob
         self.cfg_w_continuous = cfg_w_continuous
         self.cfg_w_discrete = cfg_w_discrete
-        self.standardize_ads_pos = standardize_ads_pos
-
-        # Adsorbate position normalization stats (per-axis), computed offline over training set.
-        # Path, loss, and Euler integration run in normalized space; denormalize only at sampling output.
-        self.register_buffer("ads_pos_mean", torch.tensor(ads_pos_mean, dtype=torch.float32))
-        self.register_buffer("ads_pos_std", torch.tensor(ads_pos_std, dtype=torch.float32))
+        self.sde_noise_scale = sde_noise_scale
 
         _hist_path = os.path.join(os.path.dirname(__file__), "primitive_atom_distribution.json")
         with open(_hist_path) as f:
             hist = json.load(f)["prim_slab_num_atoms_hist"]
-        #self.prim_atoms_hist = torch.tensor(hist, dtype=torch.float32)
         self.register_buffer("prim_atoms_hist", torch.tensor(hist, dtype=torch.float32))
        # ==============================================================================
        
@@ -377,27 +367,18 @@ class LightFlowMatch(LightningModule, Flow):
             relax_otf=self.relax_otf,
             config_vasp=self.config_vasp,
             catalyst_dist_cutoff=self.catalyst_dist_cutoff,
-            gen_POS=self.gen_POS,
-            rlxd_POS=self.rlxd_POS,
+            generated_strucs=self.generated_strucs,
+            relaxed_strucs=self.relaxed_strucs,
+            sanitized_strucs=self.sanitized_strucs,
             file_ext=".traj",
             ads_integrity_threshold=self.ads_integrity_threshold,
             sanitize_otf=self.sanitize_otf,
         )
         for metrics in cf.run():
             for key, val in metrics.items():
-                if key == "binding_E_diff" and isinstance(val, float):
-                    self._test_binding_E_diffs.append(val)
-                elif isinstance(val, float):
+                if isinstance(val, float):
                     self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
-
         return
-
-    def on_test_epoch_start(self):
-        self._test_binding_E_diffs = []
-
-    def on_test_epoch_end(self):
-        if self._test_binding_E_diffs:
-            self.log("median_binding_E_diff", float(np.median(self._test_binding_E_diffs)))
 
     def predict_step(self, data: Data, batch_idx: int):
         """Generate catalyst structures conditioned on adsorbate molecule and target binding energy.
@@ -436,8 +417,9 @@ class LightFlowMatch(LightningModule, Flow):
                 relax_otf=self.relax_otf,
                 config_vasp=self.config_vasp,
                 catalyst_dist_cutoff=self.catalyst_dist_cutoff,
-                gen_POS=self.gen_POS,
-                rlxd_POS=self.rlxd_POS,
+                generated_strucs=self.generated_strucs,
+                relaxed_strucs=self.relaxed_strucs,
+                sanitized_strucs=self.sanitized_strucs,
                 file_ext=".traj",
                 sanitize_otf=self.sanitize_otf,
             )
@@ -530,8 +512,10 @@ class LightFlowMatch(LightningModule, Flow):
                 total_iters=num_training_steps,
                 power=self.hparams.power,
             )
-        else:
-            raise ValueError(f"Scheduler not specified")
+        elif not lr_scheduler:
+            return {
+                "optimizer": optimizer, 
+            }
 
         return {
             "optimizer": optimizer,

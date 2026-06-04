@@ -1,20 +1,28 @@
-"""Evaluate forge-generated structures for uniqueness, validity, and binding energy.
+"""Evaluate forge-generated structures for novelty, validity, and binding energy.
 
-All logic lives in gace.utils.evaluation. This script is the CLI entry point.
+All logic lives in gace.utils.posthoc_evaluation. This script is the CLI entry point.
 
 Arguments
 ---------
---gen_strucs       Directory containing generated structure files (.vasp preferred, .traj fallback).
-                   Default: ./gen_strucs
+--strucs_for_eval  Directory containing generated structure files (.vasp preferred, .traj fallback).
+
+--check_novelty    Flag. If set, runs structural uniqueness check via StructureMatcher and
+                   reports total/unique counts and uniqueness score. Default: False.
 
 --sanitize         Flag. If set, runs CatalystForge validity checks on structures and reports
-                   per-criterion pass rates (vol_ok, cat_dist_ok, etc.). Disabled by default.
+                   per-criterion pass rates (vol_ok, cat_dist_ok, etc.). Default: False.
 
---relax            Flag. If set, runs MLFF relaxation on structures (implies --sanitize) and
-                   reports binding energy statistics. Disabled by default.
+--relax            Flag. If set, runs MLFF relaxation on structures without requiring sanitization
+                   and reports binding energy statistics. Disabled by default.
 
---rlxd_strucs      Output directory for relaxed .vasp files and evaluation CSVs.
-                   Default: ./rlxd_strucs
+--relaxed_strucs   Output directory for relaxed .vasp files and evaluation CSVs.
+                   Default: ./relaxed_strucs
+
+--sanitized_strucs Output directory for sanitized .vasp files.
+                   Default: ./sanitized_strucs
+
+--catalyst_dist_cutoff  Catalyst inter-atom distance cutoff as a fraction of the sum of
+                   covalent radii. Default: 0.75
 
 --n_strucs         Number of structures to randomly sample for sanitisation/relaxation.
                    Default: all structures in gen_strucs.
@@ -33,25 +41,24 @@ Arguments
 
 --seed             Random seed for reproducible structure sampling. Default: 42
 
---num_workers      Number of parallel workers for structure loading during uniqueness
-                   computation. Default: 8
+--num_workers      Number of parallel workers for structure loading. Default: 8
 
 --output           Path to write the evaluation report (.txt).
                    Default: ./eval_report.txt
 
 Examples
 --------
-    # Uniqueness only (fast):
-    python scripts/evaluate.py --gen_strucs ./gen_strucs
+    # Novelty check only (fast):
+    python scripts/evaluate.py --strucs_for_eval ./gen_strucs --check_novelty
 
-    # Uniqueness + validity checks:
-    python scripts/evaluate.py --gen_strucs ./gen_strucs --sanitize
+    # Validity checks only:
+    python scripts/evaluate.py --strucs_for_eval ./gen_strucs --sanitize
 
-    # With MLFF relaxation on a 500-structure sample:
-    python scripts/evaluate.py --gen_strucs ./gen_strucs --relax --n_strucs 500
+    # Relax on the fly without sanitization, on a 500-structure sample:
+    python scripts/evaluate.py --strucs_for_eval ./gen_strucs --relax --n_strucs 500
 
-    # Full run, all structures, save report to custom path:
-    python scripts/evaluate.py --gen_strucs ./gen_strucs --relax --output ./results/eval.txt
+    # Full run — novelty + sanitize + relax, save report to custom path:
+    python scripts/evaluate.py --strucs_for_eval ./gen_strucs --check_novelty --sanitize --relax --output ./results/eval.txt
 """
 
 from gace.utils.posthoc_evaluation import main as evaluate_generated_structures

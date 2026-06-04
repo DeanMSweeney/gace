@@ -14,6 +14,7 @@ import time
 from multiprocessing import Pool
 
 import ase.io
+from ase import Atoms
 from pymatgen.analysis.structure_matcher import StructureMatcher
 from pymatgen.io.ase import AseAtomsAdaptor
 from tqdm import tqdm
@@ -58,31 +59,45 @@ def collect_structure_files(directory: str) -> list[str]:
 # Uniqueness
 # ---------------------------------------------------------------------------
 
-def _load_slab_structure(path):
-    """Worker: strip adsorbate (tags==2) and return a pymatgen Structure."""
+def _load_full_atoms(path: str) -> tuple[str, "Atoms | None"]:
+    """Worker: load full atoms (with adsorbate) and return (path, atoms)."""
     try:
-        atoms = ase.io.read(path)
-        slab = atoms[atoms.get_tags() != 2]
-        if len(slab) == 0:
-            return None
-        return AseAtomsAdaptor().get_structure(slab)
+        return path, ase.io.read(path)
     except Exception:
-        return None
+        return path, None
 
 
-def compute_uniqueness(files: list[str], num_workers: int) -> dict:
-    """Structural uniqueness via StructureMatcher on slab-only structures.
-
-    File loading is parallelised; StructureMatcher runs in the main process.
-    """
-    log.info(f"Uniqueness: loading {len(files)} structures ({num_workers} workers)...")
+def load_atoms_parallel(files: list[str], num_workers: int) -> dict[str, "Atoms | None"]:
+    """Load all structure files in parallel. Returns path → Atoms mapping."""
+    log.info(f"Loading {len(files)} structures ({num_workers} workers)...")
     t0 = time.time()
     with Pool(processes=num_workers) as pool:
-        results = list(tqdm(pool.imap(_load_slab_structure, files),
-                            total=len(files), desc="Loading slabs"))
-    structures = [s for s in results if s is not None]
+        pairs = list(tqdm(pool.imap(_load_full_atoms, files),
+                          total=len(files), desc="Loading structures"))
+    log.info(f"Loaded in {time.time() - t0:.1f}s")
+    return dict(pairs)
+
+
+def compute_uniqueness(atoms_map: dict[str, "Atoms | None"]) -> dict:
+    """Structural uniqueness via StructureMatcher on slab-only structures.
+
+    Accepts pre-loaded full Atoms objects (with adsorbate); strips tags==2 here.
+    StructureMatcher runs in the main process.
+    """
+    t0 = time.time()
+    structures = []
+    for atoms in atoms_map.values():
+        if atoms is None:
+            continue
+        try:
+            slab = atoms[atoms.get_tags() != 2]
+            if len(slab) == 0:
+                continue
+            structures.append(AseAtomsAdaptor().get_structure(slab))
+        except Exception:
+            continue
     load_time = time.time() - t0
-    log.info(f"Loaded {len(structures)}/{len(files)} ({load_time:.1f}s)")
+    log.info(f"Converted {len(structures)}/{len(atoms_map)} slabs ({load_time:.1f}s)")
 
     log.info("Running StructureMatcher...")
     t1 = time.time()
@@ -141,7 +156,7 @@ def summarize_results(rows: list[dict]) -> dict:
 
 def format_report(
     directory: str,
-    uniqueness: dict,
+    uniqueness: dict | None,
     sanitisation: dict | None,
     n_strucs: int | None,
     seed: int | None,
@@ -153,14 +168,17 @@ def format_report(
         f"Generated : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         f"Directory : {directory}",
         "=" * 50,
-        "",
-        "Uniqueness",
-        f"  Total loaded  : {uniqueness['total']}",
-        f"  Unique groups : {uniqueness['unique']}",
-        f"  Score         : {uniqueness['uniqueness']:.4f}",
-        f"  Load time     : {uniqueness['load_time']:.1f}s",
-        f"  Match time    : {uniqueness['match_time']:.1f}s",
     ]
+    if uniqueness is not None:
+        lines += [
+            "",
+            "Uniqueness",
+            f"  Total loaded  : {uniqueness['total']}",
+            f"  Unique groups : {uniqueness['unique']}",
+            f"  Score         : {uniqueness['uniqueness']:.4f}",
+            f"  Load time     : {uniqueness['load_time']:.1f}s",
+            f"  Match time    : {uniqueness['match_time']:.1f}s",
+        ]
 
     if sanitisation is not None:
         validity = sanitisation["validity"]
@@ -208,30 +226,36 @@ def write_report(report: str, output_path: str) -> None:
 def parse_args():
     import argparse
     p = argparse.ArgumentParser(description="Evaluate forge-generated structures.")
-    p.add_argument("--gen_strucs", default="./gen_strucs", help="Directory of generated structure files")
-    p.add_argument("--sanitize", default=True, action="store_true",
+    p.add_argument("--strucs_for_eval", help="Directory of generated structure files")
+    p.add_argument("--check_novelty", default=False, action="store_true", help="Run structural uniqueness check via StructureMatcher")
+    p.add_argument("--sanitize", default=False, action="store_true",
                    help="Run validity checks (and optionally MLFF relaxation) on structures")
     p.add_argument("--relax", default=False, action="store_true", help="Run MLFF relaxation step")
-    p.add_argument("--rlxd_strucs", default="./rlxd_strucs", help="Output directory for relaxed structures")
     p.add_argument("--n_strucs", type=int, default=None, help="Number of structures to process (default: all)")
     p.add_argument("--mlff_checkpoint", default="EquiformerV2-31M-S2EF-OC20-All+MD")
     p.add_argument("--energy_cutoff", type=float, default=10.0, help="Max binding energy (eV)")
     p.add_argument("--fmax", type=float, default=0.05, help="Force convergence criterion (eV/Å)")
     p.add_argument("--steps", type=int, default=200, help="Max optimizer steps")
+    p.add_argument("--catalyst_dist_cutoff", type=float, default=0.75, help="Catalyst inter-atom distance cutoff (fraction of covalent radii sum)")
     p.add_argument("--cpu", action="store_true", help="Force CPU for MLFF")
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--num_workers", type=int, default=8, help="Parallel workers for uniqueness")
-    p.add_argument("--output", default="./eval_report.txt", help="Path for output report")
+    p.add_argument("--num_workers", type=int, default=8, help="Parallel workers for structure loading")
+    p.add_argument("--relaxed_strucs", default="./relaxed_strucs", help="Output directory for relaxed structures")
+    p.add_argument("--sanitized_strucs", default="./sanitized_strucs", help="Output directory for sanitized structures")
+    p.add_argument("--output", default="./report.txt", help="Path for output report")
     return p.parse_args()
 
 
-def main():
+def main(**kwargs):
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     args = parse_args()
+    for k, v in kwargs.items():
+        setattr(args, k, v)
 
-    files = collect_structure_files(args.gen_strucs)
+    files = collect_structure_files(args.strucs_for_eval)
+    preloaded = load_atoms_parallel(files, args.num_workers)
 
-    uniqueness = compute_uniqueness(files, args.num_workers)
+    uniqueness = compute_uniqueness(preloaded) if args.check_novelty else None
 
     sanitisation = None
     if args.sanitize or args.relax:
@@ -249,7 +273,7 @@ def main():
                     cpu=args.cpu,
                 )
 
-        binding_energies = load_target_energies(gen_strucs=args.gen_strucs)
+        binding_energies = load_target_energies(gen_strucs=args.strucs_for_eval)
         if binding_energies:
             log.info(f"Loaded {len(binding_energies)} target energies")
 
@@ -257,12 +281,16 @@ def main():
             binding_energies=binding_energies,
             batch_idx=0,
             calculator=calculator,
-            catalyst_dist_cutoff=0.75,
+            catalyst_dist_cutoff=args.catalyst_dist_cutoff,
             sanitize_otf=args.sanitize,
             relax_otf=args.relax,
             energy_cutoff=args.energy_cutoff,
-            gen_POS=args.gen_strucs,
-            rlxd_POS=args.rlxd_strucs,
+            fmax=args.fmax,
+            steps=args.steps,
+            generated_strucs=args.strucs_for_eval,
+            relaxed_strucs=args.relaxed_strucs,
+            sanitized_strucs=args.sanitized_strucs,
+            preloaded_atoms=preloaded,
             n_strucs=args.n_strucs,
             seed=args.seed,
         )
@@ -270,7 +298,7 @@ def main():
         sanitisation = summarize_results(rows)
 
     report = format_report(
-        directory=args.gen_strucs,
+        directory=args.strucs_for_eval,
         uniqueness=uniqueness,
         sanitisation=sanitisation,
         n_strucs=args.n_strucs if (args.sanitize or args.relax) else None,

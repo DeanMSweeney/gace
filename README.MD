@@ -1,23 +1,22 @@
 # GACE
 
-GACE (Generative Adsorbate Catalyst Engineer) is a **conditional flow matching** model for generating catalyst slab + adsorbate structures de novo. It learns a velocity field that transports from Gaussian noise to real DFT-relaxed structures, conditioned on binding energy and spacegroup.
+**Generative Adsorbate Catalyst Engineer** — a conditional flow matching model for generating catalyst slab + adsorbate structures de novo.
+
+![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=flat&logo=pytorch&logoColor=white)
+![Lightning](https://img.shields.io/badge/Lightning-792EE5?style=flat&logo=lightning&logoColor=white)
+![Config](https://img.shields.io/badge/Config-gray?style=flat)
+![Hydra](https://img.shields.io/badge/Hydra-89CFF0?style=flat)
 
 ![alt text](concept_art.png)
 
 ## Overview
 
-GACE uses conditional flow matching (CFM) to model the joint distribution over catalyst primitive-cell geometry (fractional coordinates, atom types, lattice parameters, supercell matrix) and adsorbate geometry (center-of-mass, relative positions). Hungarian-alignment-based optimal transport is applied at training time to handle permutation invariance.
-
-### Variants
-
-- **`forge`** — generates a full slab+adsorbate structure de novo from Gaussian noise, conditioned on target binding energy
-- **`place`** *(legacy)* — relaxes an existing slab+adsorbate from initial DFT geometry to relaxed geometry (uses EquiformerV2/GemNet backbone)
+GACE uses conditional flow matching (CFM) to model the joint distribution over catalyst primitive-cell geometry (fractional coordinates, atom types, lattice parameters, supercell matrix) and adsorbate geometry (center-of-mass, relative positions). It learns a velocity field that transports from Gaussian noise to real DFT-relaxed structures, conditioned on binding energy and spacegroup. Hungarian-alignment-based optimal transport is applied at training time to handle permutation invariance.
 
 ### Key Features
 
 - **Multi-modality flow matching**: simultaneous flows over positions, atom types (simplex corruption), lattice lengths/angles, supercell matrix M, and adsorbate geometry
-- **Transformer backbone (forge)**: `TransformerModule` processes primitive-cell and adsorbate tokens as separate sequences with a shared trunk and modality-specific output heads
-- **Equivariant GNN backbone (place)**: EquiformerV2 with SO(3)-equivariant attention for structure refinement
+- **Transformer backbone**: `TransformerModule` processes primitive-cell and adsorbate tokens as separate sequences with a shared trunk and modality-specific output heads
 - **Endpoint & velocity matching**: configurable loss mode (`endpoint` or `flow`)
 - **ODE-based sampling**: torchdiffeq integration with dopri5, euler, rk4, or adaptive_heun solvers
 - **MLFF relaxation**: optional post-generation relaxation via FairChem OCPCalculator
@@ -145,7 +144,7 @@ Configuration is handled by `helm/config.py` via three dataclasses:
 | `x_matching` | `"endpoint"` | Loss mode: `endpoint` (predict x₁) or `flow` (predict dx/dt) |
 | `interpolant_schedule` | `"linear"` | Interpolation schedule: `linear` or `cosine` |
 | `optimal_transport` | `False` | Hungarian alignment of noise x₀ to target x₁ |
-| `informed_priors` | `False` | Use informed priors for noise (forge only) |
+| `informed_priors` | `False` | Use informed priors for noise |
 | `precision` | `"bf16-mixed"` | Training precision |
 | `devices` / `num_nodes` | `1` / `1` | Multi-GPU / multi-node config |
 
@@ -177,7 +176,7 @@ Configuration is handled by `helm/config.py` via three dataclasses:
 
 ## Architecture
 
-### Forge: Transformer backbone (`models/TFT/`)
+### Transformer backbone (`models/TFT/`)
 
 `TransformerModule` takes dense padded tensors for primitive-cell atoms and adsorbate atoms as **separate sequences**, concatenates them for a shared transformer trunk, then splits back for modality-specific output heads.
 
@@ -189,10 +188,6 @@ Configuration is handled by `helm/config.py` via three dataclasses:
 **Outputs (endpoint predictions):**
 - Primitive cell: atom type logits, fractional coords, lengths, angles, M
 - Adsorbate: COM, relative positions
-
-### Place: Equivariant GNN backbone (`models/equiformer_v2/`)
-
-EquiformerV2 with SO(3)-equivariant attention for structure refinement. Also supports GemNet (`models/gemnet/`) as an alternative backbone.
 
 ### Training loop (`helm/lightning.py`, `utils/path.py`)
 
@@ -209,13 +204,9 @@ gace/
 │   │   ├── lightning.py            # LightFlowMatch Lightning module
 │   │   └── callbacks.py            # EMA callback
 │   ├── models/
-│   │   ├── TFT/                    # Transformer backbone (forge)
-│   │   │   ├── transformer_module.py
-│   │   │   └── architectures/      # Attention, losses, positional encoding
-│   │   └── equiformer_v2/          # Equivariant GNN backbone (place)
-│   │       ├── equiformerv2_flow.py
-│   │       ├── equiformerv2_forge.py
-│   │       └── layers/             # SO(3) layers, attention, RBF
+│   │   └── TFT/                    # Transformer backbone
+│   │       ├── transformer_module.py
+│   │       └── architectures/      # Attention, losses, positional encoding
 │   └── utils/
 │       ├── path.py                 # Flow interpolation & multi-component loss
 │       ├── invariance.py           # PBC distances, optimal transport (Hungarian)
@@ -246,7 +237,7 @@ Raw CatFlow LMDB
   → LazyLmdbDataset (lmdb_loader.py)
   → PyG DataLoader
   → PyGToTensorDict / to_dense_batch         (sparse PyG → dense padded tensors)
-  → TransformerModule / EquiformerV2
+  → TransformerModule
 ```
 
 Atoms are identified by `tags`: `1 = slab (primitive cell)`, `2 = adsorbate`. These are split and handled separately throughout the model — they are never concatenated at the data level.
@@ -256,7 +247,6 @@ Atoms are identified by `tags`: `1 = slab (primitive cell)`, `2 = adsorbate`. Th
 | Category | Packages |
 |----------|---------|
 | Deep learning | PyTorch, PyTorch Lightning, PyTorch Geometric |
-| Equivariance | e3nn |
 | ODE solvers | torchdiffeq |
 | Atomistic | ASE, pymatgen, fairchem-core |
 | Configuration | hydra-core, omegaconf |

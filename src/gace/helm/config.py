@@ -42,7 +42,7 @@ class OptimizerConfig:
 
     # ==================== Learning Rate Scheduler ====================
 
-    lr_scheduler: Literal["polynomial_decay", "cosine_w_warmup", "cosine_annealing", "polynomial_w_warmup", "polynomial_decay"] = "cosine_w_warmup"
+    lr_scheduler: Optional[Literal["polynomial_decay", "cosine_w_warmup", "cosine_annealing", "polynomial_w_warmup"]]= None
     """
     Learning rate scheduling strategy:
     - cosine_w_warmup: Cosine annealing with linear warmup (recommended)
@@ -147,11 +147,14 @@ class SamplerConfig:
     path for saving during testing (POSCAR format).
     """
 
-    gen_POS: Optional[str] = "gen_strucs/" 
+    generated_strucs: Optional[str] = "generated_strucs/" 
     """Output path for saving generated (model-predicted) structures during testing"""
 
-    rlxd_POS: Optional[str] = "rlxd_strucs/"
+    relaxed_strucs: Optional[str] = "relaxed_strucs/"
     """Output path for saving relaxed structures (model-predicted) structures during testing"""
+
+    sanitized_strucs: Optional[str] = "sanitized_strucs/"
+    """Output path for saving sanitized structures (model-predicted) structures during testing"""
 
     config_vasp: bool = False
     """Whether to generate VASP DFT input files for generated structures
@@ -172,6 +175,19 @@ class SamplerConfig:
     1.0 = fully conditional (single forward pass, no overhead). >1 = extrapolated guidance.
     Requires the model to have been trained with cfg_dropout_prob > 0."""
 
+    # ==================== Evaluation Criteria ================
+
+    sanitize_otf: bool = True
+    """Whether to apply validity checks on-the-fly during generation.
+    - True: filter structures by validity criteria before writing (default)
+    - False: write every successfully built structure without filtering
+    """
+
+    catalyst_dist_cutoff: float = 0.75
+    """Scale factor applied to summed covalent radii for the atom-clash distance check.
+    A pair is flagged as clashing if its distance is below catalyst_dist_cutoff * (r_i + r_j).
+    Lower values are more permissive; higher values are stricter."""
+
     # ==================== MLFF Relaxation ====================
 
     relax_otf: bool = False
@@ -180,23 +196,47 @@ class SamplerConfig:
     mlff_checkpoint: str = "EquiformerV2-31M-S2EF-OC20-All+MD"
     """Path to MLFF checkpoint for relaxation"""
 
-    # ==================== Evaluation Criteria ================
 
-    catalyst_dist_cutoff: float = 0.75
-    """Scale factor applied to summed covalent radii for the atom-clash distance check.
-    A pair is flagged as clashing if its distance is below catalyst_dist_cutoff * (r_i + r_j).
-    Lower values are more permissive; higher values are stricter."""
 
-    ads_integrity_threshold: float = 2.0
-    """Cutoff distance threshold to indicate whether an adsorabte atom has
-    dissociated upon adsorption"""
 
-    sanitize_otf: bool = True
-    """Whether to apply validity checks on-the-fly during generation.
-    - True: filter structures by validity criteria before writing (default)
-    - False: write every successfully built structure without filtering
+@dataclass
+class PathConfig:
+    """
+    Flow-path configuration: interpolation schedule, transport, and conditioning settings.
     """
 
+    x_matching: Literal["flow", "endpoint"] = "endpoint"
+    """
+    Loss computation mode:
+    - "flow": velocity matching (predict dx/dt, standard flow matching)
+    - "endpoint": position matching (predict x1 directly)
+    """
+
+    interpolant_schedule: Literal["linear", "cosine"] = "linear"
+    """
+    Interpolation schedule for x(t) = x0 + alpha(t) * (x1 - x0):
+    - "linear": alpha(t) = t (uniform sampling in time)
+    - "cosine": alpha(t) = 1 - cos^2(t*pi/2) (more samples near endpoints)
+    """
+
+    optimal_transport: bool = False
+    """
+    Whether to apply optimal transport (Hungarian algorithm) to align noise x0
+    with targets x1 before interpolation, minimising transport cost per modality.
+    Applied to: catalyst positions, adsorbate relative positions, adsorbate COM,
+    lattice lengths/angles, and transformation matrix M.
+    Not applied to atom types (corruption-mask scheme; alignment has no effect).
+    """
+
+    informed_priors: bool = True
+    """Whether to use informed priors for the noise x0 (forge variant only)."""
+
+    cfg_dropout_prob: float = 0.0
+    """
+    Probability of dropping the binding energy condition for a given training sample.
+    When dropped, the learnable null binding energy embedding is used instead.
+    Set to 0.0 to disable condition dropout (fully conditional training).
+    """
 
 
 @dataclass
@@ -362,55 +402,8 @@ class Config:
     num_eval_samples: Optional[int] = None
     """Number of samples to use for evaluation (default: use full eval set)"""
 
-    x_matching: Literal["flow", "endpoint"] = "endpoint"
-    """
-    Loss computation mode:
-    - "flow": velocity matching (predict dx/dt, standard flow matching)
-    - "endpoint": position matching (predict x1 directly)
-    """
-
-    interpolant_schedule: Literal["linear", "cosine"] = "linear"
-    """
-    Interpolation schedule for x(t) = x0 + alpha(t) * (x1 - x0):
-    - "linear": alpha(t) = t (uniform sampling in time)
-    - "cosine": alpha(t) = 1 - cos^2(t*pi/2) (more samples near endpoints)
-    """
-
-    optimal_transport: bool = False
-    """
-    Whether to apply optimal transport (Hungarian algorithm) to align noise x0
-    with targets x1 before interpolation, minimising transport cost per modality.
-    Applied to: catalyst positions, adsorbate relative positions, adsorbate COM,
-    lattice lengths/angles, and transformation matrix M.
-    Not applied to atom types (corruption-mask scheme; alignment has no effect).
-    """
-
-    informed_priors: bool = True
-    """
-    Whether to use informed priors for the noise x0 (forge variant only).
-    """
-
-    interpolate_on_torus: bool = False
-    """
-    Whether to apply the minimum image convention (MIC) to the velocity u_x
-    for catalyst fractional coordinates. When True, u_x is wrapped to [-0.5, 0.5)
-    by subtracting round(u_x), ensuring the shortest path on the periodic torus.
-    """
-
-    standardize_ads_pos: bool = False
-    """
-    Whether to standardize adsorbate positions by subtracting the mean and dividing by
-    the standard deviation before flow matching. 
-    - True: adsorbate positions are z-score normalized (zero mean, unit variance)
-    - False: adsorbate positions are used as-is (default)
-    """
-
-    cfg_dropout_prob: float = 0.0
-    """
-    Probability of dropping the binding energy condition for a given training sample.
-    When dropped, the learnable null binding energy embedding is used instead.
-    Set to 0.0 to disable condition dropout (fully conditional training).
-    """
+    path_cfg: PathConfig = field(default_factory=PathConfig)
+    """Flow-path settings: interpolation schedule, transport, and conditioning"""
 
     # ==================== Sampler Settings (for Inference) ====================
 
