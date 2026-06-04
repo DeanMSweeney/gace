@@ -469,6 +469,10 @@ class LightFlowMatch(LightningModule, Flow):
         num_warmup_steps = int(self.hparams.warmup_proportion * num_training_steps)
 
         # Select and configure learning rate scheduler
+        # None → constant learning rate, return early without a scheduler
+        if self.hparams.lr_scheduler is None:
+            return {"optimizer": optimizer}
+
         lr_scheduler = str(self.hparams.lr_scheduler)
 
         if lr_scheduler == "cosine_w_warmup":
@@ -512,10 +516,8 @@ class LightFlowMatch(LightningModule, Flow):
                 total_iters=num_training_steps,
                 power=self.hparams.power,
             )
-        elif not lr_scheduler:
-            return {
-                "optimizer": optimizer, 
-            }
+        else:
+            raise ValueError(f"Unknown lr_scheduler: {lr_scheduler!r}")
 
         return {
             "optimizer": optimizer,
