@@ -224,11 +224,3 @@ def batch_relax_w_mlff(
         return [None] * len(atoms_list)
     finally:
         _PatchedOptimizableBatch.ignored_changes = {}
-
-
-_CSV_DECIMALS = 6
-_FMT = f".{_CSV_DECIMALS}f"
-
-
-def _fmt(v: Optional[float]) -> str:
-    return format(v, _FMT) if v is not None else ""

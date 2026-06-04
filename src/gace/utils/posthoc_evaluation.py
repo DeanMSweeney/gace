@@ -21,23 +21,6 @@ from tqdm import tqdm
 
 log = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Target energy loading
-# ---------------------------------------------------------------------------
-
-def load_target_energies(gen_strucs: str) -> dict[tuple[int, int], float]:
-    csv_path = os.path.join(gen_strucs, "binding_energies.csv")
-    if not os.path.isfile(csv_path):
-        return {}
-    targets = {}
-    with open(csv_path, newline="") as f:
-        for row in csv.DictReader(f):
-            key = (int(row["batch_idx"]), int(row["graph_idx"]))
-            targets[key] = float(row["target_binding_E"])
-    return targets
-
-
 # ---------------------------------------------------------------------------
 # File collection
 # ---------------------------------------------------------------------------
@@ -278,7 +261,6 @@ def main(**kwargs):
             log.info(f"Loaded {len(binding_energies)} target energies")
 
         cf = CatalystForge(
-            binding_energies=binding_energies,
             batch_idx=0,
             calculator=calculator,
             catalyst_dist_cutoff=args.catalyst_dist_cutoff,
@@ -294,7 +276,7 @@ def main(**kwargs):
             n_strucs=args.n_strucs,
             seed=args.seed,
         )
-        rows = cf.run()
+        rows = cf.fire()
         sanitisation = summarize_results(rows)
 
     report = format_report(

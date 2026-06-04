@@ -374,7 +374,7 @@ class LightFlowMatch(LightningModule, Flow):
             ads_integrity_threshold=self.ads_integrity_threshold,
             sanitize_otf=self.sanitize_otf,
         )
-        for metrics in cf.run():
+        for metrics in cf.fire():
             for key, val in metrics.items():
                 if isinstance(val, float):
                     self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
@@ -423,7 +423,7 @@ class LightFlowMatch(LightningModule, Flow):
                 file_ext=".traj",
                 sanitize_otf=self.sanitize_otf,
             )
-            all_metrics.extend(cf.run())
+            all_metrics.extend(cf.fire())
             all_atoms.extend(cf._all_atoms)
 
         if all_metrics:
