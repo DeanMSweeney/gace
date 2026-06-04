@@ -4,11 +4,10 @@ All logic lives in gace.utils.posthoc_evaluation. This script is the CLI entry p
 
 Arguments
 ---------
---gen_strucs       Directory containing generated structure files (.vasp preferred, .traj fallback).
-                   Default: ./gen_strucs
+--strucs_for_eval  Directory containing generated structure files (.vasp preferred, .traj fallback).
 
---novelty          Flag. If set, runs structural uniqueness check via StructureMatcher and
-                   reports total/unique counts and uniqueness score. Disabled by default.
+--check_novelty    Flag. If set, runs structural uniqueness check via StructureMatcher and
+                   reports total/unique counts and uniqueness score. Default: True.
 
 --sanitize         Flag. If set, runs CatalystForge validity checks on structures and reports
                    per-criterion pass rates (vol_ok, cat_dist_ok, etc.). Disabled by default.
@@ -44,16 +43,16 @@ Arguments
 Examples
 --------
     # Novelty check only (fast):
-    python scripts/evaluate.py --gen_strucs ./gen_strucs --novelty
+    python scripts/evaluate.py --strucs_for_eval ./gen_strucs --check_novelty
 
     # Validity checks only:
-    python scripts/evaluate.py --gen_strucs ./gen_strucs --sanitize
+    python scripts/evaluate.py --strucs_for_eval ./gen_strucs --sanitize
 
     # Relax on the fly without sanitization, on a 500-structure sample:
-    python scripts/evaluate.py --gen_strucs ./gen_strucs --relax --n_strucs 500
+    python scripts/evaluate.py --strucs_for_eval ./gen_strucs --relax --n_strucs 500
 
     # Full run — novelty + sanitize + relax, save report to custom path:
-    python scripts/evaluate.py --gen_strucs ./gen_strucs --novelty --sanitize --relax --output ./results/eval.txt
+    python scripts/evaluate.py --strucs_for_eval ./gen_strucs --check_novelty --sanitize --relax --output ./results/eval.txt
 """
 
 from gace.utils.posthoc_evaluation import main as evaluate_generated_structures

@@ -249,10 +249,10 @@ def main(**kwargs):
     for k, v in kwargs.items():
         setattr(args, k, v)
 
-    files = collect_structure_files(args.gen_strucs)
+    files = collect_structure_files(args.strucs_for_eval)
     preloaded = load_atoms_parallel(files, args.num_workers)
 
-    uniqueness = compute_uniqueness(preloaded, args.num_workers) if args.novelty else None
+    uniqueness = compute_uniqueness(preloaded, args.num_workers) if args.check_novelty else None
 
     sanitisation = None
     if args.sanitize or args.relax:
@@ -270,7 +270,7 @@ def main(**kwargs):
                     cpu=args.cpu,
                 )
 
-        binding_energies = load_target_energies(gen_strucs=args.gen_strucs)
+        binding_energies = load_target_energies(gen_strucs=args.strucs_for_eval)
         if binding_energies:
             log.info(f"Loaded {len(binding_energies)} target energies")
 
@@ -282,7 +282,7 @@ def main(**kwargs):
             sanitize_otf=args.sanitize,
             relax_otf=args.relax,
             energy_cutoff=args.energy_cutoff,
-            generated_strucs=args.gen_strucs,
+            generated_strucs=args.strucs_for_eval,
             relaxed_strucs="./relaxed_strucs",
             sanitized_strucs="./sanitized_strucs",
             preloaded_atoms=preloaded,
@@ -293,7 +293,7 @@ def main(**kwargs):
         sanitisation = summarize_results(rows)
 
     report = format_report(
-        directory=args.gen_strucs,
+        directory=args.strucs_for_eval,
         uniqueness=uniqueness,
         sanitisation=sanitisation,
         n_strucs=args.n_strucs if (args.sanitize or args.relax) else None,
