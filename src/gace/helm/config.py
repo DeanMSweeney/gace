@@ -42,7 +42,7 @@ class OptimizerConfig:
 
     # ==================== Learning Rate Scheduler ====================
 
-    lr_scheduler: Literal["polynomial_decay", "cosine_w_warmup", "cosine_annealing", "polynomial_w_warmup", "polynomial_decay"] = "cosine_w_warmup"
+    lr_scheduler: Optional[Literal["polynomial_decay", "cosine_w_warmup", "cosine_annealing", "polynomial_w_warmup"]]= None
     """
     Learning rate scheduling strategy:
     - cosine_w_warmup: Cosine annealing with linear warmup (recommended)
@@ -187,10 +187,6 @@ class SamplerConfig:
     """Scale factor applied to summed covalent radii for the atom-clash distance check.
     A pair is flagged as clashing if its distance is below catalyst_dist_cutoff * (r_i + r_j).
     Lower values are more permissive; higher values are stricter."""
-
-    ads_integrity_threshold: float = 2.0
-    """Cutoff distance threshold to indicate whether an adsorabte atom has
-    dissociated upon adsorption"""
 
     # ==================== MLFF Relaxation ====================
 
