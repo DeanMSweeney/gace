@@ -82,7 +82,7 @@ class CatalystForge:
         """
         if self.opt_graph is not None:
             items = self._items_from_graph()
-            os.makedirs(self.generated_strucs, exist_ok=True)
+            os.makedirs(self.sanitized_strucs if self.sanitize_otf else self.generated_strucs, exist_ok=True)
         else:
             items = self._items_from_preloaded()
             os.makedirs(self.sanitized_strucs, exist_ok=True)
