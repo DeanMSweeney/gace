@@ -597,6 +597,7 @@ class Flow():
         data.angles_generated          = data.angles_radians
         data.transformation_matrix     = data.transformation_matrix.round().long()
         data.M_generated               = data.transformation_matrix
+        data.ads_pos_generated         = data.ads_pos
 
 
         return data
