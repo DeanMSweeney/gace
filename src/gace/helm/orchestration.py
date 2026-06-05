@@ -365,13 +365,11 @@ class LightFlowMatch(LightningModule, Flow):
             batch_idx=batch_idx,
             calculator=self._mlff_calculator,
             relax_otf=self.relax_otf,
-            config_vasp=self.config_vasp,
             catalyst_dist_cutoff=self.catalyst_dist_cutoff,
             generated_strucs=self.generated_strucs,
             relaxed_strucs=self.relaxed_strucs,
             sanitized_strucs=self.sanitized_strucs,
             file_ext=".traj",
-            ads_integrity_threshold=self.ads_integrity_threshold,
             sanitize_otf=self.sanitize_otf,
         )
         for metrics in cf.fire():
@@ -415,7 +413,6 @@ class LightFlowMatch(LightningModule, Flow):
                 batch_idx=batch_idx,
                 calculator=self._mlff_calculator,
                 relax_otf=self.relax_otf,
-                config_vasp=self.config_vasp,
                 catalyst_dist_cutoff=self.catalyst_dist_cutoff,
                 generated_strucs=self.generated_strucs,
                 relaxed_strucs=self.relaxed_strucs,
