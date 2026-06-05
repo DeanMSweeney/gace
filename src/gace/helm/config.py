@@ -289,7 +289,7 @@ class Config:
     Note: For graph neural networks, batch_size refers to number of graphs
     """
 
-    num_workers: Optional[int] = None
+    num_workers: int = 8 
     """Number of CPU workers for data loading (parallel preprocessing)
     - None: auto-detect based on CPU cores
     - Higher values: faster data loading but more memory usage

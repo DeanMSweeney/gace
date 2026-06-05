@@ -392,36 +392,34 @@ class LightFlowMatch(LightningModule, Flow):
         Returns:
             List of ASE Atoms objects (one per graph in the batch).
         """
-        if self.target_binding_energy is not None:
-            data.ads_binding_energy = torch.tensor(
-                [self.target_binding_energy], device=data.pos.device, dtype=torch.float32,
-            )
-        else:
+        if self.target_binding_energy is None:
             raise ValueError("No target binding energy provided.")
 
-        t = torch.linspace(0., 1., self.num_integration_steps,device=data.pos.device, dtype=torch.float32)
+        B = data.num_graphs
+        data.ads_binding_energy = torch.full(
+            (B,), self.target_binding_energy, device=data.pos.device, dtype=torch.float32,
+        )
 
-        all_atoms = []
-        all_metrics = []
-        for sample_idx in range(self.num_generated_samples):
-            counts = sample_prim_atom_counts(1, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
-            opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts,)
+        t = torch.linspace(0., 1., self.num_integration_steps, device=data.pos.device, dtype=torch.float32)
+        counts = sample_prim_atom_counts(B, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
+        opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts)
 
-            cf = CatalystForge(
-                opt_graph=opt_graph,
-                binding_energies=[self.target_binding_energy],
-                batch_idx=batch_idx,
-                calculator=self._mlff_calculator,
-                relax_otf=self.relax_otf,
-                catalyst_dist_cutoff=self.catalyst_dist_cutoff,
-                generated_strucs=self.generated_strucs,
-                relaxed_strucs=self.relaxed_strucs,
-                sanitized_strucs=self.sanitized_strucs,
-                file_ext=".traj",
-                sanitize_otf=self.sanitize_otf,
-            )
-            all_metrics.extend(cf.fire())
-            all_atoms.extend(cf._all_atoms)
+        binding_energies = [data.ads_binding_energy[b].item() for b in range(B)]
+        cf = CatalystForge(
+            opt_graph=opt_graph,
+            binding_energies=binding_energies,
+            batch_idx=batch_idx,
+            calculator=self._mlff_calculator,
+            relax_otf=self.relax_otf,
+            catalyst_dist_cutoff=self.catalyst_dist_cutoff,
+            generated_strucs=self.generated_strucs,
+            relaxed_strucs=self.relaxed_strucs,
+            sanitized_strucs=self.sanitized_strucs,
+            file_ext=".traj",
+            sanitize_otf=self.sanitize_otf,
+        )
+        all_metrics = list(cf.fire())
+        all_atoms = cf._all_atoms
 
         if all_metrics:
             keys = all_metrics[0].keys()

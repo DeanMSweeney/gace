@@ -215,10 +215,11 @@ def main(cfg: Config) -> None:
             binding_energy=cfg.sampler_cfg.target_binding_E,
             num_prim_atoms=cfg.sampler_cfg.num_prim_atoms,
         )
+        n_samples = cfg.sampler_cfg.num_generated_samples
         gen_loader = DataLoader(
-            dataset=[initial_graph],
-            batch_size=1,
-            num_workers=0,
+            dataset=[initial_graph] * n_samples,
+            batch_size=cfg.batch_size,
+            num_workers=cfg.num_workers,
             pin_memory=pin_memory,
         )
         
