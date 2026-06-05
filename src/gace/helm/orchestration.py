@@ -425,8 +425,13 @@ class LightFlowMatch(LightningModule, Flow):
             keys = all_metrics[0].keys()
             avgs = {k: np.mean([m[k] for m in all_metrics if isinstance(m.get(k), float)]) for k in keys
                     if any(isinstance(m.get(k), float) for m in all_metrics)}
-            print(f"[predict batch={batch_idx} avg over {len(all_metrics)} samples] " +
-                  " ".join(f"{k}={v:.4f}" for k, v in avgs.items()))
+            col_w = max(len(k) for k in avgs) + 2
+            sep = "-" * (col_w + 26)
+            print(f"\n[predict batch={batch_idx} | {len(all_metrics)} samples]")
+            print(sep)
+            for k, v in avgs.items():
+                print(f"\033[38;5;183m{k:>{col_w}}\033[0m | \033[38;5;177m{v:.4f}\033[0m")
+            print(sep)
 
         return all_atoms
 
