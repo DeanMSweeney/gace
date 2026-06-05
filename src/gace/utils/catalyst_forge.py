@@ -18,7 +18,6 @@ _FMT = f".{_CSV_DECIMALS}f"
 _BINDING_E_THRESHOLD = 0.10  # eV
 _THRESHOLD_MULTIPLIERS = [1, 2, 3, 5, 10]
 
-
 def _csv_fmt(v) -> str:
     if isinstance(v, float):
         return format(v, _FMT)
@@ -29,7 +28,7 @@ def _threshold_flags(diff: float | None) -> dict:
     """Return within_NT booleans for each multiplier of _BINDING_E_THRESHOLD."""
     if diff is None:
         return {f"within_{m}T": None for m in _THRESHOLD_MULTIPLIERS}
-    return {f"within_{m}T": float(diff <= m * _BINDING_E_THRESHOLD for m in _THRESHOLD_MULTIPLIERS)}
+    return {f"within_{m}T": float(diff <= m * _BINDING_E_THRESHOLD) for m in _THRESHOLD_MULTIPLIERS}
 
 class CatalystForge:
     """Build, sanitize, relax, and write generated catalyst structures.
