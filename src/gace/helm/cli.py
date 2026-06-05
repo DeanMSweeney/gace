@@ -205,14 +205,14 @@ def main(cfg: Config) -> None:
 
     # --- Generation Mode ---
     # Build Data object from adsorbate molecule POSCAR + target binding energy
-    elif cfg.mode == "generate" and cfg.sampler_cfg.in_POS:
+    elif cfg.mode == "generate" and cfg.sampler_cfg.inputted_adsorbate:
         n = cfg.sampler_cfg.get("num_prim_atoms", None)
         declare("Activated Generation mode with user adsorbate input")
         declare(f"Primitive atom count: {'fixed at ' + str(n) if n is not None else 'sampling from histogram'} 🧙🏽‍♀️")
-        mol_atoms = ase.io.read(cfg.sampler_cfg.in_POS)
+        mol_atoms = ase.io.read(cfg.sampler_cfg.inputted_adsorbate)
         initial_graph = build_graph_from_atoms(
             mol_atoms=mol_atoms,
-            binding_energy=cfg.sampler_cfg.target_binding_E,
+            binding_energy=cfg.sampler_cfg.target_binding_energy,
             num_prim_atoms=cfg.sampler_cfg.num_prim_atoms,
         )
         n_samples = cfg.sampler_cfg.num_generated_samples

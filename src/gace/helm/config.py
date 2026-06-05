@@ -142,7 +142,7 @@ class SamplerConfig:
 
     # ==================== Structure Generation/Output ====================
 
-    in_POS: Optional[str] = None
+    inputted_adsorbate: Optional[str] = None
     """Path to adsorbate molecule POSCAR for generate mode, or initial structure
     path for saving during testing (POSCAR format).
     """
