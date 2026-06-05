@@ -15,12 +15,21 @@ from gace.utils.relaxation import relax_w_mlff
 
 _CSV_DECIMALS = 6
 _FMT = f".{_CSV_DECIMALS}f"
+_BINDING_E_THRESHOLD = 0.10  # eV
+_THRESHOLD_MULTIPLIERS = [1, 2, 3, 5, 10]
 
 
 def _csv_fmt(v) -> str:
     if isinstance(v, float):
         return format(v, _FMT)
     return str(v) if v is not None else ""
+
+
+def _threshold_flags(diff: float | None) -> dict:
+    """Return within_NT booleans for each multiplier of _BINDING_E_THRESHOLD."""
+    if diff is None:
+        return {f"within_{m}T": None for m in _THRESHOLD_MULTIPLIERS}
+    return {f"within_{m}T": diff <= m * _BINDING_E_THRESHOLD for m in _THRESHOLD_MULTIPLIERS}
 
 class CatalystForge:
     """Build, sanitize, relax, and write generated catalyst structures.
@@ -206,11 +215,13 @@ class CatalystForge:
         fname: str | None,
         target_E: float | None,
     ) -> dict:
+        threshold_cols = {f"within_{m}T": None for m in _THRESHOLD_MULTIPLIERS}
         base_row = {
             "fname":              fname,
             "target_binding_E":   target_E,
             "computed_binding_E": None,
             "binding_E_diff":     None,
+            **threshold_cols,
         }
 
         if not self.sanitize_otf:
@@ -221,10 +232,12 @@ class CatalystForge:
 
             if atoms_rlxd is not None:
                 ase.io.write(os.path.join(self.relaxed_strucs, fname), atoms_rlxd)
+                diff = atoms_rlxd.info.get("binding_E_diff")
                 return {
                     **base_row,
                     "computed_binding_E": atoms_rlxd.info.get("computed_binding_E"),
-                    "binding_E_diff":     atoms_rlxd.info.get("binding_E_diff"),
+                    "binding_E_diff":     diff,
+                    **_threshold_flags(diff),
                 }
             return base_row
 
@@ -240,12 +253,14 @@ class CatalystForge:
         if atoms_rlxd is not None:
             ase.io.write(os.path.join(self.relaxed_strucs, fname), atoms_rlxd)
 
+        diff = atoms_rlxd.info.get("binding_E_diff") if atoms_rlxd is not None else None
         validity_keys = ["vol_ok", "cat_dist_ok", "cat_atom_types_ok", "cat_ads_dist_ok", "ads_dist_ok", "is_valid", "is_valid_naive"]
         return {
             **base_row,
             "computed_binding_E": atoms_rlxd.info.get("computed_binding_E") if atoms_rlxd is not None else None,
-            "binding_E_diff":     atoms_rlxd.info.get("binding_E_diff") if atoms_rlxd is not None else None,
-            **{k: float(atoms.info.get(k)) if atoms is not None else float(False) for k in validity_keys}, # if atoms DNE, it could not be built and mark as invalid 
+            "binding_E_diff":     diff,
+            **_threshold_flags(diff),
+            **{k: float(atoms.info.get(k)) if atoms is not None else float(False) for k in validity_keys}, # if atoms DNE, it could not be built and mark as invalid
         }
 
     def fire(self) -> list[dict]:

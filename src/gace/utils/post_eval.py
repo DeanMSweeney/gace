@@ -117,6 +117,12 @@ def summarize_results(rows: list[dict]) -> dict:
     diffs = [float(r["binding_E_diff"]) for r in rows if r.get("binding_E_diff")]
     energy_stats = {}
     if diffs:
+        threshold_multipliers = [1, 2, 3, 5, 10]
+        within_pct = {}
+        for m in threshold_multipliers:
+            key = f"within_{m}T"
+            flagged = [r[key] for r in rows if r.get(key) is not None]
+            within_pct[key] = sum(flagged) / len(flagged) if flagged else 0.0
         energy_stats = {
             "n_relaxed": len(diffs),
             "n_total":   len(rows),
@@ -125,6 +131,7 @@ def summarize_results(rows: list[dict]) -> dict:
             "std":       statistics.stdev(diffs) if len(diffs) > 1 else 0.0,
             "min":       min(diffs),
             "max":       max(diffs),
+            **within_pct,
         }
 
     return {"validity": validity, "energy_stats": energy_stats}
@@ -186,6 +193,13 @@ def format_report(
                 f"  Std ΔE    : {energy_stats['std']:.4f} eV",
                 f"  Min ΔE    : {energy_stats['min']:.4f} eV",
                 f"  Max ΔE    : {energy_stats['max']:.4f} eV",
+                "",
+                "  Within threshold (T=0.10 eV)",
+                f"  ≤ 1×T (0.10 eV) : {energy_stats['within_1T']:.2%}",
+                f"  ≤ 2×T (0.20 eV) : {energy_stats['within_2T']:.2%}",
+                f"  ≤ 3×T (0.30 eV) : {energy_stats['within_3T']:.2%}",
+                f"  ≤ 5×T (0.50 eV) : {energy_stats['within_5T']:.2%}",
+                f"  ≤10×T (1.00 eV) : {energy_stats['within_10T']:.2%}",
             ]
 
     lines += ["", "=" * 50]
