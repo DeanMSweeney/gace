@@ -52,10 +52,8 @@ class CatalystForge:
         preloaded_atoms: dict[str, "Atoms | None"] | None = None,
         file_ext: str = ".vasp",
         energy_cutoff: float = 10.0,
-        ads_integrity_threshold: float = 2.0,
         sanitize_otf: bool = True,
         relax_otf: bool = False,
-        config_vasp: bool = False,
         n_strucs: int | None = None,
         seed: int = 42,
         fmax: float = 0.05,
@@ -67,7 +65,6 @@ class CatalystForge:
         self.batch_idx = batch_idx
         self.calculator = calculator
         self.relax_otf = relax_otf
-        self.config_vasp = config_vasp
         self.catalyst_dist_cutoff = catalyst_dist_cutoff
         self.generated_strucs = generated_strucs
         self.relaxed_strucs = relaxed_strucs
@@ -102,26 +99,6 @@ class CatalystForge:
         logging.info(f"Processing {len(sample)} structures (preloaded, seed={self.seed})")
         return [self.preloaded_atoms.get(path) for path in sample]
 
-    def _compute_binding_energy(
-        self,
-        atoms_rlxd: "Atoms | None",
-        target_E: float | None,
-        fname: str,
-    ) -> "Atoms | None":
-        if atoms_rlxd is None:
-            return None
-        try:
-            computed_E = atoms_rlxd.get_potential_energy()
-            if computed_E <= self.energy_cutoff:
-                atoms_rlxd.info["computed_binding_E"] = computed_E
-                if target_E is not None:
-                    atoms_rlxd.info["binding_E_diff"] = abs(computed_E - target_E)
-                return atoms_rlxd
-            return None
-        except Exception as e:
-            logging.warning(f"Energy extraction failed for {fname}: {e}")
-            return None
-
     def _build(self, b: int, prim_batch, ads_batch) -> Atoms | None:
         try:
             lengths  = self.opt_graph.lengths_generated[b]
@@ -146,6 +123,7 @@ class CatalystForge:
             return None
 
     def sanitize(self, atoms: Atoms | None) -> None:
+
         if atoms is None:
             return
 
@@ -155,7 +133,7 @@ class CatalystForge:
             tags = atoms.get_tags()
             cat_mask = tags != 2
             ads_mask = tags == 2
-            ads_atoms = atoms[ads_mask]
+
             cat_atoms = atoms[cat_mask]
             ads_idx = np.where(ads_mask)[0]
             cat_idx = np.where(cat_mask)[0]
@@ -182,7 +160,6 @@ class CatalystForge:
             cat_ads_dist_ok = bool(cat_ads_dists.min() >= 0.5)
 
         except Exception as e:
-            logging.warning(f"batch_relax_w_mlff failed: {e}")
             vol_ok = False
             cat_dist_ok = False
             cat_dist_ok_naive = False
@@ -199,17 +176,29 @@ class CatalystForge:
         atoms.info["is_valid_naive"]    = cat_dist_ok_naive and ads_dist_ok and cat_ads_dist_ok and vol_ok
 
     def relax(self, atoms: Atoms | None) -> Atoms | None:
-        if not self.relax_otf or atoms is None:
-            return None
-        if not atoms.info.get("is_valid", True):
-            return None
-        return relax_w_mlff(
+
+        atoms_rlxd = relax_w_mlff(
             atoms=atoms,
             calculator=self.calculator,
             fmax=self.fmax,
             steps=self.steps,
             optimizer="BFGS",
         )
+
+        target_E = atoms.info.get("target_binding_E")
+        try:
+            computed_E = atoms_rlxd.get_potential_energy()
+            if computed_E <= self.energy_cutoff:
+                atoms_rlxd.info["computed_binding_E"] = computed_E
+                if target_E is not None:
+                    atoms_rlxd.info["binding_E_diff"] = abs(computed_E - target_E)
+                return atoms_rlxd
+            atoms.info["is_valid"] = False # binding energy greater than 10 eV, discard sample 
+            return None
+        except Exception as e:
+            logging.warning(f"Energy extraction failed for {atoms.info.get('fname')}: {e}")
+            atoms.info["is_valid"] = False # optimization or energy extraction failed, mark as invalid 
+            return None
 
     def _process_built_struc(
         self,
@@ -227,8 +216,9 @@ class CatalystForge:
         if not self.sanitize_otf:
             if atoms is not None and self.opt_graph:
                 ase.io.write(os.path.join(self.generated_strucs, fname), atoms) # if opt_grpah present, we are generating strucs for the first time
-            atoms_rlxd = self.relax(atoms=atoms)
-            atoms_rlxd = self._compute_binding_energy(atoms_rlxd, target_E, fname)
+            opt_conditions = self.relax_otf and atoms
+            atoms_rlxd = self.relax(atoms=atoms) if opt_conditions else None
+
             if atoms_rlxd is not None:
                 ase.io.write(os.path.join(self.relaxed_strucs, fname), atoms_rlxd)
                 return {
@@ -240,14 +230,13 @@ class CatalystForge:
 
         # sanitize the atoms objects to purge unstabele strucs
         self.sanitize(atoms=atoms)
-        atoms_rlxd = self.relax(atoms=atoms)
 
-        atoms_rlxd = self._compute_binding_energy(atoms_rlxd, target_E, fname)
-        if atoms_rlxd is None and self.relax_otf and atoms is not None:
-            atoms.info["is_valid"] = False
-
-        if atoms is not None and atoms.info.get("is_valid", False):
+        # write sanitized and relaxed structures to disk
+        if atoms is not None and atoms.info.get("is_valid"):
             ase.io.write(os.path.join(self.sanitized_strucs, fname), atoms)
+            atoms_rlxd = self.relax(atoms=atoms) if self.relax_otf else None
+        else:
+            atoms_rlxd = None # if atoms DNE, store atoms_rlxd as None  
         if atoms_rlxd is not None:
             ase.io.write(os.path.join(self.relaxed_strucs, fname), atoms_rlxd)
 
@@ -256,7 +245,7 @@ class CatalystForge:
             **base_row,
             "computed_binding_E": atoms_rlxd.info.get("computed_binding_E") if atoms_rlxd is not None else None,
             "binding_E_diff":     atoms_rlxd.info.get("binding_E_diff") if atoms_rlxd is not None else None,
-            **{k: float(atoms.info.get(k, False)) for k in validity_keys},
+            **{k: float(atoms.info.get(k)) if atoms is not None else float(False) for k in validity_keys}, # if atoms DNE, it could not be built and mark as invalid 
         }
 
     def fire(self) -> list[dict]:

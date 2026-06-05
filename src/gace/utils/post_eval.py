@@ -27,16 +27,13 @@ log = logging.getLogger(__name__)
 
 def collect_structure_files(directory: str) -> list[str]:
     """Return sorted structure files from directory (.vasp preferred, .traj fallback)."""
-    vasp = sorted(glob.glob(os.path.join(directory, "*.vasp")))
-    if vasp:
-        log.info(f"Found {len(vasp)} .vasp files in {directory}")
-        return vasp
     traj = sorted(glob.glob(os.path.join(directory, "*.traj")))
-    if traj:
-        log.info(f"Found {len(traj)} .traj files in {directory}")
-        return traj
-    raise FileNotFoundError(f"No .vasp or .traj files found in {directory}")
-
+    log.info(f"Found {len(traj)} .traj files in {directory}")
+    
+    if not traj:
+        raise FileNotFoundError(f"No .traj files found in directory: {directory}")
+    
+    return traj
 
 # ---------------------------------------------------------------------------
 # Uniqueness
@@ -255,10 +252,6 @@ def main(**kwargs):
                     local_cache="./mlff_checkpoint_cache",
                     cpu=args.cpu,
                 )
-
-        binding_energies = load_target_energies(gen_strucs=args.strucs_for_eval)
-        if binding_energies:
-            log.info(f"Loaded {len(binding_energies)} target energies")
 
         cf = CatalystForge(
             batch_idx=0,

@@ -61,7 +61,7 @@ Examples
     python scripts/evaluate.py --strucs_for_eval ./gen_strucs --check_novelty --sanitize --relax --output ./results/eval.txt
 """
 
-from gace.utils.posthoc_evaluation import main as evaluate_generated_structures
+from gace.utils.post_eval import main as evaluate_generated_structures
 
 if __name__ == "__main__":
     evaluate_generated_structures()
