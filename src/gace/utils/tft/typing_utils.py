@@ -42,8 +42,6 @@ typecheck = jaxtyped(typechecker=beartype) if IS_TYPECHECKING else identity
 
 if IS_TYPECHECKING:
     print("Type checking is enabled.")
-else:
-    print("Type checking is disabled.")
 
 if IS_DEBUGGING:
     print("Debugging is enabled.")
@@ -55,9 +53,6 @@ if IS_DEBUGGING:
         lt.monkey_patch()
     else:
         print("`lovely_tensors` is not available, debugging will not be as informative.")
-
-else:
-    print("Debugging is disabled.")
 
 __all__ = [
     "IS_TYPECHECKING",
