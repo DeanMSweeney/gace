@@ -69,7 +69,22 @@ import logging
 @rank_zero_only
 def declare(statement) -> None:
     logging.info(statement)
-    return 
+    return
+
+@rank_zero_only
+def print_banner() -> None:
+    LAVENDER = "\033[38;2;180;160;220m"
+    RESET = "\033[0m"
+    banner = """
+  ██████╗  █████╗  ██████╗███████╗
+ ██╔════╝ ██╔══██╗██╔════╝██╔════╝
+ ██║  ███╗███████║██║     █████╗
+ ██║   ██║██╔══██║██║     ██╔══╝
+ ╚██████╔╝██║  ██║╚██████╗███████╗
+  ╚═════╝ ╚═╝  ╚═╝ ╚═════╝╚══════╝
+         Change the paradigm.
+"""
+    print(LAVENDER + banner + RESET)
 
 def main(cfg: Config) -> None:
     """
@@ -78,6 +93,8 @@ def main(cfg: Config) -> None:
     Args:
         cfg: Configuration object containing model, training, and data parameters
     """
+    print_banner()
+
     # === Configuration Setup ===
     # Create default configuration and merge with provided config (YAML overrides defaults)
     defaults = Config()
