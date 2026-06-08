@@ -31,7 +31,7 @@ def _threshold_flags(diff: float | None) -> dict:
     return {f"within_{m}T": float(diff <= m * _BINDING_E_THRESHOLD) for m in _THRESHOLD_MULTIPLIERS}
 
 
-_THRESHOLD_SUBDIRS = {1: "in_threshold", 2: "2_threshold", 3: "3_threshold", 5: "5_threshold", 10: "10_threshold"}
+_THRESHOLD_SUBDIRS = {1: "1_threshold", 2: "2_threshold", 3: "3_threshold", 5: "5_threshold", 10: "10_threshold"}
 
 
 def _threshold_subdir(diff: float | None) -> str:
