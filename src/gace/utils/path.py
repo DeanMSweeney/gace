@@ -703,7 +703,6 @@ class Flow():
         """
         # Softmax sums to 1 by construction, but if every particle failed
         # (all rewards = -inf) it produces nan. Fall back to uniform in that case.
-        print(rewards, selected)
 
         if rewards.isinf().all():
             probs = torch.ones(N, dtype=torch.float32) / N
