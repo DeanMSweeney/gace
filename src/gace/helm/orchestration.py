@@ -98,6 +98,10 @@ class LightFlowMatch(LightningModule, Flow):
             cfg_w_discrete: float=1.0,
             sde_noise_scale: float=0.0,
             sanitize_otf: bool=True,
+            fk_steering: bool=False,
+            fk_K: int=10,
+            fk_tau: float=1.0,
+            fk_start_step: int=20,
             **kwargs,
         ):
 
@@ -156,6 +160,12 @@ class LightFlowMatch(LightningModule, Flow):
         self.cfg_w_continuous = cfg_w_continuous
         self.cfg_w_discrete = cfg_w_discrete
         self.sde_noise_scale = sde_noise_scale
+
+        # Feynman-Kac steering
+        self.fk_steering   = fk_steering
+        self.fk_K          = fk_K
+        self.fk_tau        = fk_tau
+        self.fk_start_step = fk_start_step
 
         _hist_path = os.path.join(os.path.dirname(__file__), "primitive_atom_distribution.json")
         with open(_hist_path) as f:

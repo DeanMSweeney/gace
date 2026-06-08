@@ -105,7 +105,7 @@ class CatalystForge:
         num_graphs = int(self.opt_graph.batch.max().item()) + 1
         items = []
         for b in range(num_graphs):
-            atoms    = self._build(b, prim_batch, ads_batch)
+            atoms    = self.build_from_factorized_repr(b, prim_batch, ads_batch)
             if atoms is not None:
                 atoms.info["fname"]             = f"{self.batch_idx}_{b}{self.file_ext}"
                 atoms.info["target_binding_E"]  = self.binding_energies[b]
@@ -119,7 +119,7 @@ class CatalystForge:
         logging.info(f"Processing {len(sample)} structures (preloaded, seed={self.seed})")
         return [self.preloaded_atoms.get(path) for path in sample]
 
-    def _build(self, b: int, prim_batch, ads_batch) -> Atoms | None:
+    def build_from_factorized_repr(self, b: int, prim_batch, ads_batch) -> Atoms | None:
         try:
             lengths  = self.opt_graph.lengths_generated[b]
             angles   = self.opt_graph.angles_generated[b]

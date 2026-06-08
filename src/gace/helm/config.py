@@ -196,6 +196,24 @@ class SamplerConfig:
     mlff_checkpoint: str = "EquiformerV2-31M-S2EF-OC20-All+MD"
     """Path to MLFF checkpoint for relaxation"""
 
+    # ==================== Feynman-Kac Steering ====================
+
+    fk_steering: bool = False
+    """Enable Feynman-Kac particle filtering during ODE sampling.
+    Runs num_generated_samples particles in parallel and periodically
+    resamples toward structures with adsorption energy close to target."""
+
+    fk_K: int = 10
+    """Evaluate and resample every fk_K ODE steps."""
+
+    fk_tau: float = 1.0
+    """Resampling temperature. Lower = harder selection (winner-takes-all);
+    higher = softer selection (near-uniform). Typical range: 0.1 – 5.0."""
+
+    fk_start_step: int = 20
+    """Minimum number of ODE steps to complete before the first FK evaluation.
+    Allows global structure (lattice, rough positions) to form before steering."""
+
 
 
 

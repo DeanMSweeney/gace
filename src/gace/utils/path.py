@@ -11,6 +11,8 @@ from gace.utils.invariance import pbc_aware_delta, batched_ot_align, global_ot_a
 from gace.utils.utils import adsorbate_neighborhood_mask, random_so3_rotation
 from gace.utils.builder import lattice_params_to_matrix
 from gace.utils.euler import euler_step, ctmc_step
+from gace.utils.relaxation import relax_w_mlff
+from gace.utils.catalyst_forge import CatalystForge
 
 NUM_CLASSES = 100  # number of atom-type classes (atomic numbers 1–100, shifted to 0-indexed)
 
@@ -590,6 +592,24 @@ class Flow():
                 # Update discrete atom types (CTMC)
                 data.atomic_numbers = ctmc_step(data.atomic_numbers, pred["z"], t_curr, dt)
 
+                # ── FK steering hook ─────────────────────────────────────────
+                if (
+                    getattr(self, "fk_steering", False)
+                    and (i + 1) >= getattr(self, "fk_start_step", 20)
+                    and (i + 1) % getattr(self, "fk_K", 10) == 0
+                    and i < len(t) - 2
+                ):
+                    n_prim = int(self.primitive_mask.sum().item()) // B
+                    n_ads  = N_ads // B
+                    rewards = self._fk_evaluate(
+                        data=data, pred=pred, N=B,
+                        n_prim=n_prim, n_ads=n_ads, n_scale=n_scale,
+                    )
+                    data = self._fk_resample(
+                        data=data, rewards=rewards, N=B,
+                        n_prim=n_prim, n_ads=n_ads,
+                    )
+
         # ── Store generated outputs ───────────────────────────────────────────
         data.pos_generated             = data.pos
         data.atomic_numbers_generated  = data.atomic_numbers + 1 if not build_from_truth else data.atomic_numbers  # 1-indexed (1–99)
@@ -600,4 +620,109 @@ class Flow():
         data.ads_pos_generated         = data.ads_pos
 
 
+        return data
+
+    # ── Feynman-Kac helpers ──────────────────────────────────────────────────
+
+    def _fk_evaluate(self, data, pred, N: int, n_prim: int, n_ads: int, n_scale) -> torch.Tensor:
+        """Decode x1_pred for each particle, relax, and return volcano rewards.
+
+        Writes pred into *_generated fields on data (temporary), initialises
+        CatalystForge with sanitize_otf=False and relax_otf=True, then calls
+        build_from_factorized_repr() + relax_w_mlff() per particle.
+
+        Args:
+            data:    current PyG Batch (N particles)
+            pred:    model endpoint predictions dict
+            N:       number of particles (batch size)
+            n_prim:  primitive atoms per particle (uniform)
+            n_ads:   adsorbate atoms per particle (uniform)
+            n_scale: (B, 1) length de-normalisation scale factor
+
+        Returns:
+            rewards: (N,) float tensor, reward = -|E_ads - target_E|
+        """
+        rewards    = torch.full((N,), float("-inf"), dtype=torch.float32)
+        prim_batch = data.batch[data.tags == 1]
+        ads_batch  = data.batch[data.tags == 2]
+
+        # Temporarily write x1_pred into *_generated fields
+        data.pos_generated            = pred["pos"]
+        data.atomic_numbers_generated = pred["z"].argmax(dim=-1) + 1   # 1-indexed
+        data.lengths_generated        = pred["len"] * n_scale           # denormalise to Å
+        data.angles_generated         = pred["ang"]
+        data.M_generated              = pred["M"].round().long()
+        data.ads_pos_generated        = pred["ads_pos"]
+
+        forge = CatalystForge(
+            opt_graph=data,
+            binding_energies=[data.ads_binding_energy[b].item() for b in range(N)],
+            batch_idx=0,
+            calculator=self._mlff_calculator,
+            sanitize_otf=False,
+            relax_otf=True,
+            catalyst_dist_cutoff=self.catalyst_dist_cutoff,
+            generated_strucs=None,
+            sanitized_strucs=None,
+            relaxed_strucs=None,
+        )
+
+        for b in range(N):
+            atoms = forge.build_from_factorized_repr(
+                b=b, prim_batch=prim_batch, ads_batch=ads_batch,
+            )
+            if atoms is None:
+                continue
+
+            result = relax_w_mlff(atoms=atoms, calculator=self._mlff_calculator)
+            if result is None:
+                continue
+
+            E_ads    = result["binding_E"]
+            target_E = data.ads_binding_energy[b].item()
+            rewards[b] = -abs(E_ads - target_E)   # volcano: peaked at conditioning label
+
+        return rewards
+
+    def _fk_resample(self, data, rewards: torch.Tensor, N: int, n_prim: int, n_ads: int):
+        """Multinomial resampling of the N-particle batch.
+
+        High-reward particles are cloned (selected multiple times); low-reward
+        ones are dropped. Total population stays at N. Clones diverge in
+        subsequent ODE steps via CTMC stochasticity and sde_noise_scale.
+
+        Args:
+            data:    current PyG Batch (N particles, uniform atom counts)
+            rewards: (N,) reward tensor from _fk_evaluate
+            N:       number of particles
+            n_prim:  primitive atoms per particle
+            n_ads:   adsorbate atoms per particle
+
+        Returns:
+            data with particle tensors rearranged by selected indices
+        """
+        # Softmax sums to 1 by construction, but if every particle failed
+        # (all rewards = -inf) it produces nan. Fall back to uniform in that case.
+        if rewards.isinf().all():
+            probs = torch.ones(N, dtype=torch.float32) / N
+        else:
+            finite_rewards = rewards.clone()
+            finite_rewards[rewards.isinf()] = rewards[~rewards.isinf()].min() - 1.0
+            probs = torch.softmax(
+                (finite_rewards - finite_rewards.max()) / self.fk_tau, dim=0
+            )
+        selected = torch.multinomial(input=probs, num_samples=N, replacement=True)  # (N,)
+
+        # Per-graph tensors: direct index by selected particle indices
+        data.lengths_scaled        = data.lengths_scaled[selected]          # (N, 3)
+        data.angles_radians        = data.angles_radians[selected]          # (N, 3)
+        data.transformation_matrix = data.transformation_matrix[selected]   # (N, 3, 3)
+
+        # Per-atom tensors: reshape to (N, n_atoms, 3), index by particle, reshape back
+        # Safe because all particles share the same atom count (identical topology)
+        data.pos            = data.pos.view(N, n_prim, 3)[selected].view(N * n_prim, 3)
+        data.atomic_numbers = data.atomic_numbers.view(N, n_prim)[selected].view(N * n_prim)
+        data.ads_pos        = data.ads_pos.view(N, n_ads, 3)[selected].view(N * n_ads, 3)
+
+        # data.batch and data.tags unchanged — topology identical across all particles
         return data
