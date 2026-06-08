@@ -704,6 +704,7 @@ class Flow():
         # Softmax sums to 1 by construction, but if every particle failed
         # (all rewards = -inf) it produces nan. Fall back to uniform in that case.
         if rewards.isinf().all():
+            print(rewards)
             probs = torch.ones(N, dtype=torch.float32) / N
         else:
             finite_rewards = rewards.clone()
@@ -712,6 +713,7 @@ class Flow():
                 (finite_rewards - finite_rewards.max()) / self.fk_tau, dim=0
             )
         selected = torch.multinomial(input=probs, num_samples=N, replacement=True)  # (N,)
+        print(selected)
 
         # Per-graph tensors: direct index by selected particle indices
         data.lengths_scaled        = data.lengths_scaled[selected]          # (N, 3)
