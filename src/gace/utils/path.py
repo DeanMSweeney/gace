@@ -591,6 +591,7 @@ class Flow():
 
                 # Update discrete atom types (CTMC)
                 data.atomic_numbers = ctmc_step(data.atomic_numbers, pred["z"], t_curr, dt)
+                print(self.fk_steering)
 
                 # ── FK steering hook ─────────────────────────────────────────
                 if (
