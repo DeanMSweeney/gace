@@ -593,7 +593,6 @@ class Flow():
                 data.atomic_numbers = ctmc_step(data.atomic_numbers, pred["z"], t_curr, dt)
 
                 # ── FK steering hook ─────────────────────────────────────────
-                print(i, getattr(self, "fk_steering", False), (i + 1) >= getattr(self, "fk_start_step", 20), (i + 1) % getattr(self, "fk_K", 10) == 0, i < len(t) - 2)
                 if (
                     getattr(self, "fk_steering", False)
                     and (i + 1) >= getattr(self, "fk_start_step", 20)
@@ -704,6 +703,8 @@ class Flow():
         """
         # Softmax sums to 1 by construction, but if every particle failed
         # (all rewards = -inf) it produces nan. Fall back to uniform in that case.
+        print(rewards, selected)
+
         if rewards.isinf().all():
             probs = torch.ones(N, dtype=torch.float32) / N
         else:
@@ -713,7 +714,7 @@ class Flow():
                 (finite_rewards - finite_rewards.max()) / self.fk_tau, dim=0
             )
         selected = torch.multinomial(input=probs, num_samples=N, replacement=True)  # (N,)
-
+        print(rewards, selected)
         # Per-graph tensors: direct index by selected particle indices
         data.lengths_scaled        = data.lengths_scaled[selected]          # (N, 3)
         data.angles_radians        = data.angles_radians[selected]          # (N, 3)
