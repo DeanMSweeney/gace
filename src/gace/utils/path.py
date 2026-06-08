@@ -593,7 +593,7 @@ class Flow():
                 data.atomic_numbers = ctmc_step(data.atomic_numbers, pred["z"], t_curr, dt)
 
                 # ── FK steering hook ─────────────────────────────────────────
-                print(getattr(self, "fk_steering", False), (i + 1) >= getattr(self, "fk_start_step", 20), (i + 1) % getattr(self, "fk_K", 10) == 0, i < len(t) - 2)
+                print(i, getattr(self, "fk_steering", False), (i + 1) >= getattr(self, "fk_start_step", 20), (i + 1) % getattr(self, "fk_K", 10) == 0, i < len(t) - 2)
                 if (
                     getattr(self, "fk_steering", False)
                     and (i + 1) >= getattr(self, "fk_start_step", 20)
