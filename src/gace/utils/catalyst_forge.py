@@ -30,6 +30,18 @@ def _threshold_flags(diff: float | None) -> dict:
         return {f"within_{m}T": None for m in _THRESHOLD_MULTIPLIERS}
     return {f"within_{m}T": float(diff <= m * _BINDING_E_THRESHOLD) for m in _THRESHOLD_MULTIPLIERS}
 
+
+_THRESHOLD_SUBDIRS = {1: "in_threshold", 2: "2_threshold", 3: "3_threshold", 5: "5_threshold", 10: "10_threshold"}
+
+
+def _threshold_subdir(diff: float | None) -> str:
+    """Return the tightest threshold subdirectory name, or 'inf_threshold' if outside all."""
+    if diff is not None:
+        for m in _THRESHOLD_MULTIPLIERS:
+            if diff <= m * _BINDING_E_THRESHOLD:
+                return _THRESHOLD_SUBDIRS[m]
+    return "inf_threshold"
+
 class CatalystForge:
     """Build, sanitize, relax, and write generated catalyst structures.
 
@@ -230,8 +242,12 @@ class CatalystForge:
             atoms_rlxd = self.relax(atoms=atoms) if opt_conditions else None
 
             if atoms_rlxd is not None:
-                ase.io.write(os.path.join(self.relaxed_strucs, fname), atoms_rlxd)
                 diff = atoms_rlxd.info.get("binding_E_diff")
+                subdir = _threshold_subdir(diff)
+                atoms_rlxd.info["threshold_subdir"] = subdir
+                out_path = os.path.join(self.relaxed_strucs, subdir, fname)
+                os.makedirs(os.path.dirname(out_path), exist_ok=True)
+                ase.io.write(out_path, atoms_rlxd)
                 return {
                     **base_row,
                     "computed_binding_E": atoms_rlxd.info.get("computed_binding_E"),
@@ -248,9 +264,14 @@ class CatalystForge:
             ase.io.write(os.path.join(self.sanitized_strucs, fname), atoms)
             atoms_rlxd = self.relax(atoms=atoms) if self.relax_otf else None
         else:
-            atoms_rlxd = None # if atoms DNE, store atoms_rlxd as None  
+            atoms_rlxd = None # if atoms DNE, store atoms_rlxd as None
         if atoms_rlxd is not None:
-            ase.io.write(os.path.join(self.relaxed_strucs, fname), atoms_rlxd)
+            diff = atoms_rlxd.info.get("binding_E_diff")
+            subdir = _threshold_subdir(diff)
+            atoms_rlxd.info["threshold_subdir"] = subdir
+            out_path = os.path.join(self.relaxed_strucs, subdir, fname)
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            ase.io.write(out_path, atoms_rlxd)
 
         diff = atoms_rlxd.info.get("binding_E_diff") if atoms_rlxd is not None else None
         validity_keys = ["vol_ok", "cat_dist_ok", "cat_atom_types_ok", "cat_ads_dist_ok", "ads_dist_ok", "is_valid", "is_valid_naive"]
