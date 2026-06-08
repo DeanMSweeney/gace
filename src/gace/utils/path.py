@@ -678,7 +678,7 @@ class Flow():
             if result is None:
                 continue
 
-            E_ads    = result["binding_E"]
+            E_ads    = result.get_potential_energy()
             target_E = data.ads_binding_energy[b].item()
             rewards[b] = -abs(E_ads - target_E)   # volcano: peaked at conditioning label
 
