@@ -591,7 +591,6 @@ class Flow():
 
                 # Update discrete atom types (CTMC)
                 data.atomic_numbers = ctmc_step(data.atomic_numbers, pred["z"], t_curr, dt)
-                print(self.fk_steering)
 
                 # ── FK steering hook ─────────────────────────────────────────
                 if (
@@ -600,6 +599,7 @@ class Flow():
                     and (i + 1) % getattr(self, "fk_K", 10) == 0
                     and i < len(t) - 2
                 ):
+                    print(self.fk_steering)
                     n_prim = int(self.primitive_mask.sum().item()) // B
                     n_ads  = N_ads // B
                     rewards = self._fk_evaluate(
