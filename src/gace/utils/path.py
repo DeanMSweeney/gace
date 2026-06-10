@@ -709,7 +709,7 @@ class Flow():
             if atoms is None:
                 continue
 
-            result, _ = relax_w_mlff(atoms=atoms, calculator=self._fk_mlff_calculator, steps=100, fmax=0.10)
+            result, _ = relax_w_mlff(atoms=atoms, calculator=self._fk_mlff_calculator, steps=100, fmax=0.50)
             
             E_ads    = result.get_potential_energy()
             target_E = data.ads_binding_energy[b].item()
