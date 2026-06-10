@@ -709,7 +709,7 @@ class Flow():
             if atoms is None:
                 continue
 
-            result = relax_w_mlff(atoms=atoms, calculator=self._fk_mlff_calculator, steps=100, fmax=0.25)
+            result = relax_w_mlff(atoms=atoms, calculator=self._fk_mlff_calculator, steps=100, fmax=0.10)
             if result is None:
                 continue
 
@@ -748,8 +748,6 @@ class Flow():
         u   = torch.rand(1, device=probs.device) / N
         positions = u + torch.arange(N, device=probs.device, dtype=torch.float32) / N
         selected  = torch.searchsorted(cdf.contiguous(), positions.contiguous()).clamp(0, N - 1)
-
-        print(log_w, selected)
 
         # Per-graph tensors
         data.lengths_scaled        = data.lengths_scaled[selected]
