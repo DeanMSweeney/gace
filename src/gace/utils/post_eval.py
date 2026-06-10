@@ -12,6 +12,7 @@ import os
 import statistics
 import time
 from multiprocessing import Pool
+import pathlib 
 
 import ase.io
 from ase import Atoms
