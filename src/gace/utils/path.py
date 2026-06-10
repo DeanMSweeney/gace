@@ -677,7 +677,7 @@ class Flow():
         Returns:
             rewards: (N,) float tensor, reward = -|E_ads - target_E|
         """
-        rewards    = torch.full((N,), float("-inf"), dtype=torch.float32)
+        rewards    = torch.full((N,), float("-inf"), dtype=torch.float32, device=data.pos.device)
         prim_batch = data.batch[data.tags == 1]
         ads_batch  = data.batch[data.tags == 2]
 
