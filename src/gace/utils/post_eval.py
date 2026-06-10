@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 
 def collect_structure_files(directory: str) -> list[str]:
     """Return sorted structure files from directory (.vasp preferred, .traj fallback)."""
-    traj = sorted(glob.glob(os.path.join(directory, "*.traj")))
+    traj = sorted(str(p) for p in pathlib.Path(directory).rglob("*.traj"))
     log.info(f"Found {len(traj)} .traj files in {directory}")
     
     if not traj:
