@@ -658,7 +658,7 @@ class Flow():
             opt_graph=data,
             binding_energies=[data.ads_binding_energy[b].item() for b in range(N)],
             batch_idx=0,
-            calculator=self._mlff_calculator,
+            calculator="PaiNN-S2EF-OC20-All",
             sanitize_otf=False,
             relax_otf=True,
             catalyst_dist_cutoff=self.catalyst_dist_cutoff,
