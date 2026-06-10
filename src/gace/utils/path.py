@@ -544,7 +544,27 @@ class Flow():
         n_scale = (num_prim_atoms.float() ** (1 / 3)).unsqueeze(1)  # (B, 1)
 
         # ── Euler integration loop ────────────────────────────────────────────
-        if not build_from_truth: 
+        if not build_from_truth:
+            # Pre-compute FK harmonic-sum schedule if steering is enabled.
+            # L = number of resampling events; H_L = L-th harmonic number.
+            # log_w accumulates per-particle path costs across all events.
+            fk_log_w = fk_ell = fk_L = fk_H_L = None
+            if self.fk_steering:
+                assert data.ads_binding_energy.unique().numel() == 1, (
+                    "FK steering requires all particles to share a single target "
+                    "binding energy. Set target_binding_energy in sampler_cfg."
+                )
+                fk_event_steps = [
+                    i for i in range(len(t) - 1)
+                    if (i + 1) >= self.fk_start_step
+                    and (i + 1) % self.fk_K == 0
+                    and i < len(t) - 2
+                ]
+                fk_L   = len(fk_event_steps)
+                fk_H_L = sum(1.0 / k for k in range(1, fk_L + 1)) if fk_L > 0 else 1.0
+                fk_log_w = torch.zeros(B, device=device)
+                fk_ell   = 0
+
             for i in range(len(t) - 1):
                 t_curr = t[i].item()
                 dt     = (t[i + 1] - t[i]).item()
@@ -594,9 +614,9 @@ class Flow():
 
                 # ── FK steering hook ─────────────────────────────────────────
                 if (
-                    getattr(self, "fk_steering", False)
-                    and (i + 1) >= getattr(self, "fk_start_step", 20)
-                    and (i + 1) % getattr(self, "fk_K", 10) == 0
+                    self.fk_steering
+                    and (i + 1) >= self.fk_start_step
+                    and (i + 1) % self.fk_K == 0
                     and i < len(t) - 2
                 ):
                     n_prim = int(self.primitive_mask.sum().item()) // B
@@ -605,10 +625,18 @@ class Flow():
                         data=data, pred=pred, N=B,
                         n_prim=n_prim, n_ads=n_ads, n_scale=n_scale,
                     )
-                    data = self._fk_resample(
-                        data=data, rewards=rewards, N=B,
+                    # Harmonic-sum weight accumulation: later events get a larger
+                    # share of the total inverse-temperature budget β = 1/fk_tau.
+                    beta  = 1.0 / self.fk_tau
+                    costs = -rewards   # cost ≥ 0; -inf particles get large cost
+                    costs[costs.isinf()] = costs[~costs.isinf()].max() + 1.0
+                    fk_log_w += -beta * costs / ((fk_L - fk_ell) * fk_H_L)
+
+                    data, fk_log_w = self._fk_resample(
+                        data=data, log_w=fk_log_w, N=B,
                         n_prim=n_prim, n_ads=n_ads,
                     )
+                    fk_ell += 1
 
         # ── Store generated outputs ───────────────────────────────────────────
         data.pos_generated             = data.pos
@@ -658,7 +686,7 @@ class Flow():
             opt_graph=data,
             binding_energies=[data.ads_binding_energy[b].item() for b in range(N)],
             batch_idx=0,
-            calculator="PaiNN-S2EF-OC20-All",
+            calculator=self.fk_mlff_checkpoint,
             sanitize_otf=False,
             relax_otf=True,
             catalyst_dist_cutoff=self.catalyst_dist_cutoff,
@@ -674,7 +702,7 @@ class Flow():
             if atoms is None:
                 continue
 
-            result = relax_w_mlff(atoms=atoms, calculator=self._mlff_calculator, steps=100, fmax=0.1)
+            result = relax_w_mlff(atoms=atoms, calculator=self._fk_mlff_calculator, steps=30, fmax=0.5)
             if result is None:
                 continue
 
@@ -684,46 +712,47 @@ class Flow():
 
         return rewards
 
-    def _fk_resample(self, data, rewards: torch.Tensor, N: int, n_prim: int, n_ads: int):
-        """Multinomial resampling of the N-particle batch.
+    def _fk_resample(self, data, log_w: torch.Tensor, N: int, n_prim: int, n_ads: int):
+        """Stratified resampling of the N-particle batch using accumulated log-weights.
 
-        High-reward particles are cloned (selected multiple times); low-reward
-        ones are dropped. Total population stays at N. Clones diverge in
-        subsequent ODE steps via CTMC stochasticity and sde_noise_scale.
+        Particles are selected proportionally to exp(log_w). Stratified resampling
+        gives lower variance than multinomial while keeping the same expectation.
+        Selected particles carry their accumulated log-weight history forward so
+        subsequent events build on path cost rather than resetting each time.
 
         Args:
-            data:    current PyG Batch (N particles, uniform atom counts)
-            rewards: (N,) reward tensor from _fk_evaluate
-            N:       number of particles
-            n_prim:  primitive atoms per particle
-            n_ads:   adsorbate atoms per particle
+            data:  current PyG Batch (N particles, uniform atom counts)
+            log_w: (N,) accumulated log-weight tensor from harmonic-sum scheduler
+            N:     number of particles
+            n_prim: primitive atoms per particle
+            n_ads:  adsorbate atoms per particle
 
         Returns:
-            data with particle tensors rearranged by selected indices
+            (data, log_w) with particle tensors and weights reordered by selection
         """
-        # Softmax sums to 1 by construction, but if every particle failed
-        # (all rewards = -inf) it produces nan. Fall back to uniform in that case.
+        # Convert log-weights to normalised probabilities (shift by max for stability)
+        log_w_shifted = log_w - log_w.max()
+        probs = torch.exp(log_w_shifted)
+        probs = probs / probs.sum()
 
-        if rewards.isinf().all():
-            probs = torch.ones(N, dtype=torch.float32) / N
-        else:
-            finite_rewards = rewards.clone()
-            finite_rewards[rewards.isinf()] = rewards[~rewards.isinf()].min() - 1.0
-            probs = torch.softmax(
-                (finite_rewards - finite_rewards.max()) / self.fk_tau, dim=0
-            )
-        selected = torch.multinomial(input=probs, num_samples=N, replacement=True)  # (N,)
-        print(rewards, selected)
-        # Per-graph tensors: direct index by selected particle indices
-        data.lengths_scaled        = data.lengths_scaled[selected]          # (N, 3)
-        data.angles_radians        = data.angles_radians[selected]          # (N, 3)
-        data.transformation_matrix = data.transformation_matrix[selected]   # (N, 3, 3)
+        # Stratified resampling: single uniform offset shared across N evenly-spaced
+        # positions on the CDF — lower variance than independent multinomial draws.
+        cdf = torch.cumsum(probs, dim=0)
+        u   = torch.rand(1, device=probs.device) / N
+        positions = u + torch.arange(N, device=probs.device, dtype=torch.float32) / N
+        selected  = torch.searchsorted(cdf.contiguous(), positions.contiguous()).clamp(0, N - 1)
 
-        # Per-atom tensors: reshape to (N, n_atoms, 3), index by particle, reshape back
-        # Safe because all particles share the same atom count (identical topology)
+        # Per-graph tensors
+        data.lengths_scaled        = data.lengths_scaled[selected]
+        data.angles_radians        = data.angles_radians[selected]
+        data.transformation_matrix = data.transformation_matrix[selected]
+
+        # Per-atom tensors: reshape to (N, n_atoms, ...), index, reshape back
         data.pos            = data.pos.view(N, n_prim, 3)[selected].view(N * n_prim, 3)
         data.atomic_numbers = data.atomic_numbers.view(N, n_prim)[selected].view(N * n_prim)
         data.ads_pos        = data.ads_pos.view(N, n_ads, 3)[selected].view(N * n_ads, 3)
 
-        # data.batch and data.tags unchanged — topology identical across all particles
-        return data
+        # Carry selected particles' accumulated log-weights forward
+        log_w_new = log_w[selected]
+
+        return data, log_w_new
