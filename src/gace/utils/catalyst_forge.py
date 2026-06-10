@@ -197,13 +197,16 @@ class CatalystForge:
 
     def relax(self, atoms: Atoms | None) -> Atoms | None:
 
-        atoms_rlxd = relax_w_mlff(
+        atoms_rlxd, converged = relax_w_mlff(
             atoms=atoms,
             calculator=self.calculator,
             fmax=self.fmax,
             steps=self.steps,
             optimizer="BFGS",
         )
+
+        if not converged: 
+            atoms_rlxd = None
 
         target_E = atoms.info.get("target_binding_E")
         try:
