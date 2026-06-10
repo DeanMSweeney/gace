@@ -99,6 +99,7 @@ class LightFlowMatch(LightningModule, Flow):
             sde_noise_scale: float=0.0,
             sanitize_otf: bool=True,
             fk_steering: bool=False,
+            fk_mlff_checkpoint: Optional[str]="PaiNN-S2EF-OC20-All",
             fk_K: int=10,
             fk_tau: float=1.0,
             fk_start_step: int=20,
@@ -110,7 +111,7 @@ class LightFlowMatch(LightningModule, Flow):
         self.save_hyperparameters(ignore=["model", "variant", "mode", "rtol", "atol", "ode_method", \
             "track_grad_norms", "generated_strucs", "relaxed_strucs", "sanitized_strucs", "config_vasp", "threshold", "x_matching", \
             "interpolant_schedule", "write_eval_metrics", "num_integration_steps", "relax_otf", "mlff_checkpoint", \
-            "accelerator", "seed", "num_prim_atoms", "optimal_transport"])
+            "fk_mlff_checkpoint", "accelerator", "seed", "num_prim_atoms", "optimal_transport"])
 
         # Model and training configuration
         self.model = model  # Neural network (e.g., Equiformer)
@@ -154,6 +155,20 @@ class LightFlowMatch(LightningModule, Flow):
                     seed=seed,
                 )
 
+        # Separate lighter calculator for FK intermediate reward evaluation.
+        # Falls back to the main calculator if fk_mlff_checkpoint is not set.
+        self._fk_mlff_calculator = None
+        if fk_steering:
+            _fk_ckpt = fk_mlff_checkpoint or mlff_checkpoint
+            if _fk_ckpt is not None:
+                with Silent():
+                    self._fk_mlff_calculator = OCPCalculator(
+                        model_name=_fk_ckpt,
+                        local_cache="./mlff_checkpoint_cache",
+                        cpu=(accelerator == "cpu"),
+                        seed=seed,
+                    )
+
         self.target_binding_energy = target_binding_energy
         self.num_generated_samples = num_generated_samples
         self.cfg_dropout_prob = cfg_dropout_prob
@@ -165,7 +180,8 @@ class LightFlowMatch(LightningModule, Flow):
         self.fk_steering   = fk_steering
         self.fk_K          = fk_K
         self.fk_tau        = fk_tau
-        self.fk_start_step = fk_start_step
+        self.fk_start_step      = fk_start_step
+        self.fk_mlff_checkpoint = fk_mlff_checkpoint
 
         _hist_path = os.path.join(os.path.dirname(__file__), "primitive_atom_distribution.json")
         with open(_hist_path) as f:
