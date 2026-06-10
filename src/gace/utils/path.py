@@ -674,7 +674,7 @@ class Flow():
             if atoms is None:
                 continue
 
-            result = relax_w_mlff(atoms=atoms, calculator=self._mlff_calculator, steps=100)
+            result = relax_w_mlff(atoms=atoms, calculator=self._mlff_calculator, steps=100, fmax=0.1)
             if result is None:
                 continue
 
