@@ -737,7 +737,7 @@ class Flow():
         Returns:
             (data, log_w) with particle tensors and weights reordered by selection
         """
-        # Convert log-weights to normalised probabilities (shift by max for stability)
+        # Convert log-weights to normalised probabilities (shift by max for stability)\
         log_w_shifted = log_w - log_w.max()
         probs = torch.exp(log_w_shifted)
         probs = probs / probs.sum()
@@ -748,6 +748,8 @@ class Flow():
         u   = torch.rand(1, device=probs.device) / N
         positions = u + torch.arange(N, device=probs.device, dtype=torch.float32) / N
         selected  = torch.searchsorted(cdf.contiguous(), positions.contiguous()).clamp(0, N - 1)
+
+        print(log_w, selected)
 
         # Per-graph tensors
         data.lengths_scaled        = data.lengths_scaled[selected]
