@@ -554,6 +554,13 @@ class Flow():
                     "FK steering requires all particles to share a single target "
                     "binding energy. Set target_binding_energy in sampler_cfg."
                 )
+                if self.sde_noise_scale == 0.0:
+                    import warnings
+                    warnings.warn(
+                        "fk_steering=True but sde_noise_scale=0.0: resampled clones will not "
+                        "diverge on continuous modalities. Set sde_noise_scale=0.05.",
+                        UserWarning,
+                    )
                 fk_event_steps = [
                     i for i in range(len(t) - 1)
                     if (i + 1) >= self.fk_start_step

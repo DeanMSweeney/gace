@@ -120,8 +120,9 @@ class SamplerConfig:
     sde_noise_scale: float = 0.0
     """Standard deviation of Brownian noise injected at each Euler step (Euler-Maruyama).
     Noise is tapered by (1 - t) so it vanishes as t → 1.
-    0.0 (default) gives the standard deterministic Euler step.
-    Typical range to explore: 0.01 – 0.1.
+    0.0 gives the standard deterministic Euler step.
+    Required to be > 0 when fk_steering=True so resampled clones diverge on
+    continuous modalities. Recommended value with FK: 0.05.
     """
 
     # ==================== Structure Generation ====================
@@ -212,9 +213,11 @@ class SamplerConfig:
     fk_K: int = 10
     """Evaluate and resample every fk_K ODE steps."""
 
-    fk_tau: float = 1.0
-    """Resampling temperature. Lower = harder selection (winner-takes-all);
-    higher = softer selection (near-uniform). Typical range: 0.1 – 5.0."""
+    fk_tau: float = 0.5
+    """Resampling temperature for harmonic-sum log-weight accumulation.
+    Controls the effective beta = 1/fk_tau applied to accumulated path costs.
+    Lower = harder selection; higher = softer (near-uniform). Typical range: 0.1–2.0.
+    At 0.5, a 1.5 eV cost spread gives ~20x best-to-worst probability ratio."""
 
     fk_start_step: int = 20
     """Minimum number of ODE steps to complete before the first FK evaluation.

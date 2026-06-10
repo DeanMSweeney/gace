@@ -101,7 +101,7 @@ class LightFlowMatch(LightningModule, Flow):
             fk_steering: bool=False,
             fk_mlff_checkpoint: Optional[str]="PaiNN-S2EF-OC20-All",
             fk_K: int=10,
-            fk_tau: float=1.0,
+            fk_tau: float=0.5,
             fk_start_step: int=20,
             **kwargs,
         ):
