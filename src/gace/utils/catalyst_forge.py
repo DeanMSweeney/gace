@@ -2,12 +2,15 @@ import csv
 import logging
 import os
 import random
+import time
 import numpy as np
 import torch
 import ase.io
 from ase import Atoms
 from ase.constraints import FixAtoms
 from ase.data import covalent_radii
+from pymatgen.analysis.structure_matcher import StructureMatcher
+from pymatgen.io.ase import AseAtomsAdaptor
 from tqdm import tqdm
 
 from gace.utils.builder import build_slab_adsorbate, lattice_params_to_matrix
@@ -78,6 +81,7 @@ class CatalystForge:
         seed: int = 42,
         fmax: float = 0.05,
         steps: int = 200,
+        check_diversity: bool = False,
     ):
         self.opt_graph = opt_graph
         self.preloaded_atoms = preloaded_atoms
@@ -96,8 +100,10 @@ class CatalystForge:
         self.seed = seed
         self.fmax = fmax
         self.steps = steps
+        self.check_diversity = check_diversity
 
         self._all_atoms: list[Atoms | None] = []
+        self.diversity: dict | None = None
 
     def _construct_atoms_objects(self) -> list["Atoms | None"]:
         prim_batch = self.opt_graph.batch[self.opt_graph.tags == 1]
@@ -275,8 +281,9 @@ class CatalystForge:
             out_path = os.path.join(self.relaxed_strucs, subdir, fname)
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
             ase.io.write(out_path, atoms_rlxd)
+        else: 
+            diff = None
 
-        diff = atoms_rlxd.info.get("binding_E_diff") if atoms_rlxd is not None else None
         validity_keys = ["vol_ok", "cat_dist_ok", "cat_atom_types_ok", "cat_ads_dist_ok", "ads_dist_ok", "is_valid", "is_valid_naive"]
         return {
             **base_row,
@@ -285,6 +292,28 @@ class CatalystForge:
             **_threshold_flags(diff),
             **{k: float(atoms.info.get(k)) if atoms is not None else float(False) for k in validity_keys}, # if atoms DNE, it could not be built and mark as invalid
         }
+
+    def _compute_uniqueness(self) -> dict:
+        """Structural uniqueness via StructureMatcher on slab-only structures.
+
+        Strips adsorbate atoms (tags==2) before comparison.
+        Returns uniqueness ratio with total structure count, e.g. '0.8500 (100)'.
+        """
+        structures = []
+        for atoms in self._all_atoms:
+            if atoms is None:
+                continue
+            try:
+                slab = atoms[atoms.get_tags() != 2]
+                if len(slab) == 0:
+                    continue
+                structures.append(AseAtomsAdaptor().get_structure(slab))
+            except Exception:
+                continue
+        groups = StructureMatcher().group_structures(structures)
+        uniqueness = len(groups) / len(structures) if structures else 0.0
+        return {f"uniqueness ({len(structures)})": uniqueness}
+
 
     def fire(self) -> list[dict]:
         """Process structures from opt_graph (OTF) or from preloaded files.
@@ -327,5 +356,8 @@ class CatalystForge:
                         w.writeheader()
                         write_header = False
                     w.writerow({k: _csv_fmt(atoms_dict.get(k)) for k in csv_fieldnames})
+
+        if self.check_diversity:
+            self.diversity = self._compute_uniqueness()
 
         return atoms_dict_list
