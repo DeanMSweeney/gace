@@ -465,7 +465,7 @@ class LightFlowMatch(LightningModule, Flow):
             print(f"\n[predict batch={batch_idx} | {len(all_metrics)} samples]")
             print(sep)
             for k, v in avgs.items():
-                print(f"\033[38;5;183m{k:>{col_w}}\033[0m | \033[38;5;177m{v:.4f}\033[0m")
+                print(f"{k:>{col_w}} | {v:.4f}")
             if cf.diversity is not None:
                 for k, v in cf.diversity.items():
                     print(f"\033[38;5;183m{k:>{col_w}}\033[0m | \033[38;5;177m{v:.4f}\033[0m")
