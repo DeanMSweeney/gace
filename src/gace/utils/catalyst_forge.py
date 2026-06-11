@@ -270,10 +270,14 @@ class CatalystForge:
 
         # write sanitized and relaxed structures to disk
         if atoms is not None and atoms.info.get("is_valid"):
-            ase.io.write(os.path.join(self.sanitized_strucs, fname), atoms)
-            atoms_rlxd = self.relax(atoms=atoms) if self.relax_otf else None
+            if self.relax_otf: 
+                atoms_rlxd = self.relax(atoms=atoms) 
+            else: 
+                atoms_rlxd = None
+                ase.io.write(os.path.join(self.sanitized_strucs, fname), atoms)
         else:
             atoms_rlxd = None # if atoms DNE, store atoms_rlxd as None
+            
         if atoms_rlxd is not None:
             diff = atoms_rlxd.info.get("binding_E_diff")
             subdir = _threshold_subdir(diff)
