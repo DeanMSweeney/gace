@@ -77,11 +77,12 @@ class CatalystForge:
         energy_cutoff: float = 10.0,
         sanitize_otf: bool = True,
         relax_otf: bool = False,
+        check_diversity_otf: bool = False,
+        check_diversity: bool = False,
         n_strucs: int | None = None,
         seed: int = 42,
         fmax: float = 0.05,
         steps: int = 200,
-        check_diversity: bool = False,
     ):
         self.opt_graph = opt_graph
         self.preloaded_atoms = preloaded_atoms
@@ -101,6 +102,7 @@ class CatalystForge:
         self.fmax = fmax
         self.steps = steps
         self.check_diversity = check_diversity
+        self.check_diversity_otf = check_diversity_otf
 
         self._all_atoms: list[Atoms | None] = []
         self._seen_pymatgen_strucs: list = []
@@ -229,6 +231,54 @@ class CatalystForge:
             logging.warning(f"Energy extraction failed for {atoms.info.get('fname')}: {e}")
             atoms.info["is_valid"] = False # optimization or energy extraction failed, mark as invalid 
             return None
+    
+    def compute_uniqueness(self, atoms):
+        """OTF duplicate check or batch uniqueness, depending on input.
+
+        Single Atoms object: checks against _seen_pymatgen_strucs, appends if
+        unique. Returns True if duplicate (skip write), False if unique.
+
+        List of Atoms: converts all slabs, groups via StructureMatcher, returns
+        uniqueness ratio dict e.g. {'uniqueness (100)': 0.85}.
+        """
+        if isinstance(atoms, Atoms) and self.check_diversity_otf:
+            slab = atoms[atoms.get_tags() != 2]
+            struc = AseAtomsAdaptor().get_structure(slab)
+            matcher = StructureMatcher()
+
+            if len(self._seen_pymatgen_strucs) == 0:
+                atoms.info["is_unique"] = True 
+                self._seen_pymatgen_strucs.append(struc)
+                return True
+
+            is_unique = True
+            for seen_strucs in self._seen_pymatgen_strucs:
+                if matcher.fit(seen_strucs, struc):
+                    is_unique = False 
+                    break
+            
+            atoms.info["is_unique"] = is_unique
+            if is_unique: 
+                self._seen_pymatgen_strucs.append(struc)
+                return True
+            return False
+
+        elif isinstance(atoms, list):
+            structures = []
+            for a in atoms:
+                if a is None:
+                    continue
+                try:
+                    slab = a[a.get_tags() != 2]
+                    if len(slab) == 0:
+                        continue
+                    structures.append(AseAtomsAdaptor().get_structure(slab))
+                except Exception:
+                    continue
+            groups = StructureMatcher().group_structures(structures)
+            uniqueness = len(groups) / len(structures) if structures else 0.0
+            return {f"uniqueness ({len(structures)})": uniqueness}
+
 
     def _process_built_struc(
         self,
@@ -269,6 +319,13 @@ class CatalystForge:
         # sanitize the atoms objects to purge unstabele strucs
         self.sanitize(atoms=atoms)
 
+        if self.check_diversity_otf and atoms is not None:
+            is_unique = self.compute_uniqueness(atoms=atoms)
+            if not is_unique: # set non-unique strucutres as invalid strucutres
+                atoms.info["is_valid"] = False
+        else: 
+            is_unique = True
+
         # write sanitized and relaxed structures to disk
         if atoms is not None and atoms.info.get("is_valid"):
             if self.relax_otf: 
@@ -285,8 +342,11 @@ class CatalystForge:
             atoms_rlxd.info["threshold_subdir"] = subdir
             out_path = os.path.join(self.relaxed_strucs, subdir, fname)
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
-            if not (self.check_diversity and self._compute_uniqueness(atoms_rlxd)):
-                ase.io.write(out_path, atoms_rlxd)
+            if not self.check_diversity_otf:
+                ase.io.write(out_path, atoms_rlxd) 
+            else: 
+                if is_unique: 
+                    ase.io.write(out_path, atoms_rlxd)
         else:
             diff = None
 
@@ -298,46 +358,6 @@ class CatalystForge:
             **_threshold_flags(diff),
             **{k: float(atoms.info.get(k)) if atoms is not None else float(False) for k in validity_keys}, # if atoms DNE, it could not be built and mark as invalid
         }
-
-    def _compute_uniqueness(self, atoms):
-        """OTF duplicate check or batch uniqueness, depending on input.
-
-        Single Atoms object: checks against _seen_pymatgen_strucs, appends if
-        unique. Returns True if duplicate (skip write), False if unique.
-
-        List of Atoms: converts all slabs, groups via StructureMatcher, returns
-        uniqueness ratio dict e.g. {'uniqueness (100)': 0.85}.
-        """
-        if isinstance(atoms, list):
-            structures = []
-            for a in atoms:
-                if a is None:
-                    continue
-                try:
-                    slab = a[a.get_tags() != 2]
-                    if len(slab) == 0:
-                        continue
-                    structures.append(AseAtomsAdaptor().get_structure(slab))
-                except Exception:
-                    continue
-            groups = StructureMatcher().group_structures(structures)
-            uniqueness = len(groups) / len(structures) if structures else 0.0
-            return {f"uniqueness ({len(structures)})": uniqueness}
-        else:
-            try:
-                slab = atoms[atoms.get_tags() != 2]
-                if len(slab) == 0:
-                    return False
-                struc = AseAtomsAdaptor().get_structure(slab)
-            except Exception:
-                return False
-            matcher = StructureMatcher()
-            for seen in self._seen_pymatgen_strucs:
-                if matcher.fit(seen, struc):
-                    return True
-            self._seen_pymatgen_strucs.append(struc)
-            return False
-
 
     def fire(self) -> list[dict]:
         """Process structures from opt_graph (OTF) or from preloaded files.
@@ -382,6 +402,6 @@ class CatalystForge:
                     w.writerow({k: _csv_fmt(atoms_dict.get(k)) for k in csv_fieldnames})
 
         if self.check_diversity:
-            self.diversity = self._compute_uniqueness(self._all_atoms)
+            self.diversity = self.compute_uniqueness(self._all_atoms)
 
         return atoms_dict_list

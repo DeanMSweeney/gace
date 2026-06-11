@@ -404,7 +404,8 @@ class LightFlowMatch(LightningModule, Flow):
         for metrics in cf.fire():
             for key, val in metrics.items():
                 if isinstance(val, float):
-                    self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
+                    reduce_fx = "sum" if key.startswith("within_") else "mean"
+                    self.log(key, val, on_step=False, on_epoch=True, batch_size=1, reduce_fx=reduce_fx)
         if cf.diversity is not None:
             for key, val in cf.diversity.items():
                 self.log(key, val, on_step=False, on_epoch=True)
@@ -450,6 +451,7 @@ class LightFlowMatch(LightningModule, Flow):
             file_ext=".traj",
             sanitize_otf=self.sanitize_otf,
             check_diversity=self.check_diversity,
+            check_diversity_otf=True, # always check diversity on the fly during test time 
         )
         all_metrics = list(cf.fire())
         all_atoms = cf._all_atoms
@@ -457,7 +459,7 @@ class LightFlowMatch(LightningModule, Flow):
         if all_metrics:
             keys = all_metrics[0].keys()
             vals = {k: [m[k] for m in all_metrics if isinstance(m.get(k), float)] for k in keys}
-            avgs = {k: np.mean(v) for k, v in vals.items() if v}
+            avgs = {k: (np.sum(v) if k.startswith("within_") else np.mean(v)) for k, v in vals.items() if v}
             col_w = max(len(k) for k in avgs) + 2
             sep = "-" * (col_w + 26)
             print(f"\n[predict batch={batch_idx} | {len(all_metrics)} samples]")
