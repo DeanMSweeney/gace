@@ -368,7 +368,7 @@ class CatalystForge:
         if self.opt_graph is not None:
             items = self._construct_atoms_objects()
             if self.relax_otf: 
-                os.makedirs(self.relax_strucs, exist_ok=True)
+                os.makedirs(self.relaxed_strucs, exist_ok=True)
             else:
                 os.makedirs(self.sanitized_strucs if self.sanitize_otf else self.generated_strucs, exist_ok=True)
         else:
