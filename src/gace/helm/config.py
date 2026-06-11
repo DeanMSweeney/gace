@@ -189,6 +189,10 @@ class SamplerConfig:
     A pair is flagged as clashing if its distance is below catalyst_dist_cutoff * (r_i + r_j).
     Lower values are more permissive; higher values are stricter."""
 
+    check_diversity: bool = False
+    """Run structural uniqueness check via StructureMatcher after generation.
+    Strips adsorbate atoms and groups slab structures; result is stored in cf.diversity."""
+
     # ==================== MLFF Relaxation ====================
 
     relax_otf: bool = False

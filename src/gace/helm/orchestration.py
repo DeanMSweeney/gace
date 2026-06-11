@@ -98,6 +98,7 @@ class LightFlowMatch(LightningModule, Flow):
             cfg_w_discrete: float=1.0,
             sde_noise_scale: float=0.0,
             sanitize_otf: bool=True,
+            check_diversity: bool=False,
             fk_steering: bool=False,
             fk_mlff_checkpoint: Optional[str]="PaiNN-S2EF-OC20-All",
             fk_K: int=10,
@@ -138,6 +139,7 @@ class LightFlowMatch(LightningModule, Flow):
         self.informed_priors = informed_priors
         self.relax_otf = relax_otf
         self.sanitize_otf = sanitize_otf
+        self.check_diversity = check_diversity
         self.batched_relaxation = batched_relaxation
         self.accelerator = accelerator
         self.seed = seed
@@ -397,11 +399,15 @@ class LightFlowMatch(LightningModule, Flow):
             sanitized_strucs=self.sanitized_strucs,
             file_ext=".traj",
             sanitize_otf=self.sanitize_otf,
+            check_diversity=self.check_diversity,
         )
         for metrics in cf.fire():
             for key, val in metrics.items():
                 if isinstance(val, float):
                     self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
+        if cf.diversity is not None:
+            for key, val in cf.diversity.items():
+                self.log(key, val, on_step=False, on_epoch=True)
         return
 
     def predict_step(self, data: Data, batch_idx: int):
@@ -443,20 +449,24 @@ class LightFlowMatch(LightningModule, Flow):
             sanitized_strucs=self.sanitized_strucs,
             file_ext=".traj",
             sanitize_otf=self.sanitize_otf,
+            check_diversity=self.check_diversity,
         )
         all_metrics = list(cf.fire())
         all_atoms = cf._all_atoms
 
         if all_metrics:
             keys = all_metrics[0].keys()
-            avgs = {k: np.mean([m[k] for m in all_metrics if isinstance(m.get(k), float)]) for k in keys
-                    if any(isinstance(m.get(k), float) for m in all_metrics)}
+            vals = {k: [m[k] for m in all_metrics if isinstance(m.get(k), float)] for k in keys}
+            avgs = {k: np.mean(v) for k, v in vals.items() if v}
             col_w = max(len(k) for k in avgs) + 2
             sep = "-" * (col_w + 26)
             print(f"\n[predict batch={batch_idx} | {len(all_metrics)} samples]")
             print(sep)
             for k, v in avgs.items():
                 print(f"\033[38;5;183m{k:>{col_w}}\033[0m | \033[38;5;177m{v:.4f}\033[0m")
+            if cf.diversity is not None:
+                for k, v in cf.diversity.items():
+                    print(f"\033[38;5;183m{k:>{col_w}}\033[0m | \033[38;5;177m{v:.4f}\033[0m")
             print(sep)
 
         return all_atoms
