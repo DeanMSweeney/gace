@@ -403,6 +403,7 @@ class TransformerModule(nn.Module):
             )
 
         embed_conditions = (embed_time + embed_binding_energy).unsqueeze(-2)  # (B, 1, C)
+        print(f"[binding norms per sample] {embed_binding_energy}")
         print(
             f"[cond norms] time={embed_time.norm(dim=-1).mean().item():.3f} "
             f"binding_energy={embed_binding_energy.norm(dim=-1).mean().item():.3f} "
