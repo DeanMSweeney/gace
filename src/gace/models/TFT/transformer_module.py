@@ -392,7 +392,6 @@ class TransformerModule(nn.Module):
             feats["ads_binding_energy"].unsqueeze(-1)
         )  # (B, C)
 
-        print(feats["ads_binding_energy"])
         # CFG training dropout: replace dropped samples with the learnable null embedding.
         # cfg_drop_mask is a (B,) bool tensor; True = this sample's condition is dropped.
         # Only present during training steps (injected by LightFlowMatch.forward).
@@ -403,13 +402,6 @@ class TransformerModule(nn.Module):
             )
 
         embed_conditions = (embed_time + embed_binding_energy).unsqueeze(-2)  # (B, 1, C)
-        print(f"[binding norms per sample] {embed_binding_energy.norm(dim=-1)}")
-        print(
-            f"[cond norms] time={embed_time.norm(dim=-1).mean().item():.3f} "
-            f"binding_energy={embed_binding_energy.norm(dim=-1).mean().item():.3f} "
-            f"conditions={embed_conditions.squeeze(-2).norm(dim=-1).mean().item():.3f}"
-        )
-
         # ── Build h_in for prim sequence ─────────────────────────────────────
         if self.concat_combine_input:
             # Broadcast graph-level embeddings to match prim seq length

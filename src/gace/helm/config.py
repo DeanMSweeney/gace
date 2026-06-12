@@ -198,7 +198,7 @@ class SamplerConfig:
     relax_otf: bool = False
     """Whether to run MLFF relaxation on-the-fly after generation"""
 
-    mlff_checkpoint: str = "EquiformerV2-31M-S2EF-OC20-All+MD"
+    mlff_checkpoint: str = "EquiformerV2-153M-S2EF-OC20-All+MD"#"EquiformerV2-31M-S2EF-OC20-All+MD"
     """MLFF checkpoint for post-generation relaxation and evaluation."""
 
     # ==================== Feynman-Kac Steering ====================
