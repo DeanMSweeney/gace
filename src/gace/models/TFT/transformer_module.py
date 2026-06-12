@@ -391,6 +391,8 @@ class TransformerModule(nn.Module):
         embed_binding_energy = self.ads_binding_energy_embed(
             feats["ads_binding_energy"].unsqueeze(-1)
         )  # (B, C)
+
+        print(feats["ads_binding_energy"])
         # CFG training dropout: replace dropped samples with the learnable null embedding.
         # cfg_drop_mask is a (B,) bool tensor; True = this sample's condition is dropped.
         # Only present during training steps (injected by LightFlowMatch.forward).
