@@ -72,3 +72,4 @@ uncond/
 **/logs/
 **/checkpoints/
 **/outputs/
+pretrained_models.json
