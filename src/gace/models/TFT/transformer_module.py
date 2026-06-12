@@ -401,6 +401,11 @@ class TransformerModule(nn.Module):
             )
 
         embed_conditions = (embed_time + embed_binding_energy).unsqueeze(-2)  # (B, 1, C)
+        print(
+            f"[cond norms] time={embed_time.norm(dim=-1).mean().item():.3f} "
+            f"binding_energy={embed_binding_energy.norm(dim=-1).mean().item():.3f} "
+            f"conditions={embed_conditions.squeeze(-2).norm(dim=-1).mean().item():.3f}"
+        )
 
         # ── Build h_in for prim sequence ─────────────────────────────────────
         if self.concat_combine_input:
