@@ -2,21 +2,48 @@ import csv
 import logging
 import os
 import random
-import re
-
+import time
 import numpy as np
 import torch
 import ase.io
 from ase import Atoms
 from ase.constraints import FixAtoms
 from ase.data import covalent_radii
+from pymatgen.analysis.structure_matcher import StructureMatcher
+from pymatgen.io.ase import AseAtomsAdaptor
 from tqdm import tqdm
 
 from gace.utils.builder import build_slab_adsorbate, lattice_params_to_matrix
-from gace.utils.relaxation import _fmt, relax_w_mlff
+from gace.utils.relaxation import relax_w_mlff
 
-_FILE_KEY_RE = re.compile(r"^(\d+)_(\d+)")
+_CSV_DECIMALS = 6
+_FMT = f".{_CSV_DECIMALS}f"
+_BINDING_E_THRESHOLD = 0.10  # eV
+_THRESHOLD_MULTIPLIERS = [1, 2, 3, 5, 10]
 
+def _csv_fmt(v) -> str:
+    if isinstance(v, float):
+        return format(v, _FMT)
+    return str(v) if v is not None else ""
+
+
+def _threshold_flags(diff: float | None) -> dict:
+    """Return within_NT booleans for each multiplier of _BINDING_E_THRESHOLD."""
+    if diff is None:
+        return {f"within_{m}T": None for m in _THRESHOLD_MULTIPLIERS}
+    return {f"within_{m}T": float(diff <= m * _BINDING_E_THRESHOLD) for m in _THRESHOLD_MULTIPLIERS}
+
+
+_THRESHOLD_SUBDIRS = {1: "1_threshold", 2: "2_threshold", 3: "3_threshold", 5: "5_threshold", 10: "10_threshold"}
+
+
+def _threshold_subdir(diff: float | None) -> str:
+    """Return the tightest threshold subdirectory name, or 'inf_threshold' if outside all."""
+    if diff is not None:
+        for m in _THRESHOLD_MULTIPLIERS:
+            if diff <= m * _BINDING_E_THRESHOLD:
+                return _THRESHOLD_SUBDIRS[m]
+    return "inf_threshold"
 
 class CatalystForge:
     """Build, sanitize, relax, and write generated catalyst structures.
@@ -27,17 +54,16 @@ class CatalystForge:
 
     Usage (OTF):
         cf = CatalystForge(opt_graph=opt_graph, binding_energies=..., batch_idx=..., ...)
-        metrics = cf.run()
+        metrics = cf.fire()
 
     Usage (post-processing):
         preloaded = load_atoms_parallel(files, num_workers)
         cf = CatalystForge(preloaded_atoms=preloaded, gen_POS="./gen_strucs", ...)
-        rows = cf.run()
+        rows = cf.fire()
     """
 
     def __init__(
         self,
-        binding_energies: list[float],
         batch_idx: int,
         calculator,
         catalyst_dist_cutoff: float,
@@ -45,13 +71,14 @@ class CatalystForge:
         relaxed_strucs: str | None,
         sanitized_strucs: str | None,
         opt_graph=None,
+        binding_energies: list[float] | None = None,
         preloaded_atoms: dict[str, "Atoms | None"] | None = None,
         file_ext: str = ".vasp",
         energy_cutoff: float = 10.0,
-        ads_integrity_threshold: float = 2.0,
         sanitize_otf: bool = True,
         relax_otf: bool = False,
-        config_vasp: bool = False,
+        check_diversity_otf: bool = False,
+        check_diversity: bool = False,
         n_strucs: int | None = None,
         seed: int = 42,
         fmax: float = 0.05,
@@ -63,7 +90,6 @@ class CatalystForge:
         self.batch_idx = batch_idx
         self.calculator = calculator
         self.relax_otf = relax_otf
-        self.config_vasp = config_vasp
         self.catalyst_dist_cutoff = catalyst_dist_cutoff
         self.generated_strucs = generated_strucs
         self.relaxed_strucs = relaxed_strucs
@@ -75,204 +101,34 @@ class CatalystForge:
         self.seed = seed
         self.fmax = fmax
         self.steps = steps
+        self.check_diversity = check_diversity
+        self.check_diversity_otf = check_diversity_otf
 
         self._all_atoms: list[Atoms | None] = []
+        self._seen_pymatgen_strucs: list = []
+        self.diversity: dict | None = None
 
-    def run(self) -> list[dict]:
-        """Process structures from opt_graph (OTF) or from gen_POS directory (post-processing).
-
-        Returns:
-            List of metric/row dicts, one per structure.
-        """
-        if self.opt_graph is not None:
-            items = self._items_from_graph()
-            os.makedirs(self.sanitized_strucs if self.sanitize_otf else self.generated_strucs, exist_ok=True)
-        else:
-            items = self._items_from_preloaded()
-            os.makedirs(self.sanitized_strucs, exist_ok=True)
-
-        if self.relax_otf:
-            os.makedirs(self.relaxed_strucs, exist_ok=True)
-
-        otf_csv_path = None
-        otf_first_write = False
-        if self.opt_graph is not None:
-            csv_dir = self.relaxed_strucs if self.relax_otf else self.generated_strucs
-            otf_csv_path = os.path.join(csv_dir, "binding_energies.csv")
-            otf_first_write = self.batch_idx == 0
-            if otf_first_write and os.path.isfile(otf_csv_path):
-                os.remove(otf_csv_path)
-
-        be_fieldnames = ["batch_idx", "graph_idx", "target_binding_E", "computed_binding_E", "binding_E_diff"]
-
-        rows: list[dict] = []
-
-        for atoms, fname, batch_idx, graph_idx, target_E, ref_ads_pos in tqdm(items, desc="Processing", disable=self.opt_graph is not None):
-            row = self._process_one(
-                atoms=atoms,
-                fname=fname,
-                batch_idx=batch_idx,
-                graph_idx=graph_idx,
-                target_E=target_E,
-                ref_ads_pos=ref_ads_pos,
-            )
-            rows.append(row)
-            self._all_atoms.append(atoms)
-
-            if otf_csv_path is not None:
-                with open(otf_csv_path, "a", newline="") as f:
-                    w = csv.DictWriter(f, fieldnames=be_fieldnames)
-                    if otf_first_write:
-                        w.writeheader()
-                        otf_first_write = False
-                    w.writerow({k: row.get(k, "") for k in be_fieldnames})
-
-        if self.opt_graph is None:
-            out_dir = self.relaxed_strucs if self.relax_otf else self.sanitized_strucs
-            eval_fieldnames = [
-                "batch_idx", "graph_idx", "target_binding_E", "computed_binding_E", "binding_E_diff",
-                "vol_ok", "cat_dist_ok", "cat_atom_types_ok", "cat_ads_dist_ok", "ads_dist_ok",
-                "is_valid", "is_valid_naive",
-            ]
-            with open(os.path.join(out_dir, "evaluation.csv"), "w", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=eval_fieldnames, extrasaction="ignore")
-                writer.writeheader()
-                writer.writerows(rows)
-
-        return rows
-
-    def _items_from_graph(self):
+    def _construct_atoms_objects(self) -> list["Atoms | None"]:
         prim_batch = self.opt_graph.batch[self.opt_graph.tags == 1]
         ads_batch  = self.opt_graph.batch[self.opt_graph.tags == 2]
         num_graphs = int(self.opt_graph.batch.max().item()) + 1
         items = []
         for b in range(num_graphs):
-            atoms       = self._build(b, prim_batch, ads_batch)
-            fname       = f"{self.batch_idx}_{b}{self.file_ext}"
-            target_E    = self.binding_energies[b]
-            ref_ads_pos = self.opt_graph.ref_ads_pos[ads_batch == b]
-            items.append((atoms, fname, self.batch_idx, b, target_E, ref_ads_pos))
+            atoms    = self.build_from_factorized_repr(b, prim_batch, ads_batch)
+            if atoms is not None:
+                atoms.info["fname"]             = f"{self.batch_idx}_{b}{self.file_ext}"
+                atoms.info["target_binding_E"]  = self.binding_energies[b]
+            items.append(atoms)
         return items
 
-    def _items_from_preloaded(self):
+    def _list_atoms_objects(self) -> list["Atoms | None"]:
         files = sorted(self.preloaded_atoms.keys())
         n = len(files) if self.n_strucs is None else min(self.n_strucs, len(files))
         sample = sorted(random.Random(self.seed).sample(files, n))
         logging.info(f"Processing {len(sample)} structures (preloaded, seed={self.seed})")
+        return [self.preloaded_atoms.get(path) for path in sample]
 
-        items = []
-        for path in sample:
-            key = self._parse_file_key(path=path)
-            batch_idx, graph_idx = key if key else (None, None)
-            target_E = self.binding_energies.get(key) if key and isinstance(self.binding_energies, dict) else None
-            fname = os.path.basename(path)
-            atoms = self.preloaded_atoms.get(path)
-            items.append((atoms, fname, batch_idx, graph_idx, target_E, None))
-        return items
-
-    def _compute_energy(
-        self,
-        atoms_rlxd: "Atoms | None",
-        target_E: float | None,
-        fname: str,
-    ) -> tuple[dict | None, "Atoms | None"]:
-        """Extract energy from relaxed atoms, apply cutoff filter.
-
-        Returns (energy_dict_or_None, atoms_or_None).
-        """
-        if atoms_rlxd is None:
-            return None, None
-        try:
-            computed_E = atoms_rlxd.get_potential_energy()
-            if computed_E <= self.energy_cutoff:
-                diff = abs(computed_E - target_E) if target_E is not None else None
-                return {"computed_binding_E": computed_E, "binding_E_diff": diff}, atoms_rlxd
-            return None, None
-        except Exception as e:
-            logging.warning(f"Energy extraction failed for {fname}: {e}")
-            return None, None
-
-    def _process_one(
-        self,
-        atoms: Atoms | None,
-        fname: str,
-        batch_idx: int | None,
-        graph_idx: int | None,
-        target_E: float | None,
-        ref_ads_pos,
-    ) -> dict:
-        base_row = {
-            "batch_idx":          batch_idx,
-            "graph_idx":          graph_idx,
-            "target_binding_E":   _fmt(target_E) if target_E is not None else "",
-            "computed_binding_E": "",
-            "binding_E_diff":     "",
-        }
-
-        if not self.sanitize_otf:
-            if atoms is not None and self.opt_graph:
-                ase.io.write(os.path.join(self.generated_strucs, fname), atoms)
-            atoms_rlxd = self.relax(
-                atoms=atoms,
-                validity_dict={"is_valid": True},
-                calculator=self.calculator,
-                do_relax=self.relax_otf,
-                fmax=self.fmax,
-                steps=self.steps,
-            )
-            energy_dict, atoms_rlxd = self._compute_energy(atoms_rlxd, target_E, fname)
-            if atoms_rlxd is not None:
-                ase.io.write(os.path.join(self.relaxed_strucs, fname), atoms_rlxd)
-            if energy_dict:
-                return {
-                    **base_row,
-                    "computed_binding_E": _fmt(energy_dict["computed_binding_E"]),
-                    "binding_E_diff":     energy_dict["binding_E_diff"] if energy_dict["binding_E_diff"] is not None else "",
-                }
-            return base_row
-
-        validity_dict = self.sanitize(
-            atoms=atoms,
-            catalyst_dist_cutoff=self.catalyst_dist_cutoff,
-        )
-        atoms_rlxd = self.relax(
-            atoms=atoms,
-            validity_dict=validity_dict,
-            calculator=self.calculator,
-            do_relax=self.relax_otf,
-            fmax=self.fmax,
-            steps=self.steps,
-        )
-
-        energy_dict, atoms_rlxd = self._compute_energy(atoms_rlxd, target_E, fname)
-        if atoms_rlxd is None and self.relax_otf:
-            validity_dict["is_valid"] = False
-
-        if validity_dict["is_valid"] and atoms is not None:
-            ase.io.write(os.path.join(self.sanitized_strucs, fname), atoms)
-        if atoms_rlxd is not None:
-            ase.io.write(os.path.join(self.relaxed_strucs, fname), atoms_rlxd)
-
-        return {
-            **base_row,
-            "computed_binding_E": _fmt(energy_dict["computed_binding_E"]) if energy_dict else "",
-            "binding_E_diff":     energy_dict["binding_E_diff"] if energy_dict and energy_dict["binding_E_diff"] is not None else "",
-            "vol_ok":             float(validity_dict["vol_ok"]),
-            "cat_dist_ok":        float(validity_dict["cat_dist_ok"]),
-            "cat_atom_types_ok":  float(validity_dict["cat_atom_types_ok"]),
-            "cat_ads_dist_ok":    float(validity_dict["cat_ads_dist_ok"]),
-            "ads_dist_ok":        float(validity_dict["ads_dist_ok"]),
-            "is_valid":           float(validity_dict["is_valid"]),
-            "is_valid_naive":     float(validity_dict["is_valid_naive"]),
-        }
-
-    @staticmethod
-    def _parse_file_key(path: str) -> tuple[int, int] | None:
-        stem = os.path.splitext(os.path.basename(path))[0]
-        m = _FILE_KEY_RE.match(stem)
-        return (int(m.group(1)), int(m.group(2))) if m else None
-
-    def _build(self, b: int, prim_batch, ads_batch) -> Atoms | None:
+    def build_from_factorized_repr(self, b: int, prim_batch, ads_batch) -> Atoms | None:
         try:
             lengths  = self.opt_graph.lengths_generated[b]
             angles   = self.opt_graph.angles_generated[b]
@@ -295,17 +151,10 @@ class CatalystForge:
             logging.warning(f"[build] graph {b}: {e}")
             return None
 
-    @staticmethod
-    def sanitize(
-        atoms: Atoms | None,
-        catalyst_dist_cutoff: float,
-    ) -> dict:
+    def sanitize(self, atoms: Atoms | None) -> None:
+
         if atoms is None:
-            return {
-                "vol_ok": False, "cat_dist_ok": False, "cat_atom_types_ok": False,
-                "ads_dist_ok": False, "cat_ads_dist_ok": False,
-                "is_valid": False, "is_valid_naive": False,
-            }
+            return
 
         try:
             vol_ok = float(atoms.get_volume()) >= 0.1
@@ -313,7 +162,7 @@ class CatalystForge:
             tags = atoms.get_tags()
             cat_mask = tags != 2
             ads_mask = tags == 2
-            ads_atoms = atoms[ads_mask]
+
             cat_atoms = atoms[cat_mask]
             ads_idx = np.where(ads_mask)[0]
             cat_idx = np.where(cat_mask)[0]
@@ -329,7 +178,7 @@ class CatalystForge:
             atomic_radii = covalent_radii[cat_atomic_numbers]
             sum_atomic_radii = atomic_radii[:, None] + atomic_radii[None, :]
             sum_atomic_radii[sum_atomic_radii == 0.0] = np.inf
-            cat_dist_ok = bool((cat_dists >= catalyst_dist_cutoff * sum_atomic_radii).all())
+            cat_dist_ok = bool((cat_dists >= self.catalyst_dist_cutoff * sum_atomic_radii).all())
             cat_dist_ok_naive = bool(cat_dists.min() >= 0.5)
 
             cat_oc20_atom_types = np.arange(22, 84)
@@ -340,7 +189,6 @@ class CatalystForge:
             cat_ads_dist_ok = bool(cat_ads_dists.min() >= 0.5)
 
         except Exception as e:
-            logging.warning(f"batch_relax_w_mlff failed: {e}")
             vol_ok = False
             cat_dist_ok = False
             cat_dist_ok_naive = False
@@ -348,33 +196,215 @@ class CatalystForge:
             ads_dist_ok = False
             cat_ads_dist_ok = False
 
-        is_valid = vol_ok and cat_dist_ok and ads_dist_ok and cat_ads_dist_ok and cat_atom_types_ok
+        atoms.info["vol_ok"]            = vol_ok
+        atoms.info["cat_dist_ok"]       = cat_dist_ok
+        atoms.info["cat_atom_types_ok"] = cat_atom_types_ok
+        atoms.info["cat_ads_dist_ok"]   = cat_ads_dist_ok
+        atoms.info["ads_dist_ok"]       = ads_dist_ok
+        atoms.info["is_valid"]          = vol_ok and cat_dist_ok and ads_dist_ok and cat_ads_dist_ok and cat_atom_types_ok
+        atoms.info["is_valid_naive"]    = cat_dist_ok_naive and ads_dist_ok and cat_ads_dist_ok and vol_ok
 
-        return {
-            "vol_ok":            vol_ok,
-            "cat_dist_ok":       cat_dist_ok,
-            "cat_atom_types_ok": cat_atom_types_ok,
-            "cat_ads_dist_ok":   cat_ads_dist_ok,
-            "ads_dist_ok":       ads_dist_ok,
-            "is_valid":          is_valid,
-            "is_valid_naive":    cat_dist_ok_naive and ads_dist_ok and cat_ads_dist_ok and vol_ok,
-        }
+    def relax(self, atoms: Atoms | None) -> Atoms | None:
 
-    @staticmethod
-    def relax(
-        atoms: Atoms | None,
-        validity_dict: dict,
-        calculator,
-        do_relax: bool,
-        fmax: float = 0.05,
-        steps: int = 200,
-    ) -> Atoms | None:
-        if not do_relax or not validity_dict["is_valid"] or atoms is None:
-            return None
-        return relax_w_mlff(
+        atoms_rlxd, converged = relax_w_mlff(
             atoms=atoms,
-            calculator=calculator,
-            fmax=fmax,
-            steps=steps,
+            calculator=self.calculator,
+            fmax=self.fmax,
+            steps=self.steps,
             optimizer="BFGS",
         )
+
+        if not converged: 
+            atoms_rlxd = None
+
+        target_E = atoms.info.get("target_binding_E")
+        try:
+            computed_E = atoms_rlxd.get_potential_energy()
+            if computed_E <= self.energy_cutoff:
+                atoms_rlxd.info["computed_binding_E"] = computed_E
+                if target_E is not None:
+                    atoms_rlxd.info["binding_E_diff"] = abs(computed_E - target_E)
+                return atoms_rlxd
+            atoms.info["is_valid"] = False # binding energy greater than 10 eV, discard sample 
+            return None
+        except Exception as e:
+            logging.warning(f"Energy extraction failed for {atoms.info.get('fname')}: {e}")
+            atoms.info["is_valid"] = False # optimization or energy extraction failed, mark as invalid 
+            return None
+    
+    def compute_uniqueness(self, atoms):
+        """OTF duplicate check or batch uniqueness, depending on input.
+
+        Single Atoms object: checks against _seen_pymatgen_strucs, appends if
+        unique. Returns True if duplicate (skip write), False if unique.
+
+        List of Atoms: converts all slabs, groups via StructureMatcher, returns
+        uniqueness ratio dict e.g. {'uniqueness (100)': 0.85}.
+        """
+        if isinstance(atoms, Atoms) and self.check_diversity_otf:
+            slab = atoms[atoms.get_tags() != 2]
+            struc = AseAtomsAdaptor().get_structure(slab)
+            matcher = StructureMatcher()
+
+            if len(self._seen_pymatgen_strucs) == 0:
+                atoms.info["is_unique"] = True 
+                self._seen_pymatgen_strucs.append(struc)
+                return True
+
+            is_unique = True
+            for seen_strucs in self._seen_pymatgen_strucs:
+                if matcher.fit(seen_strucs, struc):
+                    is_unique = False 
+                    break
+            
+            atoms.info["is_unique"] = is_unique
+            if is_unique: 
+                self._seen_pymatgen_strucs.append(struc)
+                return True
+            return False
+
+        elif isinstance(atoms, list):
+            structures = []
+            for a in atoms:
+                if a is None:
+                    continue
+                try:
+                    slab = a[a.get_tags() != 2]
+                    if len(slab) == 0:
+                        continue
+                    structures.append(AseAtomsAdaptor().get_structure(slab))
+                except Exception:
+                    continue
+            groups = StructureMatcher().group_structures(structures)
+            uniqueness = len(groups) / len(structures) if structures else 0.0
+            return {f"uniqueness ({len(structures)})": uniqueness}
+
+
+    def _process_built_struc(
+        self,
+        atoms: Atoms | None,
+        fname: str | None,
+        target_E: float | None,
+    ) -> dict:
+        threshold_cols = {f"within_{m}T": None for m in _THRESHOLD_MULTIPLIERS}
+        base_row = {
+            "fname":              fname,
+            "target_binding_E":   target_E,
+            "computed_binding_E": None,
+            "binding_E_diff":     None,
+            **threshold_cols,
+        }
+
+        if not self.sanitize_otf:
+            if atoms is not None and self.opt_graph:
+                ase.io.write(os.path.join(self.generated_strucs, fname), atoms) # if opt_grpah present, we are generating strucs for the first time
+            opt_conditions = self.relax_otf and atoms
+            atoms_rlxd = self.relax(atoms=atoms) if opt_conditions else None
+
+            if atoms_rlxd is not None:
+                diff = atoms_rlxd.info.get("binding_E_diff")
+                subdir = _threshold_subdir(diff)
+                atoms_rlxd.info["threshold_subdir"] = subdir
+                out_path = os.path.join(self.relaxed_strucs, subdir, fname)
+                os.makedirs(os.path.dirname(out_path), exist_ok=True)
+                ase.io.write(out_path, atoms_rlxd)
+                return {
+                    **base_row,
+                    "computed_binding_E": atoms_rlxd.info.get("computed_binding_E"),
+                    "binding_E_diff":     diff,
+                    **_threshold_flags(diff),
+                }
+            return base_row
+
+        # sanitize the atoms objects to purge unstabele strucs
+        self.sanitize(atoms=atoms)
+
+        if self.check_diversity_otf and atoms is not None:
+            is_unique = self.compute_uniqueness(atoms=atoms)
+            if not is_unique: # set non-unique strucutres as invalid strucutres
+                atoms.info["is_valid"] = False
+        else: 
+            is_unique = True
+
+        # write sanitized and relaxed structures to disk
+        if atoms is not None and atoms.info.get("is_valid"):
+            if self.relax_otf: 
+                atoms_rlxd = self.relax(atoms=atoms) 
+            else: 
+                atoms_rlxd = None
+                ase.io.write(os.path.join(self.sanitized_strucs, fname), atoms)
+        else:
+            atoms_rlxd = None # if atoms DNE, store atoms_rlxd as None
+
+        if atoms_rlxd is not None:
+            diff = atoms_rlxd.info.get("binding_E_diff")
+            subdir = _threshold_subdir(diff)
+            atoms_rlxd.info["threshold_subdir"] = subdir
+            out_path = os.path.join(self.relaxed_strucs, subdir, fname)
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            if not self.check_diversity_otf:
+                ase.io.write(out_path, atoms_rlxd) 
+            else: 
+                if is_unique: 
+                    ase.io.write(out_path, atoms_rlxd)
+        else:
+            diff = None
+
+        validity_keys = ["vol_ok", "cat_dist_ok", "cat_atom_types_ok", "cat_ads_dist_ok", "ads_dist_ok", "is_valid", "is_valid_naive"]
+        return {
+            **base_row,
+            "computed_binding_E": atoms_rlxd.info.get("computed_binding_E") if atoms_rlxd is not None else None,
+            "binding_E_diff":     diff,
+            **_threshold_flags(diff),
+            **{k: float(atoms.info.get(k)) if atoms is not None else float(False) for k in validity_keys}, # if atoms DNE, it could not be built and mark as invalid
+        }
+
+    def fire(self) -> list[dict]:
+        """Process structures from opt_graph (OTF) or from preloaded files.
+
+        Returns:
+            List of metric/row dicts, one per structure.
+        """
+        if self.opt_graph is not None:
+            items = self._construct_atoms_objects()
+            if self.relax_otf: 
+                os.makedirs(self.relaxed_strucs, exist_ok=True)
+            else:
+                os.makedirs(self.sanitized_strucs if self.sanitize_otf else self.generated_strucs, exist_ok=True)
+        else:
+            items = self._list_atoms_objects()
+            os.makedirs(self.sanitized_strucs, exist_ok=True)
+
+        csv_path = None
+        write_header = False
+        if self.relax_otf:
+            os.makedirs(self.relaxed_strucs, exist_ok=True)
+            csv_path = os.path.join(self.relaxed_strucs, "relaxed_strucs_data.csv")
+            if self.opt_graph is not None and self.batch_idx == 0 and os.path.isfile(csv_path):
+                os.remove(csv_path)
+            write_header = not os.path.isfile(csv_path)
+
+        atoms_dict_list: list[dict] = []
+        csv_fieldnames: list[str] | None = None
+
+        for atoms in tqdm(items, desc="Processing", disable=self.opt_graph is not None):
+            fname    = atoms.info.get("fname") if atoms is not None else None
+            target_E = atoms.info.get("target_binding_E") if atoms is not None else None
+            atoms_dict = self._process_built_struc(atoms=atoms, fname=fname, target_E=target_E)
+            atoms_dict_list.append(atoms_dict)
+            self._all_atoms.append(atoms)
+
+            if csv_path is not None:
+                if csv_fieldnames is None:
+                    csv_fieldnames = list(atoms_dict.keys())
+                with open(csv_path, "a", newline="") as f:
+                    w = csv.DictWriter(f, fieldnames=csv_fieldnames)
+                    if write_header:
+                        w.writeheader()
+                        write_header = False
+                    w.writerow({k: _csv_fmt(atoms_dict.get(k)) for k in csv_fieldnames})
+
+        if self.check_diversity:
+            self.diversity = self.compute_uniqueness(self._all_atoms)
+
+        return atoms_dict_list

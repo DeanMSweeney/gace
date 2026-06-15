@@ -12,6 +12,7 @@ import os
 import statistics
 import time
 from multiprocessing import Pool
+import pathlib 
 
 import ase.io
 from ase import Atoms
@@ -21,39 +22,19 @@ from tqdm import tqdm
 
 log = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Target energy loading
-# ---------------------------------------------------------------------------
-
-def load_target_energies(gen_strucs: str) -> dict[tuple[int, int], float]:
-    csv_path = os.path.join(gen_strucs, "binding_energies.csv")
-    if not os.path.isfile(csv_path):
-        return {}
-    targets = {}
-    with open(csv_path, newline="") as f:
-        for row in csv.DictReader(f):
-            key = (int(row["batch_idx"]), int(row["graph_idx"]))
-            targets[key] = float(row["target_binding_E"])
-    return targets
-
-
 # ---------------------------------------------------------------------------
 # File collection
 # ---------------------------------------------------------------------------
 
 def collect_structure_files(directory: str) -> list[str]:
     """Return sorted structure files from directory (.vasp preferred, .traj fallback)."""
-    vasp = sorted(glob.glob(os.path.join(directory, "*.vasp")))
-    if vasp:
-        log.info(f"Found {len(vasp)} .vasp files in {directory}")
-        return vasp
-    traj = sorted(glob.glob(os.path.join(directory, "*.traj")))
-    if traj:
-        log.info(f"Found {len(traj)} .traj files in {directory}")
-        return traj
-    raise FileNotFoundError(f"No .vasp or .traj files found in {directory}")
-
+    traj = sorted(str(p) for p in pathlib.Path(directory).rglob("*.traj"))
+    log.info(f"Found {len(traj)} .traj files in {directory}")
+    
+    if not traj:
+        raise FileNotFoundError(f"No .traj files found in directory: {directory}")
+    
+    return traj
 
 # ---------------------------------------------------------------------------
 # Uniqueness
@@ -137,6 +118,12 @@ def summarize_results(rows: list[dict]) -> dict:
     diffs = [float(r["binding_E_diff"]) for r in rows if r.get("binding_E_diff")]
     energy_stats = {}
     if diffs:
+        threshold_multipliers = [1, 2, 3, 5, 10]
+        within_pct = {}
+        for m in threshold_multipliers:
+            key = f"within_{m}T"
+            flagged = [r[key] for r in rows if r.get(key) is not None]
+            within_pct[key] = sum(flagged) / len(flagged) if flagged else 0.0
         energy_stats = {
             "n_relaxed": len(diffs),
             "n_total":   len(rows),
@@ -145,6 +132,7 @@ def summarize_results(rows: list[dict]) -> dict:
             "std":       statistics.stdev(diffs) if len(diffs) > 1 else 0.0,
             "min":       min(diffs),
             "max":       max(diffs),
+            **within_pct,
         }
 
     return {"validity": validity, "energy_stats": energy_stats}
@@ -170,15 +158,9 @@ def format_report(
         "=" * 50,
     ]
     if uniqueness is not None:
-        lines += [
-            "",
-            "Uniqueness",
-            f"  Total loaded  : {uniqueness['total']}",
-            f"  Unique groups : {uniqueness['unique']}",
-            f"  Score         : {uniqueness['uniqueness']:.4f}",
-            f"  Load time     : {uniqueness['load_time']:.1f}s",
-            f"  Match time    : {uniqueness['match_time']:.1f}s",
-        ]
+        lines += ["", "Uniqueness"]
+        for key, val in uniqueness.items():
+            lines.append(f"  {key} : {val:.4f}")
 
     if sanitisation is not None:
         validity = sanitisation["validity"]
@@ -206,6 +188,13 @@ def format_report(
                 f"  Std ΔE    : {energy_stats['std']:.4f} eV",
                 f"  Min ΔE    : {energy_stats['min']:.4f} eV",
                 f"  Max ΔE    : {energy_stats['max']:.4f} eV",
+                "",
+                "  Within threshold (T=0.10 eV)",
+                f"  ≤ 1×T (0.10 eV) : {energy_stats['within_1T']:.2%}",
+                f"  ≤ 2×T (0.20 eV) : {energy_stats['within_2T']:.2%}",
+                f"  ≤ 3×T (0.30 eV) : {energy_stats['within_3T']:.2%}",
+                f"  ≤ 5×T (0.50 eV) : {energy_stats['within_5T']:.2%}",
+                f"  ≤10×T (1.00 eV) : {energy_stats['within_10T']:.2%}",
             ]
 
     lines += ["", "=" * 50]
@@ -227,7 +216,7 @@ def parse_args():
     import argparse
     p = argparse.ArgumentParser(description="Evaluate forge-generated structures.")
     p.add_argument("--strucs_for_eval", help="Directory of generated structure files")
-    p.add_argument("--check_novelty", default=False, action="store_true", help="Run structural uniqueness check via StructureMatcher")
+    p.add_argument("--check_diversity", default=False, action="store_true", help="Run structural uniqueness check via StructureMatcher")
     p.add_argument("--sanitize", default=False, action="store_true",
                    help="Run validity checks (and optionally MLFF relaxation) on structures")
     p.add_argument("--relax", default=False, action="store_true", help="Run MLFF relaxation step")
@@ -255,10 +244,9 @@ def main(**kwargs):
     files = collect_structure_files(args.strucs_for_eval)
     preloaded = load_atoms_parallel(files, args.num_workers)
 
-    uniqueness = compute_uniqueness(preloaded) if args.check_novelty else None
-
     sanitisation = None
-    if args.sanitize or args.relax:
+    uniqueness = None
+    if args.sanitize or args.relax or args.check_diversity:
         from gace.utils.catalyst_forge import CatalystForge
 
         calculator = None
@@ -273,12 +261,7 @@ def main(**kwargs):
                     cpu=args.cpu,
                 )
 
-        binding_energies = load_target_energies(gen_strucs=args.strucs_for_eval)
-        if binding_energies:
-            log.info(f"Loaded {len(binding_energies)} target energies")
-
         cf = CatalystForge(
-            binding_energies=binding_energies,
             batch_idx=0,
             calculator=calculator,
             catalyst_dist_cutoff=args.catalyst_dist_cutoff,
@@ -293,9 +276,12 @@ def main(**kwargs):
             preloaded_atoms=preloaded,
             n_strucs=args.n_strucs,
             seed=args.seed,
+            check_diversity=args.check_diversity,
         )
-        rows = cf.run()
-        sanitisation = summarize_results(rows)
+        rows = cf.fire()
+        uniqueness = cf.diversity
+        if args.sanitize or args.relax:
+            sanitisation = summarize_results(rows)
 
     report = format_report(
         directory=args.strucs_for_eval,

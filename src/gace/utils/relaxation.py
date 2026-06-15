@@ -169,10 +169,10 @@ def relax_w_mlff(
     opt = opt_class(atoms, logfile=None)
     converged = opt.run(fmax=fmax, steps=steps)
 
-    if bool(converged) == False:
-        atoms = None
+    #if bool(converged) == False:
+       # atoms = None
 
-    return atoms
+    return atoms, bool(converged)
 
 
 def batch_relax_w_mlff(
@@ -224,11 +224,3 @@ def batch_relax_w_mlff(
         return [None] * len(atoms_list)
     finally:
         _PatchedOptimizableBatch.ignored_changes = {}
-
-
-_CSV_DECIMALS = 6
-_FMT = f".{_CSV_DECIMALS}f"
-
-
-def _fmt(v: Optional[float]) -> str:
-    return format(v, _FMT) if v is not None else ""
