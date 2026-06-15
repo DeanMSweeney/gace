@@ -120,8 +120,9 @@ class SamplerConfig:
     sde_noise_scale: float = 0.0
     """Standard deviation of Brownian noise injected at each Euler step (Euler-Maruyama).
     Noise is tapered by (1 - t) so it vanishes as t → 1.
-    0.0 (default) gives the standard deterministic Euler step.
-    Typical range to explore: 0.01 – 0.1.
+    0.0 gives the standard deterministic Euler step.
+    Required to be > 0 when fk_steering=True so resampled clones diverge on
+    continuous modalities. Recommended value with FK: 0.05.
     """
 
     # ==================== Structure Generation ====================
@@ -188,13 +189,43 @@ class SamplerConfig:
     A pair is flagged as clashing if its distance is below catalyst_dist_cutoff * (r_i + r_j).
     Lower values are more permissive; higher values are stricter."""
 
+    check_diversity: bool = False
+    """Run structural uniqueness check via StructureMatcher after generation.
+    Strips adsorbate atoms and groups slab structures; result is stored in cf.diversity."""
+
     # ==================== MLFF Relaxation ====================
 
     relax_otf: bool = False
     """Whether to run MLFF relaxation on-the-fly after generation"""
 
     mlff_checkpoint: str = "EquiformerV2-31M-S2EF-OC20-All+MD"
-    """Path to MLFF checkpoint for relaxation"""
+    """MLFF checkpoint for post-generation relaxation and evaluation."""
+
+    # ==================== Feynman-Kac Steering ====================
+
+    fk_steering: bool = False
+    """Enable Feynman-Kac particle filtering during ODE sampling.
+    Runs num_generated_samples particles in parallel and periodically
+    resamples toward structures with adsorption energy close to target."""
+
+    fk_mlff_checkpoint: Optional[str] = "PaiNN-S2EF-OC20-All"
+    """MLFF checkpoint used for FK intermediate reward evaluation.
+    Can be a lighter/cheaper model than mlff_checkpoint since it only
+    needs a rough energy signal, not a tight relaxation. Defaults to
+    PaiNN-S2EF-OC20-All. If None, falls back to mlff_checkpoint."""
+
+    fk_K: int = 10
+    """Evaluate and resample every fk_K ODE steps."""
+
+    fk_tau: float = 0.5
+    """Resampling temperature for harmonic-sum log-weight accumulation.
+    Controls the effective beta = 1/fk_tau applied to accumulated path costs.
+    Lower = harder selection; higher = softer (near-uniform). Typical range: 0.1–2.0.
+    At 0.5, a 1.5 eV cost spread gives ~20x best-to-worst probability ratio."""
+
+    fk_start_step: int = 20
+    """Minimum number of ODE steps to complete before the first FK evaluation.
+    Allows global structure (lattice, rough positions) to form before steering."""
 
 
 

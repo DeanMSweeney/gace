@@ -11,6 +11,8 @@ from gace.utils.invariance import pbc_aware_delta, batched_ot_align, global_ot_a
 from gace.utils.utils import adsorbate_neighborhood_mask, random_so3_rotation
 from gace.utils.builder import lattice_params_to_matrix
 from gace.utils.euler import euler_step, ctmc_step
+from gace.utils.relaxation import relax_w_mlff
+from gace.utils.catalyst_forge import CatalystForge
 
 NUM_CLASSES = 100  # number of atom-type classes (atomic numbers 1–100, shifted to 0-indexed)
 
@@ -542,7 +544,34 @@ class Flow():
         n_scale = (num_prim_atoms.float() ** (1 / 3)).unsqueeze(1)  # (B, 1)
 
         # ── Euler integration loop ────────────────────────────────────────────
-        if not build_from_truth: 
+        if not build_from_truth:
+            # Pre-compute FK harmonic-sum schedule if steering is enabled.
+            # L = number of resampling events; H_L = L-th harmonic number.
+            # log_w accumulates per-particle path costs across all events.
+            fk_log_w = fk_ell = fk_L = fk_H_L = None
+            if self.fk_steering:
+                assert data.ads_binding_energy.unique().numel() == 1, (
+                    "FK steering requires all particles to share a single target "
+                    "binding energy. Set target_binding_energy in sampler_cfg."
+                )
+                if self.sde_noise_scale == 0.0:
+                    import warnings
+                    warnings.warn(
+                        "fk_steering=True but sde_noise_scale=0.0: resampled clones will not "
+                        "diverge on continuous modalities. Set sde_noise_scale=0.05.",
+                        UserWarning,
+                    )
+                fk_event_steps = [
+                    i for i in range(len(t) - 1)
+                    if (i + 1) >= self.fk_start_step
+                    and (i + 1) % self.fk_K == 0
+                    and i < len(t) - 2
+                ]
+                fk_L   = len(fk_event_steps)
+                fk_H_L = sum(1.0 / k for k in range(1, fk_L + 1)) if fk_L > 0 else 1.0
+                fk_log_w = torch.zeros(B, device=device)
+                fk_ell   = 0
+
             for i in range(len(t) - 1):
                 t_curr = t[i].item()
                 dt     = (t[i + 1] - t[i]).item()
@@ -590,6 +619,32 @@ class Flow():
                 # Update discrete atom types (CTMC)
                 data.atomic_numbers = ctmc_step(data.atomic_numbers, pred["z"], t_curr, dt)
 
+                # ── FK steering hook ─────────────────────────────────────────
+                if (
+                    self.fk_steering
+                    and (i + 1) >= self.fk_start_step
+                    and (i + 1) % self.fk_K == 0
+                    and i < len(t) - 2
+                ):
+                    n_prim = int(self.primitive_mask.sum().item()) // B
+                    n_ads  = N_ads // B
+                    rewards = self._fk_evaluate(
+                        data=data, pred=pred, N=B,
+                        n_prim=n_prim, n_ads=n_ads, n_scale=n_scale,
+                    )
+                    # Harmonic-sum weight accumulation: later events get a larger
+                    # share of the total inverse-temperature budget β = 1/fk_tau.
+                    beta  = 1.0 / self.fk_tau
+                    costs = -rewards   # cost ≥ 0; -inf particles get large cost
+                    costs[costs.isinf()] = costs[~costs.isinf()].max() + 1.0
+                    fk_log_w += -beta * costs / ((fk_L - fk_ell) * fk_H_L)
+
+                    data, fk_log_w = self._fk_resample(
+                        data=data, log_w=fk_log_w, N=B,
+                        n_prim=n_prim, n_ads=n_ads,
+                    )
+                    fk_ell += 1
+
         # ── Store generated outputs ───────────────────────────────────────────
         data.pos_generated             = data.pos
         data.atomic_numbers_generated  = data.atomic_numbers + 1 if not build_from_truth else data.atomic_numbers  # 1-indexed (1–99)
@@ -601,3 +656,108 @@ class Flow():
 
 
         return data
+
+    # ── Feynman-Kac helpers ──────────────────────────────────────────────────
+
+    def _fk_evaluate(self, data, pred, N: int, n_prim: int, n_ads: int, n_scale) -> torch.Tensor:
+        """Decode x1_pred for each particle, relax, and return volcano rewards.
+
+        Writes pred into *_generated fields on data (temporary), initialises
+        CatalystForge with sanitize_otf=False and relax_otf=True, then calls
+        build_from_factorized_repr() + relax_w_mlff() per particle.
+
+        Args:
+            data:    current PyG Batch (N particles)
+            pred:    model endpoint predictions dict
+            N:       number of particles (batch size)
+            n_prim:  primitive atoms per particle (uniform)
+            n_ads:   adsorbate atoms per particle (uniform)
+            n_scale: (B, 1) length de-normalisation scale factor
+
+        Returns:
+            rewards: (N,) float tensor, reward = -|E_ads - target_E|
+        """
+        rewards    = torch.full((N,), float("-inf"), dtype=torch.float32, device=data.pos.device)
+        prim_batch = data.batch[data.tags == 1]
+        ads_batch  = data.batch[data.tags == 2]
+
+        # Temporarily write x1_pred into *_generated fields
+        data.pos_generated            = pred["pos"]
+        data.atomic_numbers_generated = pred["z"].argmax(dim=-1) + 1   # 1-indexed
+        data.lengths_generated        = pred["len"] * n_scale           # denormalise to Å
+        data.angles_generated         = pred["ang"]
+        data.M_generated              = pred["M"].round().long()
+        data.ads_pos_generated        = pred["ads_pos"]
+
+        forge = CatalystForge(
+            opt_graph=data,
+            binding_energies=[data.ads_binding_energy[b].item() for b in range(N)],
+            batch_idx=0,
+            calculator=self.fk_mlff_checkpoint,
+            sanitize_otf=False,
+            relax_otf=True,
+            catalyst_dist_cutoff=self.catalyst_dist_cutoff,
+            generated_strucs=None,
+            sanitized_strucs=None,
+            relaxed_strucs=None,
+        )
+
+        for b in range(N):
+            atoms = forge.build_from_factorized_repr(
+                b=b, prim_batch=prim_batch, ads_batch=ads_batch,
+            )
+            if atoms is None:
+                continue
+
+            result, _ = relax_w_mlff(atoms=atoms, calculator=self._fk_mlff_calculator, steps=100, fmax=0.50)
+            
+            E_ads    = result.get_potential_energy()
+            target_E = data.ads_binding_energy[b].item()
+            rewards[b] = -abs(E_ads - target_E)   # volcano: peaked at conditioning label
+
+        return rewards
+
+    def _fk_resample(self, data, log_w: torch.Tensor, N: int, n_prim: int, n_ads: int):
+        """Stratified resampling of the N-particle batch using accumulated log-weights.
+
+        Particles are selected proportionally to exp(log_w). Stratified resampling
+        gives lower variance than multinomial while keeping the same expectation.
+        Selected particles carry their accumulated log-weight history forward so
+        subsequent events build on path cost rather than resetting each time.
+
+        Args:
+            data:  current PyG Batch (N particles, uniform atom counts)
+            log_w: (N,) accumulated log-weight tensor from harmonic-sum scheduler
+            N:     number of particles
+            n_prim: primitive atoms per particle
+            n_ads:  adsorbate atoms per particle
+
+        Returns:
+            (data, log_w) with particle tensors and weights reordered by selection
+        """
+        # Convert log-weights to normalised probabilities (shift by max for stability)\
+        log_w_shifted = log_w - log_w.max()
+        probs = torch.exp(log_w_shifted)
+        probs = probs / probs.sum()
+
+        # Stratified resampling: single uniform offset shared across N evenly-spaced
+        # positions on the CDF — lower variance than independent multinomial draws.
+        cdf = torch.cumsum(probs, dim=0)
+        u   = torch.rand(1, device=probs.device) / N
+        positions = u + torch.arange(N, device=probs.device, dtype=torch.float32) / N
+        selected  = torch.searchsorted(cdf.contiguous(), positions.contiguous()).clamp(0, N - 1)
+
+        # Per-graph tensors
+        data.lengths_scaled        = data.lengths_scaled[selected]
+        data.angles_radians        = data.angles_radians[selected]
+        data.transformation_matrix = data.transformation_matrix[selected]
+
+        # Per-atom tensors: reshape to (N, n_atoms, ...), index, reshape back
+        data.pos            = data.pos.view(N, n_prim, 3)[selected].view(N * n_prim, 3)
+        data.atomic_numbers = data.atomic_numbers.view(N, n_prim)[selected].view(N * n_prim)
+        data.ads_pos        = data.ads_pos.view(N, n_ads, 3)[selected].view(N * n_ads, 3)
+
+        # Carry selected particles' accumulated log-weights forward
+        log_w_new = log_w[selected]
+
+        return data, log_w_new

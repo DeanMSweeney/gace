@@ -51,7 +51,7 @@ def euler_step(
     x_new = x_t + velocity * dt
 
     if noise_scale > 0.0:
-        taper = 1.0 - t_scalar          # → 0 as t → 1
+        taper = 1.0 #- t_scalar          # → 0 as t → 1
         noise = noise_scale * taper * (dt ** 0.5) * torch.randn_like(x_t)
         x_new = x_new + noise
 
