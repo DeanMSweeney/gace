@@ -27,6 +27,9 @@ import ase.io
 from typing import Optional, Literal, Union, Tuple
 
 
+BINDING_ENERGY_MEAN =  -1.54790583
+BINDING_ENERGY_STD = 2.27278609
+
 class LightFlowMatch(LightningModule, Flow):
     """
     PyTorch Lightning module for training conditional flow matching models.
@@ -230,6 +233,8 @@ class LightFlowMatch(LightningModule, Flow):
         ads_padding_mask  = ~x_ads.mask   # (B, N)
 
         t = t_prim.data["t"].squeeze(-1)  # (B,)
+
+        f_prim.data["ads_binding_energy"] = (f_prim.data["ads_binding_energy"] - BINDING_ENERGY_MEAN ) / BINDING_ENERGY_STD
 
         if force_unconditional:
             B = x_prim.data["atomic_numbers"].shape[0]
