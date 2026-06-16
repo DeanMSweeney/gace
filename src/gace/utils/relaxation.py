@@ -169,10 +169,10 @@ def relax_w_mlff(
     opt = opt_class(atoms, logfile=None)
     converged = opt.run(fmax=fmax, steps=steps)
 
-    if bool(converged) == False:
-        atoms = None
+    #if bool(converged) == False:
+       # atoms = None
 
-    return atoms
+    return atoms, bool(converged)
 
 
 def batch_relax_w_mlff(

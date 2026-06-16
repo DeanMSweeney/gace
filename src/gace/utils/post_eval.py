@@ -12,6 +12,7 @@ import os
 import statistics
 import time
 from multiprocessing import Pool
+import pathlib 
 
 import ase.io
 from ase import Atoms
@@ -27,7 +28,7 @@ log = logging.getLogger(__name__)
 
 def collect_structure_files(directory: str) -> list[str]:
     """Return sorted structure files from directory (.vasp preferred, .traj fallback)."""
-    traj = sorted(glob.glob(os.path.join(directory, "*.traj")))
+    traj = sorted(str(p) for p in pathlib.Path(directory).rglob("*.traj"))
     log.info(f"Found {len(traj)} .traj files in {directory}")
     
     if not traj:
@@ -157,15 +158,9 @@ def format_report(
         "=" * 50,
     ]
     if uniqueness is not None:
-        lines += [
-            "",
-            "Uniqueness",
-            f"  Total loaded  : {uniqueness['total']}",
-            f"  Unique groups : {uniqueness['unique']}",
-            f"  Score         : {uniqueness['uniqueness']:.4f}",
-            f"  Load time     : {uniqueness['load_time']:.1f}s",
-            f"  Match time    : {uniqueness['match_time']:.1f}s",
-        ]
+        lines += ["", "Uniqueness"]
+        for key, val in uniqueness.items():
+            lines.append(f"  {key} : {val:.4f}")
 
     if sanitisation is not None:
         validity = sanitisation["validity"]
@@ -221,7 +216,7 @@ def parse_args():
     import argparse
     p = argparse.ArgumentParser(description="Evaluate forge-generated structures.")
     p.add_argument("--strucs_for_eval", help="Directory of generated structure files")
-    p.add_argument("--check_novelty", default=False, action="store_true", help="Run structural uniqueness check via StructureMatcher")
+    p.add_argument("--check_diversity", default=False, action="store_true", help="Run structural uniqueness check via StructureMatcher")
     p.add_argument("--sanitize", default=False, action="store_true",
                    help="Run validity checks (and optionally MLFF relaxation) on structures")
     p.add_argument("--relax", default=False, action="store_true", help="Run MLFF relaxation step")
@@ -249,10 +244,9 @@ def main(**kwargs):
     files = collect_structure_files(args.strucs_for_eval)
     preloaded = load_atoms_parallel(files, args.num_workers)
 
-    uniqueness = compute_uniqueness(preloaded) if args.check_novelty else None
-
     sanitisation = None
-    if args.sanitize or args.relax:
+    uniqueness = None
+    if args.sanitize or args.relax or args.check_diversity:
         from gace.utils.catalyst_forge import CatalystForge
 
         calculator = None
@@ -282,9 +276,12 @@ def main(**kwargs):
             preloaded_atoms=preloaded,
             n_strucs=args.n_strucs,
             seed=args.seed,
+            check_diversity=args.check_diversity,
         )
         rows = cf.fire()
-        sanitisation = summarize_results(rows)
+        uniqueness = cf.diversity
+        if args.sanitize or args.relax:
+            sanitisation = summarize_results(rows)
 
     report = format_report(
         directory=args.strucs_for_eval,

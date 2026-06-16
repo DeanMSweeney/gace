@@ -98,6 +98,12 @@ class LightFlowMatch(LightningModule, Flow):
             cfg_w_discrete: float=1.0,
             sde_noise_scale: float=0.0,
             sanitize_otf: bool=True,
+            check_diversity: bool=False,
+            fk_steering: bool=False,
+            fk_mlff_checkpoint: Optional[str]="PaiNN-S2EF-OC20-All",
+            fk_K: int=10,
+            fk_tau: float=0.5,
+            fk_start_step: int=20,
             **kwargs,
         ):
 
@@ -106,7 +112,7 @@ class LightFlowMatch(LightningModule, Flow):
         self.save_hyperparameters(ignore=["model", "variant", "mode", "rtol", "atol", "ode_method", \
             "track_grad_norms", "generated_strucs", "relaxed_strucs", "sanitized_strucs", "config_vasp", "threshold", "x_matching", \
             "interpolant_schedule", "write_eval_metrics", "num_integration_steps", "relax_otf", "mlff_checkpoint", \
-            "accelerator", "seed", "num_prim_atoms", "optimal_transport"])
+            "fk_mlff_checkpoint", "accelerator", "seed", "num_prim_atoms", "optimal_transport"])
 
         # Model and training configuration
         self.model = model  # Neural network (e.g., Equiformer)
@@ -133,6 +139,7 @@ class LightFlowMatch(LightningModule, Flow):
         self.informed_priors = informed_priors
         self.relax_otf = relax_otf
         self.sanitize_otf = sanitize_otf
+        self.check_diversity = check_diversity
         self.batched_relaxation = batched_relaxation
         self.accelerator = accelerator
         self.seed = seed
@@ -150,12 +157,33 @@ class LightFlowMatch(LightningModule, Flow):
                     seed=seed,
                 )
 
+        # Separate lighter calculator for FK intermediate reward evaluation.
+        # Falls back to the main calculator if fk_mlff_checkpoint is not set.
+        self._fk_mlff_calculator = None
+        if fk_steering:
+            _fk_ckpt = fk_mlff_checkpoint or mlff_checkpoint
+            if _fk_ckpt is not None:
+                with Silent():
+                    self._fk_mlff_calculator = OCPCalculator(
+                        model_name=_fk_ckpt,
+                        local_cache="./mlff_checkpoint_cache",
+                        cpu=(accelerator == "cpu"),
+                        seed=seed,
+                    )
+
         self.target_binding_energy = target_binding_energy
         self.num_generated_samples = num_generated_samples
         self.cfg_dropout_prob = cfg_dropout_prob
         self.cfg_w_continuous = cfg_w_continuous
         self.cfg_w_discrete = cfg_w_discrete
         self.sde_noise_scale = sde_noise_scale
+
+        # Feynman-Kac steering
+        self.fk_steering   = fk_steering
+        self.fk_K          = fk_K
+        self.fk_tau        = fk_tau
+        self.fk_start_step      = fk_start_step
+        self.fk_mlff_checkpoint = fk_mlff_checkpoint
 
         _hist_path = os.path.join(os.path.dirname(__file__), "primitive_atom_distribution.json")
         with open(_hist_path) as f:
@@ -371,11 +399,16 @@ class LightFlowMatch(LightningModule, Flow):
             sanitized_strucs=self.sanitized_strucs,
             file_ext=".traj",
             sanitize_otf=self.sanitize_otf,
+            check_diversity=self.check_diversity,
         )
         for metrics in cf.fire():
             for key, val in metrics.items():
                 if isinstance(val, float):
-                    self.log(key, val, on_step=False, on_epoch=True, batch_size=1)
+                    reduce_fx = "sum" if key.startswith("within_") else "mean"
+                    self.log(key, val, on_step=False, on_epoch=True, batch_size=1, reduce_fx=reduce_fx)
+        if cf.diversity is not None:
+            for key, val in cf.diversity.items():
+                self.log(key, val, on_step=False, on_epoch=True)
         return
 
     def predict_step(self, data: Data, batch_idx: int):
@@ -417,20 +450,25 @@ class LightFlowMatch(LightningModule, Flow):
             sanitized_strucs=self.sanitized_strucs,
             file_ext=".traj",
             sanitize_otf=self.sanitize_otf,
+            check_diversity=self.check_diversity,
+            check_diversity_otf=True, # always check diversity on the fly during test time 
         )
         all_metrics = list(cf.fire())
         all_atoms = cf._all_atoms
 
         if all_metrics:
             keys = all_metrics[0].keys()
-            avgs = {k: np.mean([m[k] for m in all_metrics if isinstance(m.get(k), float)]) for k in keys
-                    if any(isinstance(m.get(k), float) for m in all_metrics)}
+            vals = {k: [m[k] for m in all_metrics if isinstance(m.get(k), float)] for k in keys}
+            avgs = {k: (np.sum(v) if k.startswith("within_") else np.mean(v)) for k, v in vals.items() if v}
             col_w = max(len(k) for k in avgs) + 2
             sep = "-" * (col_w + 26)
             print(f"\n[predict batch={batch_idx} | {len(all_metrics)} samples]")
             print(sep)
             for k, v in avgs.items():
-                print(f"\033[38;5;183m{k:>{col_w}}\033[0m | \033[38;5;177m{v:.4f}\033[0m")
+                print(f"{k:>{col_w}} | {v:.4f}")
+            if cf.diversity is not None:
+                for k, v in cf.diversity.items():
+                    print(f"{k:>{col_w}} | {v:.4f}")
             print(sep)
 
         return all_atoms
