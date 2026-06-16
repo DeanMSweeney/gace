@@ -119,7 +119,7 @@ def _process_chunk(index_range: tuple[int, int]) -> dict[str, int]:
                 continue
 
             elem = atoms.info["ads_element"]
-            write(str(_OUT_DIR / f"{idx:08d}_{elem}.traj"), atoms)
+            write(str(_OUT_DIR / elem / f"{idx:08d}_{elem}.traj"), atoms)
             counts[elem] = counts.get(elem, 0) + 1
     return counts
 
@@ -139,7 +139,8 @@ def run(lmdb_path: str, limit: int | None, workers: int, out_dir: Path) -> None:
     env.close()
 
     n_scan = n_total if limit is None else min(limit, n_total)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    for elem in TARGET_Z.values():
+        (out_dir / elem).mkdir(parents=True, exist_ok=True)
 
     # Split the index range into one chunk per worker (a few chunks per worker
     # keeps the tqdm bar responsive and load roughly balanced).
@@ -195,18 +196,16 @@ def main() -> None:
         default=cpu_count(),
         help="Number of worker processes (default: all CPUs)",
     )
-    parser.add_argument(
-        "--out-dir",
-        required=True,
-        help="Directory to write per-sample .traj files into",
-    )
     args = parser.parse_args()
+
+    # Parent output dir is fixed; per-element subdirs (N/, O/) live underneath it.
+    out_dir = Path(__file__).parent / "N_O_strucs"
 
     run(
         lmdb_path=args.lmdb,
         limit=args.limit,
         workers=max(args.workers, 1),
-        out_dir=Path(args.out_dir),
+        out_dir=out_dir,
     )
 
 
