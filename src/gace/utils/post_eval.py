@@ -90,25 +90,46 @@ def compute_uniqueness(atoms: list) -> dict:
     return {f"uniqueness ({len(structures)})": uniqueness}
 
 
-def compute_novelty(atoms: list, reference_atoms: list) -> dict:
+# Per-worker globals, populated once per process by _init_novelty_worker so the
+# (large) reference set is shipped to each worker once rather than per task.
+_NOVELTY_REF_STRUCTURES: list | None = None
+_NOVELTY_MATCHER: "StructureMatcher | None" = None
+
+
+def _init_novelty_worker(ref_structures: list) -> None:
+    global _NOVELTY_REF_STRUCTURES, _NOVELTY_MATCHER
+    _NOVELTY_REF_STRUCTURES = ref_structures
+    _NOVELTY_MATCHER = StructureMatcher()
+
+
+def _is_novel(struc) -> bool:
+    """True if struc matches no reference slab."""
+    return not any(_NOVELTY_MATCHER.fit(ref, struc) for ref in _NOVELTY_REF_STRUCTURES)
+
+
+def compute_novelty(atoms: list, reference_atoms: list, num_workers: int = 8) -> dict:
     """Fraction of generated slabs absent from a reference set (e.g. OC20).
 
     A generated slab is novel if it matches no reference slab under
     StructureMatcher. Each slab is compared independently against the fixed
     reference, so this measures pure novelty (no inter-generated dedup).
+    Generated slabs are checked in parallel across num_workers processes.
     Returns e.g. {'novelty (100)': 0.42}.
     """
-    matcher = StructureMatcher()
     gen_structures = _atoms_to_slab_structures(atoms)
     ref_structures = _atoms_to_slab_structures(reference_atoms)
-    log.info(f"Novelty: {len(gen_structures)} generated vs {len(ref_structures)} reference slabs")
+    log.info(f"Novelty: {len(gen_structures)} generated vs {len(ref_structures)} reference slabs "
+             f"({num_workers} workers)")
 
-    n_novel = 0
-    for struc in tqdm(gen_structures, desc="Novelty check"):
-        if not any(matcher.fit(ref, struc) for ref in ref_structures):
-            n_novel += 1
-    novelty = n_novel / len(gen_structures) if gen_structures else 0.0
-    return {f"novelty ({len(gen_structures)})": novelty}
+    if not gen_structures:
+        return {"novelty (0)": 0.0}
+
+    workers = max(1, min(num_workers, len(gen_structures)))
+    with Pool(workers, initializer=_init_novelty_worker, initargs=(ref_structures,)) as pool:
+        flags = list(tqdm(pool.imap(_is_novel, gen_structures, chunksize=8),
+                          total=len(gen_structures), desc="Novelty check"))
+    n_novel = sum(flags)
+    return {f"novelty ({len(gen_structures)})": n_novel / len(gen_structures)}
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +297,7 @@ def main(**kwargs):
     if args.check_novelty_against:
         ref_files = collect_structure_files(args.check_novelty_against)
         ref_atoms = list(load_atoms_parallel(ref_files, args.num_workers).values())
-        novelty = compute_novelty(gen_atoms, ref_atoms)
+        novelty = compute_novelty(gen_atoms, ref_atoms, num_workers=args.num_workers)
 
     sanitisation = None
     if args.sanitize or args.relax:
