@@ -71,6 +71,7 @@ def _atoms_to_slab_structures(atoms_iter) -> list:
         try:
             slab = [a.get_tags() != 2]
             if len(slab) == 0:
+                print(1)
                 continue
             structures.append(AseAtomsAdaptor().get_structure(slab))
         except Exception:
