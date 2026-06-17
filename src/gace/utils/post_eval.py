@@ -132,6 +132,35 @@ def compute_novelty(atoms: list, reference_atoms: list, num_workers: int = 8) ->
     return {f"novelty ({len(gen_structures)})": n_novel / len(gen_structures)}
 
 
+def compute_composition_novelty(atoms: list, reference_atoms: list) -> dict:
+    """Fraction of generated slabs whose chemical formula is absent from the reference.
+
+    Purely composition-based: ignores geometry, lattice, and vacuum entirely, so it
+    is unaffected by the slab/vacuum limitations of StructureMatcher. Adsorbate atoms
+    (tags == 2) are stripped first, consistent with compute_novelty, so this compares
+    catalyst slab compositions only. Formulas are compared via reduced formula, which
+    is order- and stoichiometry-invariant (e.g. Pd2Cu == CuPd2, Cu2Pd4 == CuPd2).
+
+    Returns e.g. {'composition_novelty (500)': 0.12, 'unique_gen_formulas': 37,
+                  'ref_formulas': 210}.
+    """
+    gen_structures = _atoms_to_slab_structures(atoms)
+    ref_structures = _atoms_to_slab_structures(reference_atoms)
+    if not gen_structures:
+        return {"composition_novelty (0)": 0.0}
+
+    ref_formulas = {s.composition.reduced_formula for s in ref_structures}
+    gen_formulas = [s.composition.reduced_formula for s in gen_structures]
+    n_novel = sum(f not in ref_formulas for f in gen_formulas)
+    log.info(f"Composition novelty: {len(set(gen_formulas))} unique generated formulas, "
+             f"{len(ref_formulas)} reference formulas, {n_novel} absent from reference")
+    return {
+        f"composition_novelty ({len(gen_formulas)})": n_novel / len(gen_formulas),
+        "unique_gen_formulas": len(set(gen_formulas)),
+        "ref_formulas": len(ref_formulas),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Summarise sanitisation + relaxation results
 # ---------------------------------------------------------------------------
@@ -187,6 +216,7 @@ def format_report(
     n_strucs: int | None,
     seed: int | None,
     novelty: dict | None = None,
+    composition_novelty: dict | None = None,
 ) -> str:
     from datetime import datetime
     lines = [
@@ -205,6 +235,11 @@ def format_report(
         lines += ["", "Novelty"]
         for key, val in novelty.items():
             lines.append(f"  {key} : {val:.4f}")
+
+    if composition_novelty is not None:
+        lines += ["", "Composition novelty"]
+        for key, val in composition_novelty.items():
+            lines.append(f"  {key} : {val:.4f}" if isinstance(val, float) else f"  {key} : {val}")
 
     if sanitisation is not None:
         validity = sanitisation["validity"]
@@ -294,10 +329,12 @@ def main(**kwargs):
     uniqueness = compute_uniqueness(gen_atoms) if args.check_diversity else None
 
     novelty = None
+    composition_novelty = None
     if args.check_novelty_against:
         ref_files = collect_structure_files(args.check_novelty_against)
         ref_atoms = list(load_atoms_parallel(ref_files, args.num_workers).values())
         novelty = compute_novelty(gen_atoms, ref_atoms, num_workers=args.num_workers)
+        composition_novelty = compute_composition_novelty(gen_atoms, ref_atoms)
 
     sanitisation = None
     if args.sanitize or args.relax:
@@ -337,6 +374,7 @@ def main(**kwargs):
     report = format_report(
         directory=args.strucs_for_eval,
         novelty=novelty,
+        composition_novelty=composition_novelty,
         uniqueness=uniqueness,
         sanitisation=sanitisation,
         n_strucs=args.n_strucs if (args.sanitize or args.relax) else None,
