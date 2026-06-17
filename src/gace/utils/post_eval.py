@@ -59,39 +59,56 @@ def load_atoms_parallel(files: list[str], num_workers: int) -> dict[str, "Atoms 
     return dict(pairs)
 
 
-def compute_uniqueness(atoms_map: dict[str, "Atoms | None"]) -> dict:
-    """Structural uniqueness via StructureMatcher on slab-only structures.
+def _atoms_to_slab_structures(atoms_iter) -> list:
+    """Convert an iterable of full Atoms to slab-only pymatgen Structures.
 
-    Accepts pre-loaded full Atoms objects (with adsorbate); strips tags==2 here.
-    StructureMatcher runs in the main process.
+    Strips adsorbate atoms (tags == 2); skips None / empty / unconvertible slabs.
     """
-    t0 = time.time()
     structures = []
-    for atoms in atoms_map.values():
-        if atoms is None:
+    for a in atoms_iter:
+        if a is None:
             continue
         try:
-            slab = atoms[atoms.get_tags() != 2]
+            slab = a[a.get_tags() != 2]
             if len(slab) == 0:
                 continue
             structures.append(AseAtomsAdaptor().get_structure(slab))
         except Exception:
             continue
-    load_time = time.time() - t0
-    log.info(f"Converted {len(structures)}/{len(atoms_map)} slabs ({load_time:.1f}s)")
+    return structures
 
-    log.info("Running StructureMatcher...")
-    t1 = time.time()
+
+def compute_uniqueness(atoms: list) -> dict:
+    """Batch structural uniqueness over a list of Atoms.
+
+    Strips adsorbate (tags == 2), groups slabs via StructureMatcher, and returns
+    a uniqueness ratio dict e.g. {'uniqueness (100)': 0.85}.
+    """
+    structures = _atoms_to_slab_structures(atoms)
     groups = StructureMatcher().group_structures(structures)
-    match_time = time.time() - t1
+    uniqueness = len(groups) / len(structures) if structures else 0.0
+    return {f"uniqueness ({len(structures)})": uniqueness}
 
-    return {
-        "total": len(structures),
-        "unique": len(groups),
-        "uniqueness": len(groups) / len(structures) if structures else 0.0,
-        "load_time": load_time,
-        "match_time": match_time,
-    }
+
+def compute_novelty(atoms: list, reference_atoms: list) -> dict:
+    """Fraction of generated slabs absent from a reference set (e.g. OC20).
+
+    A generated slab is novel if it matches no reference slab under
+    StructureMatcher. Each slab is compared independently against the fixed
+    reference, so this measures pure novelty (no inter-generated dedup).
+    Returns e.g. {'novelty (100)': 0.42}.
+    """
+    matcher = StructureMatcher()
+    gen_structures = _atoms_to_slab_structures(atoms)
+    ref_structures = _atoms_to_slab_structures(reference_atoms)
+    log.info(f"Novelty: {len(gen_structures)} generated vs {len(ref_structures)} reference slabs")
+
+    n_novel = 0
+    for struc in tqdm(gen_structures, desc="Novelty check"):
+        if not any(matcher.fit(ref, struc) for ref in ref_structures):
+            n_novel += 1
+    novelty = n_novel / len(gen_structures) if gen_structures else 0.0
+    return {f"novelty ({len(gen_structures)})": novelty}
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +165,7 @@ def format_report(
     sanitisation: dict | None,
     n_strucs: int | None,
     seed: int | None,
+    novelty: dict | None = None,
 ) -> str:
     from datetime import datetime
     lines = [
@@ -160,6 +178,11 @@ def format_report(
     if uniqueness is not None:
         lines += ["", "Uniqueness"]
         for key, val in uniqueness.items():
+            lines.append(f"  {key} : {val:.4f}")
+
+    if novelty is not None:
+        lines += ["", "Novelty"]
+        for key, val in novelty.items():
             lines.append(f"  {key} : {val:.4f}")
 
     if sanitisation is not None:
@@ -217,6 +240,7 @@ def parse_args():
     p = argparse.ArgumentParser(description="Evaluate forge-generated structures.")
     p.add_argument("--strucs_for_eval", help="Directory of generated structure files")
     p.add_argument("--check_diversity", default=False, action="store_true", help="Run structural uniqueness check via StructureMatcher")
+    p.add_argument("--check_novelty_against", default=None, help="Directory of reference structures (e.g. OC20); reports fraction of generated slabs absent from it")
     p.add_argument("--sanitize", default=False, action="store_true",
                    help="Run validity checks (and optionally MLFF relaxation) on structures")
     p.add_argument("--relax", default=False, action="store_true", help="Run MLFF relaxation step")
@@ -243,10 +267,19 @@ def main(**kwargs):
 
     files = collect_structure_files(args.strucs_for_eval)
     preloaded = load_atoms_parallel(files, args.num_workers)
+    gen_atoms = list(preloaded.values())
+
+    # Uniqueness and novelty are pure post-processing passes over the loaded set.
+    uniqueness = compute_uniqueness(gen_atoms) if args.check_diversity else None
+
+    novelty = None
+    if args.check_novelty_against:
+        ref_files = collect_structure_files(args.check_novelty_against)
+        ref_atoms = list(load_atoms_parallel(ref_files, args.num_workers).values())
+        novelty = compute_novelty(gen_atoms, ref_atoms)
 
     sanitisation = None
-    uniqueness = None
-    if args.sanitize or args.relax or args.check_diversity:
+    if args.sanitize or args.relax:
         from gace.utils.catalyst_forge import CatalystForge
 
         calculator = None
@@ -276,15 +309,13 @@ def main(**kwargs):
             preloaded_atoms=preloaded,
             n_strucs=args.n_strucs,
             seed=args.seed,
-            check_diversity=args.check_diversity,
         )
         rows = cf.fire()
-        uniqueness = cf.diversity
-        if args.sanitize or args.relax:
-            sanitisation = summarize_results(rows)
+        sanitisation = summarize_results(rows)
 
     report = format_report(
         directory=args.strucs_for_eval,
+        novelty=novelty,
         uniqueness=uniqueness,
         sanitisation=sanitisation,
         n_strucs=args.n_strucs if (args.sanitize or args.relax) else None,
