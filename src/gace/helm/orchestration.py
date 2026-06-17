@@ -98,7 +98,7 @@ class LightFlowMatch(LightningModule, Flow):
             cfg_w_discrete: float=1.0,
             sde_noise_scale: float=0.0,
             sanitize_otf: bool=True,
-            check_diversity: bool=False,
+            purge_duplicates_otf: bool=False,
             fk_steering: bool=False,
             fk_mlff_checkpoint: Optional[str]="PaiNN-S2EF-OC20-All",
             fk_K: int=10,
@@ -139,7 +139,7 @@ class LightFlowMatch(LightningModule, Flow):
         self.informed_priors = informed_priors
         self.relax_otf = relax_otf
         self.sanitize_otf = sanitize_otf
-        self.check_diversity = check_diversity
+        self.purge_duplicates_otf = purge_duplicates_otf
         self.batched_relaxation = batched_relaxation
         self.accelerator = accelerator
         self.seed = seed
@@ -189,6 +189,14 @@ class LightFlowMatch(LightningModule, Flow):
         with open(_hist_path) as f:
             hist = json.load(f)["prim_slab_num_atoms_hist"]
         self.register_buffer("prim_atoms_hist", torch.tensor(hist, dtype=torch.float32))
+
+        # Uniqueness bookkeeping accumulated across all test/predict batches.
+        # gen_slabs_memory is the running record of unique slabs shared with each
+        # per-batch CatalystForge for OTF dedup; num_slabs_checked counts the
+        # valid structures passed to that check. Uniqueness at epoch end is
+        # len(gen_slabs_memory) / num_slabs_checked.
+        self.gen_slabs_memory: list = []
+        self.num_slabs_checked: int = 0
        # ==============================================================================
        
     def _build_target_props(self, f_prim) -> dict:
@@ -399,16 +407,16 @@ class LightFlowMatch(LightningModule, Flow):
             sanitized_strucs=self.sanitized_strucs,
             file_ext=".traj",
             sanitize_otf=self.sanitize_otf,
-            check_diversity=self.check_diversity,
+            purge_duplicates_otf=self.purge_duplicates_otf,
+            gen_slabs_memory=self.gen_slabs_memory, # share OTF dedup record across batches
         )
         for metrics in cf.fire():
             for key, val in metrics.items():
                 if isinstance(val, float):
                     reduce_fx = "sum" if key.startswith("within_") else "mean"
                     self.log(key, val, on_step=False, on_epoch=True, batch_size=1, reduce_fx=reduce_fx)
-        if cf.diversity is not None:
-            for key, val in cf.diversity.items():
-                self.log(key, val, on_step=False, on_epoch=True)
+        # Accumulate the denominator; uniqueness is reported once in on_test_epoch_end.
+        self.num_slabs_checked += cf.num_slabs_checked
         return
 
     def predict_step(self, data: Data, batch_idx: int):
@@ -450,11 +458,13 @@ class LightFlowMatch(LightningModule, Flow):
             sanitized_strucs=self.sanitized_strucs,
             file_ext=".traj",
             sanitize_otf=self.sanitize_otf,
-            check_diversity=self.check_diversity,
-            check_diversity_otf=True, # always check diversity on the fly during test time 
+            purge_duplicates_otf=self.purge_duplicates_otf,
+            gen_slabs_memory=self.gen_slabs_memory, # share OTF dedup record across batches
         )
         all_metrics = list(cf.fire())
         all_atoms = cf._all_atoms
+        # Accumulate the denominator; uniqueness is reported once in on_predict_epoch_end.
+        self.num_slabs_checked += cf.num_slabs_checked
 
         if all_metrics:
             keys = all_metrics[0].keys()
@@ -466,12 +476,44 @@ class LightFlowMatch(LightningModule, Flow):
             print(sep)
             for k, v in avgs.items():
                 print(f"{k:>{col_w}} | {v:.4f}")
-            if cf.diversity is not None:
-                for k, v in cf.diversity.items():
-                    print(f"{k:>{col_w}} | {v:.4f}")
             print(sep)
 
         return all_atoms
+
+    # ==================== Uniqueness bookkeeping ====================
+
+    def _reset_uniqueness_memory(self):
+        self.gen_slabs_memory.clear()
+        self.num_slabs_checked = 0
+
+    def _run_uniqueness(self) -> dict | None:
+        """Uniqueness over every valid structure generated this run.
+
+        gen_slabs_memory holds exactly the unique slabs (OTF dedup appends only
+        non-duplicates), so the ratio is len(unique) / (# valid checked).
+        """
+        if not self.purge_duplicates_otf or self.num_slabs_checked == 0:
+            return None
+        n_unique = len(self.gen_slabs_memory)
+        return {f"uniqueness ({self.num_slabs_checked})": n_unique / self.num_slabs_checked}
+
+    def on_test_epoch_start(self):
+        self._reset_uniqueness_memory()
+
+    def on_test_epoch_end(self):
+        uniqueness = self._run_uniqueness()
+        if uniqueness is not None:
+            for key, val in uniqueness.items():
+                self.log(key, val, on_step=False, on_epoch=True)
+
+    def on_predict_epoch_start(self):
+        self._reset_uniqueness_memory()
+
+    def on_predict_epoch_end(self):
+        uniqueness = self._run_uniqueness()
+        if uniqueness is not None:
+            for key, val in uniqueness.items():
+                print(f"{key} | {val:.4f}")
 
     # ==================== Optimizer Configuration ====================
 

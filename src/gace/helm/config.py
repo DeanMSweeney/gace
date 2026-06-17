@@ -189,9 +189,12 @@ class SamplerConfig:
     A pair is flagged as clashing if its distance is below catalyst_dist_cutoff * (r_i + r_j).
     Lower values are more permissive; higher values are stricter."""
 
-    check_diversity: bool = False
-    """Run structural uniqueness check via StructureMatcher after generation.
-    Strips adsorbate atoms and groups slab structures; result is stored in cf.diversity."""
+    purge_duplicates_otf: bool = False
+    """Run on-the-fly structural diversity filtering during generation.
+    When True, each newly generated slab is matched (StructureMatcher) against the
+    running record of unique slabs; duplicates are marked invalid and not written.
+    Enabled in both test_step and predict_step; uniqueness is reported at epoch end
+    as (# unique slabs) / (# valid structures checked)."""
 
     # ==================== MLFF Relaxation ====================
 
