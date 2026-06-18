@@ -186,7 +186,7 @@ def build_slab_adsorbate(
         lattice=Lattice.from_parameters(a, b, c, alpha, beta, gamma),
         species=species,
         coords=prim_pos,
-        #coords_are_cartesian=True,
+        coords_are_cartesian=True,
     )
 
     # Expand to supercell

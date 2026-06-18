@@ -137,7 +137,7 @@ class CatalystForge:
             angles   = self.opt_graph.angles_generated[b]
             M        = self.opt_graph.M_generated[b]
             cell     = lattice_params_to_matrix(lengths.unsqueeze(0), angles.unsqueeze(0)).squeeze(0)
-            prim_pos = self.opt_graph.pos_generated[prim_batch == b] #@ cell
+            prim_pos = self.opt_graph.pos_generated[prim_batch == b] @ cell
             ads_pos  = self.opt_graph.ads_pos_generated[ads_batch == b]
             atoms = build_slab_adsorbate(
                 prim_pos=prim_pos,
