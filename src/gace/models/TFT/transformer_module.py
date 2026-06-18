@@ -65,6 +65,7 @@ class TransformerModule(nn.Module):
         cross_attention: bool = True,
         add_sinusoid_posenc: bool = True,
         concat_combine_input: bool = False,
+        disable_prenorm: bool = False,
         num_rbf: int = 20,
         rbf_max: float = 5.0,
         custom_weight_init: Optional[
@@ -92,6 +93,7 @@ class TransformerModule(nn.Module):
         self.add_sinusoid_posenc = add_sinusoid_posenc
         self.concat_combine_input = concat_combine_input
         self.custom_weight_init = custom_weight_init
+        self.disable_prenorm = disable_prenorm
 
         # Embeddings for each the primitive cell
         self.atom_type_embed = nn.Embedding(atom_dim, hidden_dim)  # for mask token; shared with adsorbate
@@ -474,7 +476,8 @@ class TransformerModule(nn.Module):
 
         # ── Shared transformer trunk ─────────────────────────────────────────
         if self.implementation in ("transformer", "modern_transformer"):
-            h_in = self.transformer_norm(h_in)
+            if not self.disable_prenorm:
+                h_in = self.transformer_norm(h_in)
             h_out = self.transformer(h_in, padding_mask=padding_mask, **attention_kwargs)
         else:
             raise ValueError(f"Invalid implementation: {self.implementation}")
