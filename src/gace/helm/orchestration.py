@@ -147,12 +147,6 @@ class LightFlowMatch(LightningModule, Flow):
         self.mlff_checkpoint = mlff_checkpoint
         self.ads_integrity_threshold = ads_integrity_threshold
 
-        ads_pos_mean = 0.0
-        ads_pos_std = 1.0
-
-        self.register_buffer("ads_pos_mean", torch.tensor(ads_pos_mean, dtype=torch.float32))
-        self.register_buffer("ads_pos_std", torch.tensor(ads_pos_std, dtype=torch.float32))
-
         self._mlff_calculator = None
         if relax_otf and mlff_checkpoint is not None:
             with Silent():
