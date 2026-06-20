@@ -374,6 +374,21 @@ def main(cfg: Config) -> None:
         }
         load_result = lightning.load_state_dict(remapped, strict=False)
 
+        # ── Apply EMA weights for eval/generate ──────────────────────────────
+        # Val metrics are computed on EMA weights (EMACallback swaps them into
+        # the model during validation), but `state_dict` holds the live weights.
+        # To make generation match the val curves, copy the EMA shadow params
+        # onto the model. Skipped for train (warm-start) and for checkpoints
+        # without EMA (e.g. the zatom checkpoint).
+        if cfg.mode in ("eval", "generate") and "ema_state_dict" in checkpoint:
+            from torch_ema import ExponentialMovingAverage
+            ema = ExponentialMovingAverage(lightning.model.parameters(), decay=1.0)
+            ema.load_state_dict(checkpoint["ema_state_dict"])
+            ema.copy_to(lightning.model.parameters())
+            declare(">>> Applied EMA weights from checkpoint for eval/generate")
+        elif cfg.mode in ("eval", "generate"):
+            declare(">>> No ema_state_dict in checkpoint — using live weights")
+
         #  DELETE CHECKPOINT TO FREE MEMORY
         del checkpoint
         torch.cuda.empty_cache()  # Clear GPU cache if using CUDA
