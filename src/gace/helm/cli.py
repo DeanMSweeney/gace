@@ -380,43 +380,12 @@ def main(cfg: Config) -> None:
         # To make generation match the val curves, copy the EMA shadow params
         # onto the model. Skipped for train (warm-start) and for checkpoints
         # without EMA (e.g. the zatom checkpoint).
-        #
-        # We map by NAME rather than using torch_ema.load_state_dict, which only
-        # checks param count: older checkpoints may carry now-removed parameters
-        # in the EMA shadow, so a positional load fails. shadow_params are stored
-        # in the saved model's trainable-param order, which matches the order of
-        # param keys in `remapped` (state_dict preserves registration order).
         if cfg.mode in ("eval", "generate") and "ema_state_dict" in checkpoint:
-            shadow = checkpoint["ema_state_dict"]["shadow_params"]
-            cur_params = dict(lightning.named_parameters())   # keys like "model.xxx"
-            cur_bufs = dict(lightning.named_buffers())
-            ckpt_keys = list(remapped.keys())                 # saved model order
-
-            # Keys in the checkpoint that no longer exist in the current model.
-            removed = [k for k in ckpt_keys if k not in cur_params and k not in cur_bufs]
-            # Saved trainable-param order: current params + removed (assumed params,
-            # since only requires_grad params land in the EMA shadow).
-            old_param_order = [k for k in ckpt_keys if k in cur_params or k in removed]
-            if len(old_param_order) != len(shadow):
-                # Fallback: removed entries were buffers — use current params only.
-                old_param_order = [k for k in ckpt_keys if k in cur_params]
-            assert len(old_param_order) == len(shadow), (
-                f"EMA shadow ({len(shadow)}) vs param order ({len(old_param_order)}) mismatch; "
-                f"removed keys={removed}"
-            )
-
-            name_to_shadow = dict(zip(old_param_order, shadow))
-            applied = 0
-            with torch.no_grad():
-                for k, p in cur_params.items():
-                    s = name_to_shadow.get(k)
-                    if s is not None:
-                        p.copy_(s.to(device=p.device, dtype=p.dtype))
-                        applied += 1
-            declare(
-                f">>> Applied EMA weights to {applied}/{len(cur_params)} params"
-                + (f"; skipped stale {removed}" if removed else "")
-            )
+            from torch_ema import ExponentialMovingAverage
+            ema = ExponentialMovingAverage(lightning.model.parameters(), decay=1.0)
+            ema.load_state_dict(checkpoint["ema_state_dict"])
+            ema.copy_to(lightning.model.parameters())
+            declare(">>> Applied EMA weights from checkpoint for eval/generate")
         elif cfg.mode in ("eval", "generate"):
             declare(">>> No ema_state_dict in checkpoint — using live weights")
 
