@@ -164,7 +164,7 @@ class SamplerConfig:
 
     # ==================== Classifier-Free Guidance (Inference) ====================
 
-    cfg_w_continous: float = 1.0
+    cfg_w_continuous: float = 1.0
     """CFG guidance weight w1 for continuous modalities (positions, lattice, ads_pos).
     Applied as: x1_guided = (1 - w1) * x1_uncond + w1 * x1_cond.
     1.0 = fully conditional (single forward pass, no overhead). >1 = extrapolated guidance.
