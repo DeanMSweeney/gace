@@ -380,6 +380,7 @@ def main(cfg: Config) -> None:
         # To make generation match the val curves, copy the EMA shadow params
         # onto the model. Skipped for train (warm-start) and for checkpoints
         # without EMA (e.g. the zatom checkpoint).
+        """
         if cfg.mode in ("eval", "generate") and "ema_state_dict" in checkpoint:
             from torch_ema import ExponentialMovingAverage
             ema = ExponentialMovingAverage(lightning.model.parameters(), decay=1.0)
@@ -388,6 +389,7 @@ def main(cfg: Config) -> None:
             declare(">>> Applied EMA weights from checkpoint for eval/generate")
         elif cfg.mode in ("eval", "generate"):
             declare(">>> No ema_state_dict in checkpoint — using live weights")
+        """
 
         #  DELETE CHECKPOINT TO FREE MEMORY
         del checkpoint
