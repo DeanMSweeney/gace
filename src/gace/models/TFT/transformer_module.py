@@ -14,6 +14,8 @@ from .architectures.positional_encoder import (
     TimeFourierEncoding,
 )
 from .architectures.transformer import (
+    ConditionedModernTransformer,
+    ConditionedModernTransformerDecoderBlock,
     ModernTransformer,
     ModernTransformerDecoderBlock,
     Transformer,
@@ -66,6 +68,7 @@ class TransformerModule(nn.Module):
         add_sinusoid_posenc: bool = True,
         concat_combine_input: bool = False,
         disable_prenorm: bool = False,
+        use_adaln_conditioning: bool = False,
         num_rbf: int = 20,
         rbf_max: float = 5.0,
         custom_weight_init: Optional[
@@ -81,8 +84,10 @@ class TransformerModule(nn.Module):
 
         self.input_dim = spatial_dim + atom_dim
         self.time_dim = 1
-        self.prim_cond_dim = 9   # atom_types, frac_coords, lengths, angles, T_matrix, supercell_lattice, posenc, conditions, type
-        self.ads_cond_dim = 6    # ads_atom_types, ads_pos, ads_ref_centered_pos, posenc, conditions, type
+        # With AdaLN, conditioning is fed to every layer via `c` rather than concatenated
+        # into the input, so the `conditions` slot is dropped (9->8 prim, 6->5 ads).
+        self.prim_cond_dim = 8 if use_adaln_conditioning else 9   # atom_types, frac_coords, lengths, angles, T_matrix, supercell_lattice, posenc, [conditions,] type
+        self.ads_cond_dim = 5 if use_adaln_conditioning else 6    # ads_atom_types, ads_pos, ads_ref_centered_pos, posenc, [conditions,] type
         self.comb_input_dim = self.input_dim + self.time_dim
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
@@ -94,6 +99,7 @@ class TransformerModule(nn.Module):
         self.concat_combine_input = concat_combine_input
         self.custom_weight_init = custom_weight_init
         self.disable_prenorm = disable_prenorm
+        self.use_adaln_conditioning = use_adaln_conditioning
 
         # Embeddings for each the primitive cell
         self.atom_type_embed = nn.Embedding(atom_dim, hidden_dim)  # for mask token; shared with adsorbate
@@ -123,6 +129,15 @@ class TransformerModule(nn.Module):
         self.ads_binding_energy_embed = nn.Linear(1, hidden_dim)
         self.null_binding_energy = nn.Parameter(torch.zeros(hidden_dim))
 
+        # AdaLN condition vector: nonlinearly mixes time + binding energy into `c` before
+        # it drives the per-layer modulation. Only built when AdaLN conditioning is on.
+        if use_adaln_conditioning:
+            self.cond_proj = nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.SiLU(inplace=False),
+                nn.Linear(hidden_dim, hidden_dim),
+            )
+
         if activation == "SiLU":
             activation = nn.SiLU(inplace=False)
         elif activation == "ReLU":
@@ -132,9 +147,12 @@ class TransformerModule(nn.Module):
         else:
             raise ValueError(f"Invalid activation: {activation}")
 
+        _trunk_cls = (
+            ConditionedModernTransformer if use_adaln_conditioning else ModernTransformer
+        )
         transformer_class = (
             partial(
-                ModernTransformer,
+                _trunk_cls,
                 context_length=context_length,
                 rope_base=rope_base,
                 qk_layernorm=qk_layernorm,
@@ -199,8 +217,13 @@ class TransformerModule(nn.Module):
                 norm_first=True,
             )
             if self.implementation == "modern_transformer":
+                _decoder_cls = (
+                    ConditionedModernTransformerDecoderBlock
+                    if use_adaln_conditioning
+                    else ModernTransformerDecoderBlock
+                )
                 decoder_layer = partial(
-                    ModernTransformerDecoderBlock,
+                    _decoder_cls,
                     dim=hidden_dim,
                     n_heads=num_heads,
                     context_length=context_length,
@@ -403,7 +426,15 @@ class TransformerModule(nn.Module):
                 drop_mask.unsqueeze(-1), self.null_binding_energy, embed_binding_energy
             )
 
-        embed_conditions = (embed_time + embed_binding_energy).unsqueeze(-2)  # (B, 1, C)
+        if self.use_adaln_conditioning:
+            # AdaLN: conditioning is threaded into every layer via `c`, not added to the input.
+            c = self.cond_proj(embed_time + embed_binding_energy)  # (B, C)
+            embed_conditions = None
+        else:
+            # Additive: conditioning is summed into the input tokens once.
+            c = None
+            embed_conditions = (embed_time + embed_binding_energy).unsqueeze(-2)  # (B, 1, C)
+
         # ── Build h_in for prim sequence ─────────────────────────────────────
         if self.concat_combine_input:
             # Broadcast graph-level embeddings to match prim seq length
@@ -411,9 +442,8 @@ class TransformerModule(nn.Module):
             embed_angles_radians_bc = embed_angles_radians.expand(-1, prim_seq_len, -1)
             embed_transformation_matrix_bc = embed_transformation_matrix.expand(-1, prim_seq_len, -1)
             embed_supercell_lattice_bc = embed_supercell_lattice.expand(-1, prim_seq_len, -1)
-            embed_conditions_prim = embed_conditions.expand(-1, prim_seq_len, -1)
 
-            h_in_prim = torch.cat([
+            prim_inputs = [
                 embed_atom_types,               # (B, M,  C)
                 embed_frac_coords,              # (B, M,  C)
                 embed_lengths_scaled_bc,        # (B, M,  C)
@@ -421,10 +451,11 @@ class TransformerModule(nn.Module):
                 embed_transformation_matrix_bc, # (B, M,  C)
                 embed_supercell_lattice_bc,     # (B, M,  C)
                 embed_posenc_prim,              # (B, M,  C)
-                embed_conditions_prim,          # (B, M,  C)
-                embed_prim_type_ids,            # (B, M,  C)
-            ], dim=-1)  # (B, M,  9*C)
-            h_in_prim = self.combine_input_prim(h_in_prim)  # (B, M, C)
+            ]
+            if not self.use_adaln_conditioning:
+                prim_inputs.append(embed_conditions.expand(-1, prim_seq_len, -1))  # (B, M, C)
+            prim_inputs.append(embed_prim_type_ids)  # (B, M, C)
+            h_in_prim = self.combine_input_prim(torch.cat(prim_inputs, dim=-1))  # (B, M, C)
         else:
             h_in_prim = (
                 embed_atom_types              # (B, M,  C)
@@ -434,33 +465,34 @@ class TransformerModule(nn.Module):
                 + embed_transformation_matrix # (B, 1, C) → broadcasts
                 + embed_supercell_lattice     # (B, 1, C) → broadcasts
                 + embed_posenc_prim           # (B, M,  C)
-                + embed_conditions            # (B, 1, C) → broadcasts
                 + embed_prim_type_ids         # (B, M,  C)
             )
+            if not self.use_adaln_conditioning:
+                h_in_prim = h_in_prim + embed_conditions  # (B, 1, C) → broadcasts
         h_in_prim = h_in_prim * prim_real_mask.unsqueeze(-1)  # (B, M, C)
 
         # ── Build h_in for ads sequence ──────────────────────────────────────
         if self.concat_combine_input:
-            embed_conditions_ads = embed_conditions.expand(-1, ads_seq_len, -1)
-
-            h_in_ads = torch.cat([
+            ads_inputs = [
                 embed_ads_atom_types,           # (B, N, C)
                 embed_ads_pos,                  # (B, N, C)
                 embed_ads_ref_centered_pos,     # (B, N, C)
                 embed_posenc_ads,               # (B, N, C)
-                embed_conditions_ads,           # (B, N, C)
-                embed_ads_type_ids,             # (B, N, C)
-            ], dim=-1)  # (B, N, 6*C)
-            h_in_ads = self.combine_input_ads(h_in_ads)  # (B, N,  C)
+            ]
+            if not self.use_adaln_conditioning:
+                ads_inputs.append(embed_conditions.expand(-1, ads_seq_len, -1))  # (B, N, C)
+            ads_inputs.append(embed_ads_type_ids)  # (B, N, C)
+            h_in_ads = self.combine_input_ads(torch.cat(ads_inputs, dim=-1))  # (B, N, C)
         else:
             h_in_ads = (
                 embed_ads_atom_types            # (B, N, C)
                 + embed_ads_pos                 # (B, N, C)
                 + embed_ads_ref_centered_pos    # (B, N, C)
                 + embed_posenc_ads              # (B, N, C)
-                + embed_conditions              # (B, 1, C) → broadcasts
                 + embed_ads_type_ids            # (B, N, C)
             )
+            if not self.use_adaln_conditioning:
+                h_in_ads = h_in_ads + embed_conditions  # (B, 1, C) → broadcasts
         h_in_ads = h_in_ads * ads_real_mask.unsqueeze(-1)  # (B, N,  C)
 
         # ── Concatenate prim + ads into single sequence ──────────────────────
@@ -478,7 +510,10 @@ class TransformerModule(nn.Module):
         if self.implementation in ("transformer", "modern_transformer"):
             if not self.disable_prenorm:
                 h_in = self.transformer_norm(h_in)
-            h_out = self.transformer(h_in, padding_mask=padding_mask, **attention_kwargs)
+            if self.use_adaln_conditioning:
+                h_out = self.transformer(h_in, c, padding_mask=padding_mask, **attention_kwargs)
+            else:
+                h_out = self.transformer(h_in, padding_mask=padding_mask, **attention_kwargs)
         else:
             raise ValueError(f"Invalid implementation: {self.implementation}")
 
@@ -489,39 +524,51 @@ class TransformerModule(nn.Module):
         h_out_ads = h_out[:, prim_seq_len:, :]   # (B, N,  C)
 
         # ── Cross-attention & output heads ────────────────────────────────────
+        def _decode(block, query, **kw):
+            # Conditioned decoder blocks take `c` as the second positional arg; the
+            # baseline blocks do not. This keeps the six head call-sites identical.
+            if self.use_adaln_conditioning:
+                return block(query, c, **kw)
+            return block(query, **kw)
+
         if self.cross_attention:
             # Prim cross-attention (query = prim output, memory = full sequence)
-            h_atom = self.atom_types_cross_attention(
+            h_atom = _decode(
+                self.atom_types_cross_attention,
                 h_out_prim,
-                h_in,
+                memory=h_in,
                 tgt_key_padding_mask=prim_padding_mask,
                 memory_key_padding_mask=padding_mask,
                 **attention_kwargs,
             )
-            h_frac_coords = self.frac_coords_cross_attention(
+            h_frac_coords = _decode(
+                self.frac_coords_cross_attention,
                 h_out_prim,
-                h_in,
+                memory=h_in,
                 tgt_key_padding_mask=prim_padding_mask,
                 memory_key_padding_mask=padding_mask,
                 **attention_kwargs,
             )
-            h_lengths_scaled = self.lengths_scaled_cross_attention(
+            h_lengths_scaled = _decode(
+                self.lengths_scaled_cross_attention,
                 h_out_prim,
-                h_in,
+                memory=h_in,
                 tgt_key_padding_mask=prim_padding_mask,
                 memory_key_padding_mask=padding_mask,
                 **attention_kwargs,
             )
-            h_angles_radians = self.angles_radians_cross_attention(
+            h_angles_radians = _decode(
+                self.angles_radians_cross_attention,
                 h_out_prim,
-                h_in,
+                memory=h_in,
                 tgt_key_padding_mask=prim_padding_mask,
                 memory_key_padding_mask=padding_mask,
                 **attention_kwargs,
             )
-            h_transformation_matrix = self.transformation_matrix_cross_attention(
+            h_transformation_matrix = _decode(
+                self.transformation_matrix_cross_attention,
                 h_out_prim,
-                h_in,
+                memory=h_in,
                 tgt_key_padding_mask=prim_padding_mask,
                 memory_key_padding_mask=padding_mask,
                 **attention_kwargs,
@@ -542,9 +589,10 @@ class TransformerModule(nn.Module):
             ).reshape(batch_size, 3, 3)  # (B, 9) → (B, 3, 3)
 
             # Ads cross-attention — single head for absolute positions
-            h_pos = self.pos_cross_attention(
+            h_pos = _decode(
+                self.pos_cross_attention,
                 h_out_ads,
-                h_in,
+                memory=h_in,
                 tgt_key_padding_mask=ads_padding_mask,
                 memory_key_padding_mask=padding_mask,
                 query_pos_ids=ads_pos_ids,
