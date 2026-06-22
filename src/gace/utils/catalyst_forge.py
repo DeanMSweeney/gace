@@ -240,21 +240,27 @@ class CatalystForge:
 
         Checks the slab (tags != 2) against self.gen_slabs_memory, appending it
         if unique. Returns True if unique (write), False if duplicate (skip).
+
+        The vacuum-padded slab is reduced once up front (in-plane primitive;
+        the vacuum keeps the facet/termination intact) and gen_slabs_memory
+        stores the reduced form, so every fit() compares already-reduced cells
+        (skip_structure_reduction=True) instead of re-reducing the supercell on
+        each comparison. Reduction is the dominant cost of fit(), so caching it
+        turns the per-comparison cost from O(supercell) to O(primitive).
         """
         self.num_slabs_checked += 1
-        
-        #slab = atoms[atoms.get_tags() != 2]
-        #slab.center(vacuum=15, axis=2)
 
-        # extract primtive cell of the slab
-        primitive_cell = atoms.info.get("primitive_cell")
-        
-        struc = AseAtomsAdaptor().get_structure(primitive_cell)
+        slab = atoms[atoms.get_tags() != 2]
+        slab.center(vacuum=15, axis=2)
+        struc = AseAtomsAdaptor().get_structure(slab)
         matcher = StructureMatcher()
+
+        # Reduce the incoming slab once; gen_slabs_memory holds reduced cells.
+        struc = matcher._get_reduced_structure(struc, matcher._primitive_cell, niggli=True)
 
         is_unique = True
         for seen in self.gen_slabs_memory:
-            if matcher.fit(seen, struc): # comparing primitive structures only 
+            if matcher.fit(seen, struc, skip_structure_reduction=True):
                 is_unique = False
                 break
 
