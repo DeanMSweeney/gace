@@ -189,7 +189,7 @@ class SamplerConfig:
     A pair is flagged as clashing if its distance is below catalyst_dist_cutoff * (r_i + r_j).
     Lower values are more permissive; higher values are stricter."""
 
-    purge_duplicates_otf: bool = False
+    dedupe_otf: bool = False
     """Run on-the-fly structural diversity filtering during generation.
     When True, each newly generated slab is matched (StructureMatcher) against the
     running record of unique slabs; duplicates are marked invalid and not written.

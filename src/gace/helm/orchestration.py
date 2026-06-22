@@ -139,7 +139,7 @@ class LightFlowMatch(LightningModule, Flow):
         self.informed_priors = informed_priors
         self.relax_otf = relax_otf
         self.sanitize_otf = sanitize_otf
-        self.purge_duplicates_otf = purge_duplicates_otf
+        self.dedupe_otf = purge_duplicates_otf
         self.batched_relaxation = batched_relaxation
         self.accelerator = accelerator
         self.seed = seed
@@ -407,7 +407,7 @@ class LightFlowMatch(LightningModule, Flow):
             sanitized_strucs=self.sanitized_strucs,
             file_ext=".traj",
             sanitize_otf=self.sanitize_otf,
-            purge_duplicates_otf=self.purge_duplicates_otf,
+            purge_duplicates_otf=self.dedupe_otf,
             gen_slabs_memory=self.gen_slabs_memory, # share OTF dedup record across batches
         )
         for metrics in cf.fire():
@@ -458,7 +458,7 @@ class LightFlowMatch(LightningModule, Flow):
             sanitized_strucs=self.sanitized_strucs,
             file_ext=".traj",
             sanitize_otf=self.sanitize_otf,
-            purge_duplicates_otf=self.purge_duplicates_otf,
+            purge_duplicates_otf=self.dedupe_otf,
             gen_slabs_memory=self.gen_slabs_memory, # share OTF dedup record across batches
         )
         all_metrics = list(cf.fire())
@@ -492,7 +492,7 @@ class LightFlowMatch(LightningModule, Flow):
         gen_slabs_memory holds exactly the unique slabs (OTF dedup appends only
         non-duplicates), so the ratio is len(unique) / (# valid checked).
         """
-        if not self.purge_duplicates_otf or self.num_slabs_checked == 0:
+        if not self.dedupe_otf or self.num_slabs_checked == 0:
             return None
         n_unique = len(self.gen_slabs_memory)
         return {f"uniqueness ({self.num_slabs_checked})": n_unique / self.num_slabs_checked}

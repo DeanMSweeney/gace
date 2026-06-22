@@ -101,7 +101,7 @@ class CatalystForge:
         self.seed = seed
         self.fmax = fmax
         self.steps = steps
-        self.purge_duplicates_otf = purge_duplicates_otf
+        self.dedupe_otf = purge_duplicates_otf
 
         self._all_atoms: list[Atoms | None] = []
         # Running record of seen slabs for OTF dedup. Accept a shared list so the
@@ -253,7 +253,7 @@ class CatalystForge:
 
         is_unique = True
         for seen in self.gen_slabs_memory:
-            if matcher.fit(seen, struc):
+            if matcher.fit(seen, struc): # comparing primitive structures only 
                 is_unique = False
                 break
 
@@ -303,7 +303,7 @@ class CatalystForge:
 
         # Only dedup validly-built structures so poor builds never enter the
         # uniqueness memory or its denominator.
-        if self.purge_duplicates_otf and atoms is not None and atoms.info.get("is_valid"):
+        if self.dedupe_otf and atoms is not None and atoms.info.get("is_valid"):
             is_unique = self.find_duplicates_otf(atoms=atoms)
             if not is_unique: # set non-unique strucutres as invalid strucutres
                 atoms.info["is_valid"] = False
@@ -326,7 +326,7 @@ class CatalystForge:
             atoms_rlxd.info["threshold_subdir"] = subdir
             out_path = os.path.join(self.relaxed_strucs, subdir, fname)
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
-            if not self.purge_duplicates_otf:
+            if not self.dedupe_otf:
                 ase.io.write(out_path, atoms_rlxd) 
             else: 
                 if is_unique: 
