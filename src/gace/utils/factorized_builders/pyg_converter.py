@@ -101,10 +101,11 @@ def catflow_dict_to_pyg_data(d: dict) -> Data:
         np.array(d["ads_pos"], dtype=np.float32)
     )  # (N_ads, 3)
 
+    """
     ads_atomic_numbers = torch.from_numpy(
         np.array(d["ads_atomic_numbers"], dtype=np.int64)
     )  # (N_ads,)
-
+    """
     ads_pairwise_dist = torch.from_numpy(
         np.array(d["ads_pairwise_dist"], dtype=np.float32)
     )  # (N_ads, MAX_ADS_NEIGHBORS)
@@ -166,7 +167,7 @@ def catflow_dict_to_pyg_data(d: dict) -> Data:
         # Adsorbate
         ads_pos=ads_pos,
         ads_atomic_numbers=ads_atomic_numbers,
-        ads_pairwise_dist=ads_pairwise_dist,
+        #ads_pairwise_dist=ads_pairwise_dist,
         ads_com=ads_com,
         ads_rel_pos=ads_rel_pos,
         ref_ads_pos=ref_ads_pos,
