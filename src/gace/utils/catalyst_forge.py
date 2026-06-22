@@ -256,7 +256,7 @@ class CatalystForge:
         matcher = StructureMatcher()
 
         # Reduce the incoming slab once; gen_slabs_memory holds reduced cells.
-        struc = matcher._get_reduced_structure(struc, matcher._primitive_cell, niggli=True)
+        #struc = matcher._get_reduced_structure(struc, matcher._primitive_cell, niggli=True)
 
         is_unique = True
         for seen in self.gen_slabs_memory:
