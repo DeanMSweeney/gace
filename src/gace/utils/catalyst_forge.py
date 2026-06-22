@@ -265,6 +265,7 @@ class CatalystForge:
         is_unique = True
         for seen in self.gen_slabs_memory:
             seen_M = seen.info.get("transformation_matrix")
+            seen = AseAtomsAdaptor().get_structure(seen)
             if matcher.fit(seen, struc) and np.array_equal(M, seen_M):
                 is_unique = False
                 break
