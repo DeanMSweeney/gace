@@ -256,11 +256,14 @@ class CatalystForge:
         matcher = StructureMatcher()
 
         # Reduce the incoming slab once; gen_slabs_memory holds reduced cells.
-        struc = matcher._get_reduced_structure(struc, matcher._primitive_cell, niggli=True)
+        #struc = matcher._get_reduced_structure(struc, matcher._primitive_cell, niggli=True)
 
+        struc = atoms.info.get("primitive_cell")
+        M = atoms.info.get("transformation_matrix")
         is_unique = True
         for seen in self.gen_slabs_memory:
-            if matcher.fit(seen, struc, skip_structure_reduction=True):
+            seen_M = seen.info.get("transformation_matrix")
+            if matcher.fit(seen, struc) and np.array_equal(M, seen_M):
                 is_unique = False
                 break
 

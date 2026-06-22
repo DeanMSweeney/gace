@@ -218,6 +218,7 @@ def build_slab_adsorbate(
 
     atoms = slab + ads
     atoms.info["primitive_cell"] = prim
+    atoms.info["transformation_matrix"] = M
 
     return atoms
 
