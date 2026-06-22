@@ -164,3 +164,69 @@ def random_so3_rotation(ref_pos: Tensor, ads_batch: Tensor, B: int) -> Tensor:
 
     R_per_atom = R[ads_batch]                                             # (N_ads, 3, 3)
     return torch.bmm(R_per_atom, centered.unsqueeze(-1)).squeeze(-1)     # (N_ads, 3)
+
+
+def record_cfg_conditioning(
+    data: Data,
+    pred_cond: dict,
+    pred_uncond: dict,
+    save_path: str,
+) -> dict:
+    """Record the per-graph conditional-vs-unconditional prediction gap.
+
+    Diagnostic for "is the binding-energy label being washed out?". For each
+    graph we measure how far the conditional model output sits from the
+    unconditional (null-embedding) output, per modality, and pair it with that
+    graph's binding-energy label. Appends to `save_path` across calls so a sweep
+    over many samples builds up aligned vectors:
+
+        d = torch.load(save_path)
+        plt.scatter(d["ads_binding_energy"], d["gap_pos"])   # conditioning vs BE
+
+    A gap that stays ~0 across all binding energies is direct evidence the
+    conditioning is inert; a gap that tracks/varies with binding energy shows it
+    is alive.
+
+    Args:
+        data:        current PyG Batch (provides batch, tags, ads_binding_energy)
+        pred_cond:   conditional output dict   (pos, z, len, ang, M, ads_pos)
+        pred_uncond: unconditional output dict (force_unconditional=True)
+        save_path:   .pt file to append diagnostics to
+
+    Returns:
+        The per-graph diagnostics dict appended this call (CPU tensors).
+    """
+    prim_batch = data.batch[data.tags == 1]
+    ads_batch  = data.batch[data.tags == 2]
+    B = int(data.ads_binding_energy.shape[0])
+
+    def per_atom_gap(a: Tensor, b: Tensor, index: Tensor) -> Tensor:
+        # RMS of (cond - uncond) reduced to one scalar per graph
+        sq = (a.float() - b.float()).pow(2).flatten(1).mean(-1)           # (n_atoms,)
+        total = torch.zeros(B, dtype=sq.dtype, device=sq.device)
+        count = torch.zeros(B, dtype=sq.dtype, device=sq.device)
+        total.index_add_(0, index, sq)
+        count.index_add_(0, index, torch.ones_like(sq))
+        return (total / count.clamp(min=1)).sqrt()                       # (B,)
+
+    def graph_gap(a: Tensor, b: Tensor) -> Tensor:
+        return (a.float() - b.float()).pow(2).flatten(1).mean(-1).sqrt()  # (B,)
+
+    rec = {
+        "ads_binding_energy": data.ads_binding_energy.detach().float().cpu(),
+        "gap_pos":     per_atom_gap(pred_cond["pos"],     pred_uncond["pos"],     prim_batch).cpu(),
+        "gap_z":       per_atom_gap(pred_cond["z"],       pred_uncond["z"],       prim_batch).cpu(),
+        "gap_ads_pos": per_atom_gap(pred_cond["ads_pos"], pred_uncond["ads_pos"], ads_batch).cpu(),
+        "gap_len":     graph_gap(pred_cond["len"], pred_uncond["len"]).cpu(),
+        "gap_ang":     graph_gap(pred_cond["ang"], pred_uncond["ang"]).cpu(),
+        "gap_M":       graph_gap(pred_cond["M"],   pred_uncond["M"]).cpu(),
+    }
+
+    # Append to any existing record so a multi-batch sweep accumulates.
+    if os.path.exists(save_path):
+        prev = torch.load(save_path)
+        rec = {k: torch.cat([prev[k], v]) for k, v in rec.items()}
+
+    os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+    torch.save(rec, save_path)
+    return rec

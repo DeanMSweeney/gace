@@ -8,7 +8,7 @@ from torchdiffeq import odeint
 from typing import Optional, Literal, Union, Tuple
 
 from gace.utils.invariance import pbc_aware_delta, batched_ot_align, global_ot_align
-from gace.utils.utils import adsorbate_neighborhood_mask, random_so3_rotation
+from gace.utils.utils import adsorbate_neighborhood_mask, random_so3_rotation, record_cfg_conditioning
 from gace.utils.builder import lattice_params_to_matrix
 from gace.utils.euler import euler_step, ctmc_step
 from gace.utils.relaxation import relax_w_mlff
@@ -644,6 +644,17 @@ class Flow():
                         n_prim=n_prim, n_ads=n_ads,
                     )
                     fk_ell += 1
+
+        # ── Conditioning diagnostic ───────────────────────────────────────────
+        # Record the conditional-vs-unconditional prediction gap against the
+        # binding-energy label so we can plot whether conditioning is washed out.
+        with torch.no_grad():
+            record_cfg_conditioning(
+                data=data,
+                pred_cond=self(data),
+                pred_uncond=self(data, force_unconditional=True),
+                save_path="conditioning_diagnostics.pt",
+            )
 
         # ── Store generated outputs ───────────────────────────────────────────
         data.pos_generated             = data.pos
