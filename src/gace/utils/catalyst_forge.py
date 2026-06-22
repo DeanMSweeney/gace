@@ -243,14 +243,13 @@ class CatalystForge:
         """
         self.num_slabs_checked += 1
         
-        slab = atoms[atoms.get_tags() != 2]
-        slab.center(vacuum=15, axis=2)
+        #slab = atoms[atoms.get_tags() != 2]
+        #slab.center(vacuum=15, axis=2)
 
         # extract primtive cell of the slab
-        #primitive_cell = atoms.info.get("primitive_cell")
-
-
-        struc = AseAtomsAdaptor().get_structure(slab)
+        primitive_cell = atoms.info.get("primitive_cell")
+        
+        struc = AseAtomsAdaptor().get_structure(primitive_cell)
         matcher = StructureMatcher()
 
         is_unique = True
