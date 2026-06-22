@@ -77,7 +77,7 @@ class CatalystForge:
         energy_cutoff: float = 10.0,
         sanitize_otf: bool = True,
         relax_otf: bool = False,
-        purge_duplicates_otf: bool = False,
+        dedupe_otf: bool = False,
         gen_slabs_memory: list | None = None,
         n_strucs: int | None = None,
         seed: int = 42,
@@ -101,7 +101,7 @@ class CatalystForge:
         self.seed = seed
         self.fmax = fmax
         self.steps = steps
-        self.dedupe_otf = purge_duplicates_otf
+        self.dedupe_otf = dedupe_otf
 
         self._all_atoms: list[Atoms | None] = []
         # Running record of seen slabs for OTF dedup. Accept a shared list so the

@@ -98,7 +98,7 @@ class LightFlowMatch(LightningModule, Flow):
             cfg_w_discrete: float=1.0,
             sde_noise_scale: float=0.0,
             sanitize_otf: bool=True,
-            purge_duplicates_otf: bool=False,
+            dedupe_otf: bool=False,
             fk_steering: bool=False,
             fk_mlff_checkpoint: Optional[str]="PaiNN-S2EF-OC20-All",
             fk_K: int=10,
@@ -139,7 +139,7 @@ class LightFlowMatch(LightningModule, Flow):
         self.informed_priors = informed_priors
         self.relax_otf = relax_otf
         self.sanitize_otf = sanitize_otf
-        self.dedupe_otf = purge_duplicates_otf
+        self.dedupe_otf = dedupe_otf
         self.batched_relaxation = batched_relaxation
         self.accelerator = accelerator
         self.seed = seed
@@ -407,7 +407,7 @@ class LightFlowMatch(LightningModule, Flow):
             sanitized_strucs=self.sanitized_strucs,
             file_ext=".traj",
             sanitize_otf=self.sanitize_otf,
-            purge_duplicates_otf=self.dedupe_otf,
+            dedupe_otf=self.dedupe_otf,
             gen_slabs_memory=self.gen_slabs_memory, # share OTF dedup record across batches
         )
         for metrics in cf.fire():
@@ -458,7 +458,7 @@ class LightFlowMatch(LightningModule, Flow):
             sanitized_strucs=self.sanitized_strucs,
             file_ext=".traj",
             sanitize_otf=self.sanitize_otf,
-            purge_duplicates_otf=self.dedupe_otf,
+            dedupe_otf=self.dedupe_otf,
             gen_slabs_memory=self.gen_slabs_memory, # share OTF dedup record across batches
         )
         all_metrics = list(cf.fire())
