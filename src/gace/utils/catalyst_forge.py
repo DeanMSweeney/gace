@@ -271,6 +271,7 @@ class CatalystForge:
 
         atoms.info["is_unique"] = is_unique
         if is_unique:
+            struc = AseAtomsAdaptor().get_atoms(struc)
             self.gen_slabs_memory.append(struc)
         return is_unique
 
