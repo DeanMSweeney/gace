@@ -71,33 +71,23 @@ def declare(statement) -> None:
     logging.info(statement)
     return
 
-import pyfiglet
-
 @rank_zero_only
 def print_banner() -> None:
-    # Color Configuration (Both set to Lavender/Purple)
     LAVENDER = "\033[38;2;180;160;220m"
     RESET = "\033[0m"
-    
-    # 1. Render 'GACE' using the 'doh' font
-    bf = pyfiglet.Figlet(font='doh', width=250)
-    
-    # .rstrip() is the magic trick here: it strips out the extra vertical 
-    # padding lines that pyfiglet automatically appends to the bottom.
-    banner = bf.renderText('GACE').rstrip()
-    
-    # 2. Automatically measure the widest line of the 'doh' output
-    banner_lines = banner.split('\n')
-    banner_width = max(len(line) for line in banner_lines)
-    
-    # 3. Center the subtitle relative to the banner's actual width
-    raw_subtitle = "Change the paradigm."
-    centered_subtitle = raw_subtitle.center(banner_width)
-    
-    # 4. Print the final stacked assembly
-    print(LAVENDER + banner)
-    # Adding exactly one clean newline here brings it much tighter to the ASCII art
-    print(LAVENDER + "\n" + centered_subtitle + RESET + "\n")
+    banner = """
+   ██████╗   █████╗   ██████╗  ███████╗
+  ██╔════╝  ██╔══██╗ ██╔════╝  ██╔════╝
+  ██║       ██║  ██║ ██║       ██╔════╝
+  ██║ ████╗ ███████║ ██║       █████╗
+  ██║   ██║ ██╔══██║ ██║       ██╔══╝
+  ██║   ██║ ██║  ██║ ██║  ███╗ ██╔════╝
+  ╚██████╔╝ ██║  ██║ ╚██████╔╝ ███████╗
+   ╚═════╝  ╚═╝  ╚═╝  ╚═════╝  ╚══════╝
+
+           Change the paradigm.
+"""
+    print(LAVENDER + banner + RESET)
 
 def main(cfg: Config) -> None:
     """
