@@ -250,7 +250,7 @@ class CatalystForge:
         #primitive_cell = atoms.info.get("primitive_cell")
 
 
-        struc = AseAtomsAdaptor().get_structure(primitive_cell)
+        struc = AseAtomsAdaptor().get_structure(slab)
         matcher = StructureMatcher()
 
         is_unique = True
