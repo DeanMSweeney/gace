@@ -255,7 +255,7 @@ class CatalystForge:
         matcher = StructureMatcher()
         struc = atoms.info.get("primitive_cell") # grab the primitice cell
         M = atoms.info.get("transformation_matrix")  # Grab transformation matrix 
-        pymg_struc = AseAtomsAdaptor().get_structure(struc)
+        pymg_struc = AseAtomsAdaptor().get_structure(atoms)
 
         # Reduce the incoming slab once; gen_slabs_memory holds reduced cells
         reduced_pymg_struc = matcher._get_reduced_structure(pymg_struc, matcher._primitive_cell, niggli=True)
@@ -264,7 +264,7 @@ class CatalystForge:
         is_unique = True
         for seen_pymg_struc in self.gen_slabs_memory:
             seen_M = seen_pymg_struc.properties["transformation_matrix"]
-            if matcher.fit(seen_pymg_struc, reduced_pymg_struc, skip_structure_reduction=True) and np.array_equal(M, seen_M):
+            if matcher.fit(seen_pymg_struc, reduced_pymg_struc, skip_structure_reduction=True): # and np.array_equal(M, seen_M):
                 is_unique = False
                 break
 
