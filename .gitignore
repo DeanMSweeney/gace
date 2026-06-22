@@ -62,7 +62,7 @@ uncond/
 *.pkl
 *.parquet
 *.pt
-
+10k*/
 # Notebooks (strip outputs with nbstripout if you want to track structure)
 *.ipynb
 
@@ -72,4 +72,5 @@ uncond/
 **/logs/
 **/checkpoints/
 **/outputs/
+
 pretrained_models.json
