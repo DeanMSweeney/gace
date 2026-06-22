@@ -179,7 +179,6 @@ class TransformerModule(nn.Module):
         # ── Prim output heads ────────────────────────────────────────────────
         # Output head predicts real atom types only (0–98); mask token (99) is input-only.
         self.out_atom_types = nn.Sequential(
-            nn.LayerNorm(hidden_dim),  # normalize head input (matches CatFlow/clari and the other heads); prevents logit saturation under AdaLN
             nn.Linear(hidden_dim, hidden_dim),
             nn.SiLU(inplace=False),
             nn.Linear(hidden_dim, atom_dim),
