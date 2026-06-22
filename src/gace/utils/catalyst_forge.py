@@ -117,7 +117,7 @@ class CatalystForge:
         num_graphs = int(self.opt_graph.batch.max().item()) + 1
         items = []
         for b in range(num_graphs):
-            atoms    = self.build_from_factorized_repr(b, prim_batch, ads_batch)
+            atoms = self.build_from_factorized_repr(b, prim_batch, ads_batch)
             if atoms is not None:
                 atoms.info["fname"]             = f"{self.batch_idx}_{b}{self.file_ext}"
                 atoms.info["target_binding_E"]  = self.binding_energies[b]
@@ -242,9 +242,13 @@ class CatalystForge:
         if unique. Returns True if unique (write), False if duplicate (skip).
         """
         self.num_slabs_checked += 1
-        slab = atoms[atoms.get_tags() != 2]
-        slab.center(vacuum=15, axis=2)
-        struc = AseAtomsAdaptor().get_structure(slab)
+        
+        #slab = atoms[atoms.get_tags() != 2]
+        #slab.center(vacuum=15, axis=2)
+
+        # extract primtive cell of the slab
+        primitive_cell = atoms.info.get("primitive_cell")
+        struc = AseAtomsAdaptor().get_structure(primitive_cell)
         matcher = StructureMatcher()
 
         is_unique = True
