@@ -235,7 +235,7 @@ class CatalystForge:
             atoms.info["is_valid"] = False # optimization or energy extraction failed, mark as invalid 
             return None
     
-    def find_duplicates_otf(self, atoms) -> bool:
+    def purge_duplicates_otf(self, atoms) -> bool:
         """OTF duplicate check against the running record of seen slabs.
 
         Checks the slab (tags != 2) against self.gen_slabs_memory, appending it
@@ -243,11 +243,13 @@ class CatalystForge:
         """
         self.num_slabs_checked += 1
         
-        #slab = atoms[atoms.get_tags() != 2]
-        #slab.center(vacuum=15, axis=2)
+        slab = atoms[atoms.get_tags() != 2]
+        slab.center(vacuum=15, axis=2)
 
         # extract primtive cell of the slab
-        primitive_cell = atoms.info.get("primitive_cell")
+        #primitive_cell = atoms.info.get("primitive_cell")
+
+
         struc = AseAtomsAdaptor().get_structure(primitive_cell)
         matcher = StructureMatcher()
 
@@ -304,7 +306,7 @@ class CatalystForge:
         # Only dedup validly-built structures so poor builds never enter the
         # uniqueness memory or its denominator.
         if self.dedupe_otf and atoms is not None and atoms.info.get("is_valid"):
-            is_unique = self.find_duplicates_otf(atoms=atoms)
+            is_unique = self.purge_duplicates_otf(atoms=atoms)
             if not is_unique: # set non-unique strucutres as invalid strucutres
                 atoms.info["is_valid"] = False
         else:
