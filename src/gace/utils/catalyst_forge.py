@@ -260,7 +260,7 @@ class CatalystForge:
 
         is_unique = True
         for seen in self.gen_slabs_memory:
-            if matcher.fit(seen, struc, skip_structure_reduction=True):
+            if matcher.fit(seen, struc): #, skip_structure_reduction=True):
                 is_unique = False
                 break
 
