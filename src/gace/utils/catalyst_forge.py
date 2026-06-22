@@ -250,30 +250,27 @@ class CatalystForge:
         """
         self.num_slabs_checked += 1
 
-        slab = atoms[atoms.get_tags() != 2]
-        slab.center(vacuum=15, axis=2)
-        #struc = AseAtomsAdaptor().get_structure(slab)
+        #slab = atoms[atoms.get_tags() != 2]
+        #slab.center(vacuum=15, axis=2)
         matcher = StructureMatcher()
+        struc = atoms.info.get("primitive_cell") # grab the primitice cell
+        M = atoms.info.get("transformation_matrix")  # Grab transformation matrix 
+        pymg_struc = AseAtomsAdaptor().get_structure(struc)
 
-        # Reduce the incoming slab once; gen_slabs_memory holds reduced cells.
-        #struc = matcher._get_reduced_structure(struc, matcher._primitive_cell, niggli=True)
+        # Reduce the incoming slab once; gen_slabs_memory holds reduced cells
+        reduced_pymg_struc = matcher._get_reduced_structure(pymg_struc, matcher._primitive_cell, niggli=True)
+        reduced_pymg_struc.properties["transformation_matrix"] = M
 
-        struc = atoms.info.get("primitive_cell")
-        
-        M = atoms.info.get("transformation_matrix")
-        struc = AseAtomsAdaptor().get_structure(slab)
         is_unique = True
-        for seen in self.gen_slabs_memory:
-            seen_M = seen.info.get("transformation_matrix")
-            seen = AseAtomsAdaptor().get_structure(seen)
-            if matcher.fit(seen, struc) and np.array_equal(M, seen_M):
+        for seen_pymg_struc in self.gen_slabs_memory:
+            seen_M = seen_pymg_struc.properties["transformation_matrix"]
+            if matcher.fit(seen_pymg_struc, reduced_pymg_struc) and np.array_equal(M, seen_M):
                 is_unique = False
                 break
 
         atoms.info["is_unique"] = is_unique
         if is_unique:
-            struc = AseAtomsAdaptor().get_atoms(struc)
-            self.gen_slabs_memory.append(struc)
+            self.gen_slabs_memory.append(reduced_pymg_struc)
         return is_unique
 
     def _process_built_struc(
