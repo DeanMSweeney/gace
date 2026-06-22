@@ -252,14 +252,16 @@ class CatalystForge:
 
         slab = atoms[atoms.get_tags() != 2]
         slab.center(vacuum=15, axis=2)
-        struc = AseAtomsAdaptor().get_structure(slab)
+        #struc = AseAtomsAdaptor().get_structure(slab)
         matcher = StructureMatcher()
 
         # Reduce the incoming slab once; gen_slabs_memory holds reduced cells.
         #struc = matcher._get_reduced_structure(struc, matcher._primitive_cell, niggli=True)
 
         struc = atoms.info.get("primitive_cell")
+        
         M = atoms.info.get("transformation_matrix")
+        struc = AseAtomsAdaptor().get_structure(slab)
         is_unique = True
         for seen in self.gen_slabs_memory:
             seen_M = seen.info.get("transformation_matrix")
