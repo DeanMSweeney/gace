@@ -264,7 +264,7 @@ class CatalystForge:
         is_unique = True
         for seen_pymg_struc in self.gen_slabs_memory:
             seen_M = seen_pymg_struc.properties["transformation_matrix"]
-            if matcher.fit(seen_pymg_struc, reduced_pymg_struc) and np.array_equal(M, seen_M):
+            if matcher.fit(seen_pymg_struc, reduced_pymg_struc, skip_structure_reduction=True) and np.array_equal(M, seen_M):
                 is_unique = False
                 break
 
