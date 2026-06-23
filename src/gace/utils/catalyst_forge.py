@@ -253,11 +253,10 @@ class CatalystForge:
         slab = atoms[atoms.get_tags() != 2]
         slab.center(vacuum=15, axis=2)
         pymg_struc = AseAtomsAdaptor().get_structure(slab)
-
-        # Reduce the incoming slab once; gen_slabs_memory holds reduced cells
-        reduced_pymg_struc = matcher._get_reduced_structure(pymg_struc, matcher._primitive_cell, niggli=True)
         
+        # reduce the slab to its primitive cell 
         matcher = StructureMatcher()
+        reduced_pymg_struc = matcher._get_reduced_structure(pymg_struc, matcher._primitive_cell, niggli=True)
         is_unique = True
         for seen_pymg_struc in self.gen_slabs_memory:
             if matcher.fit(seen_pymg_struc, reduced_pymg_struc, skip_structure_reduction=True): 
