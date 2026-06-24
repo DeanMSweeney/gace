@@ -256,7 +256,7 @@ class CatalystForge:
         
         # reduce the slab to its primitive cell 
         matcher = StructureMatcher()
-        reduced_pymg_struc = pymg_struc #matcher._get_reduced_structure(pymg_struc, matcher._primitive_cell, niggli=True)
+        reduced_pymg_struc = matcher._get_reduced_structure(pymg_struc, matcher._primitive_cell, niggli=True)
         is_unique = True
         for seen_pymg_struc in self.gen_slabs_memory:
             if matcher.fit(seen_pymg_struc, reduced_pymg_struc, skip_structure_reduction=True): 
@@ -309,7 +309,7 @@ class CatalystForge:
 
         # Only dedup validly-built structures so poor builds never enter the
         # uniqueness memory or its denominator.
-        if self.dedupe_otf and atoms is not None and atoms.info.get("is_valid", False):
+        if self.dedupe_otf and atoms is not None and atoms.info.get("is_valid"):
             is_unique = self.purge_duplicates_otf(atoms=atoms)
             if not is_unique: # set non-unique strucutres as invalid strucutres
                 atoms.info["is_valid"] = False
