@@ -6,6 +6,7 @@ Writes the first 10 samples to catflow_analysis.txt.
 
 import sys
 from pathlib import Path
+import argparse
 
 # Numpy compatibility shim (data pickled with numpy>=1.25, redirects _core -> core)
 import numpy, numpy.core
@@ -208,7 +209,16 @@ def analyze_lmdb(dataset_path: str, n_samples: int = 10, out_file: str = "catflo
 
     print(f"\nWrote {min(n_samples, total)} samples + dataset stats across {total} graphs → {out_path}")
 
+def main():
+    parser = argparse.ArgumentParser(
+        description="Collect dataset statistics including atom count, atom types, ...etc."
+    )
+    parser.add_argument("--src",     required=True,                   help="Input LMDB file path")
+    parser.add_argument("--dst",     default="dataset_stats.txt",                    help="Output LMDB file path")
+    args = parser.parse_args()
+
+    analyze_lmdb(args.src, n_samples=10, out_file=args.dst)
+
 
 if __name__ == "__main__":
-    train_path = "/workspace/datasets/factorized/train/dataset_processed.lmdb"
-    analyze_lmdb(train_path, n_samples=10, out_file="dataset_stats.txt")
+    main()
