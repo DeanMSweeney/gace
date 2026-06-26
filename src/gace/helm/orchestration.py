@@ -26,6 +26,9 @@ import ase.io
 
 from typing import Optional, Literal, Union, Tuple
 
+_AVG_BINDING_ENERGY = -1.54790583
+_STD_BINDING_ENERGY = 2.27278609
+
 
 class LightFlowMatch(LightningModule, Flow):
     """
@@ -389,6 +392,8 @@ class LightFlowMatch(LightningModule, Flow):
         
         if self.target_binding_energy:
             data.ads_binding_energy = torch.ones(B, device=data.pos.device, dtype=data.pos.dtype) * self.target_binding_energy
+        else: 
+            data.ads_binding_energy = torch.normal(mean=_AVG_BINDING_ENERGY, std=_STD_BINDING_ENERGY, size=(B,), device=data.pos.device, dtype=data.pos.dtype)
 
         opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts,)
 
