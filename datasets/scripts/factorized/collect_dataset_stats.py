@@ -26,6 +26,37 @@ from tqdm import tqdm
 from gace.utils.lmdb_loader import LazyLmdbDataset
 
 
+class ScalarStats:
+    """Running mean/std/min/max accumulator for scalar values."""
+
+    def __init__(self):
+        self.sum    = 0.0
+        self.sum_sq = 0.0
+        self.min    = float("inf")
+        self.max    = float("-inf")
+        self.count  = 0
+
+    def update(self, x: float):
+        self.sum    += x
+        self.sum_sq += x * x
+        self.min     = min(self.min, x)
+        self.max     = max(self.max, x)
+        self.count  += 1
+
+    def summary(self, label: str) -> str:
+        mean = self.sum / max(self.count, 1)
+        var  = max(0.0, self.sum_sq / max(self.count, 1) - mean ** 2)
+        std  = var ** 0.5
+        return "\n".join([
+            "=" * 70,
+            f"{label} statistics (across full dataset)",
+            "=" * 70,
+            f"Total samples: {self.count}",
+            f"  mean={mean:>14.8f}  std={std:>14.8f}  "
+            f"min={self.min:>12.6f}  max={self.max:>12.6f}",
+        ])
+
+
 class AxisStats:
     """Per-axis running mean/std/min/max accumulator for (..., 3) tensors."""
 
@@ -43,7 +74,7 @@ class AxisStats:
         self.min = torch.minimum(self.min, x.amin(dim=0))
         self.max = torch.maximum(self.max, x.amax(dim=0))
         self.count += x.shape[0]
-
+    
     def summary(self, label: str, axis_names=("x", "y", "z"), entry_label="entries") -> str:
         mean = self.sum / max(self.count, 1)
         var = (self.sum_sq / max(self.count, 1)) - mean.pow(2)
@@ -111,6 +142,7 @@ def analyze_lmdb(dataset_path: str, n_samples: int = 10, out_file: str = "catflo
 
     out_path = Path(__file__).parent / out_file
 
+    binding_energy_stats = ScalarStats()
     ads_pos_stats = AxisStats()
     pos_stats = AxisStats()
     lengths_stats = AxisStats()
@@ -131,6 +163,7 @@ def analyze_lmdb(dataset_path: str, n_samples: int = 10, out_file: str = "catflo
         for i in tqdm(range(total), desc="Scanning samples"):
             sample = dataset[i]
 
+            binding_energy_stats.update(float(sample.ads_binding_energy))
             ads_pos_stats.update(sample.ads_pos)
             pos_stats.update(sample.pos)
             lengths_stats.update(sample.lengths_scaled)
@@ -199,6 +232,7 @@ def analyze_lmdb(dataset_path: str, n_samples: int = 10, out_file: str = "catflo
         footer = "\n\n".join([
             atom_count_summary,
             _element_table(prim_element_counts),
+            binding_energy_stats.summary("Adsorption binding energy (ads_binding_energy)"),
             ads_pos_stats.summary("Adsorbate Cartesian positions (ads_pos)", entry_label="adsorbate atoms"),
             pos_stats.summary("Primitive-cell positions (pos)", entry_label="atoms"),
             lengths_stats.summary("Lattice lengths_scaled", axis_names=("a", "b", "c"), entry_label="samples"),
