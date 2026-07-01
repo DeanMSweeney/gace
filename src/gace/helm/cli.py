@@ -117,7 +117,16 @@ def main(cfg: Config) -> None:
 
     # === Model Initialization ===
     # Instantiate the appropriate flow matching model based on regressor type
-    model = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
+    model = None
+    if cfg.oracle_cfg.oracle_mode != "train":
+        model = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
+    
+    # Energy-regression oracle (None => disabled). Only instantiated when
+    # oracle_mode is "train" or "guide" (skipped when "off"); trained standalone
+    # or used (frozen) to guide the flow model, per cfg.oracle_cfg.oracle_mode.
+    oracle_model = None
+    if cfg.oracle_cfg.oracle_mode != "off" and cfg.oracle_cfg.oracle_model_cfg is not None:
+        oracle_model = hydra.utils.instantiate(cfg.oracle_cfg.oracle_model_cfg, _convert_="partial")
 
     # Print configuration at rank 0 only
     declare(f">>> Training and model configurations:\n {OmegaConf.to_yaml(cfg)}")
@@ -244,14 +253,22 @@ def main(cfg: Config) -> None:
         )
         
     # === Lightning Module Setup ===
-    # Wrap model in LightningModule for training orchestration
-    lightning = LightFlowMatch(
+    # Wrap model in LightningModule for training orchestration.
+    # oracle_model_cfg (architecture) and oracle_ckpt_path are cli-only; capture
+    # the ckpt path (needed for guide-mode loading below), then drop both from
+    # oracle_cfg so the remaining knobs can be **unpacked into LightFlowMatch.
+    oracle_ckpt_path = cfg.oracle_cfg.oracle_ckpt_path
+    cfg.oracle_cfg.pop("oracle_ckpt_path")
+    cfg.oracle_cfg.pop("oracle_model_cfg")
+    orchestrator = LightFlowMatch(
         model=model,
+        oracle_model=oracle_model,
         variant=cfg.variant,
         mode=cfg.mode,
         track_grad_norms=cfg.track_grad_norms,
         accelerator=cfg.accelerator,
         seed=cfg.seed,
+        **cfg.oracle_cfg,   # oracle_mode, oracle_lambda_energy, oracle_softmax_temperature, oracle_guidance_min_t (ckpt_path/model_cfg popped above)
         **cfg.path_cfg,      # x_matching, interpolant_schedule, optimal_transport, informed_priors, cfg_dropout_prob
         **cfg.sampler_cfg,   # All sampler/generation/MLFF settings
         **cfg.optim_cfg,     # Optimizer hyperparameters (lr, weight_decay, etc.)
@@ -362,7 +379,7 @@ def main(cfg: Config) -> None:
             ("model." + k[len("model.model."):] if k.startswith("model.model.") else k): v
             for k, v in state_dict.items()
         }
-        load_result = lightning.load_state_dict(remapped, strict=False)
+        load_result = orchestrator.load_state_dict(remapped, strict=False)
 
         # ── Apply EMA weights for eval/generate ──────────────────────────────
         # Val metrics are computed on EMA weights (EMACallback swaps them into
@@ -373,9 +390,9 @@ def main(cfg: Config) -> None:
         """
         if cfg.mode in ("eval", "generate") and "ema_state_dict" in checkpoint:
             from torch_ema import ExponentialMovingAverage
-            ema = ExponentialMovingAverage(lightning.model.parameters(), decay=1.0)
+            ema = ExponentialMovingAverage(orchestrator.model.parameters(), decay=1.0)
             ema.load_state_dict(checkpoint["ema_state_dict"])
-            ema.copy_to(lightning.model.parameters())
+            ema.copy_to(orchestrator.model.parameters())
             declare(">>> Applied EMA weights from checkpoint for eval/generate")
         elif cfg.mode in ("eval", "generate"):
             declare(">>> No ema_state_dict in checkpoint — using live weights")
@@ -400,11 +417,39 @@ def main(cfg: Config) -> None:
         ckpt_path_for_trainer = None
 
 
+    # === Oracle weight loading (guide mode) ===
+    # In 'guide' mode the oracle is frozen and steers the flow model, so
+    # it must be initialised from a standalone disc-training run. Keys there are
+    # prefixed "oracle_model." (self.oracle_model in LightFlowMatch).
+    if cfg.oracle_cfg.oracle_mode == "guide":
+        if oracle_model is None:
+            raise ValueError("oracle_mode='guide' requires oracle_cfg.oracle_model_cfg to be set.")
+        if not oracle_ckpt_path:
+            raise ValueError("oracle_mode='guide' requires oracle_cfg.oracle_ckpt_path.")
+        declare(f">>> Loading frozen oracle weights from: {oracle_ckpt_path}")
+        oracle_ckpt = torch.load(oracle_ckpt_path, map_location="cpu")
+        oracle_sd = oracle_ckpt.get("state_dict", oracle_ckpt)
+        prefix = "oracle_model."
+        oracle_remapped = {k[len(prefix):]: v for k, v in oracle_sd.items() if k.startswith(prefix)}
+        if not oracle_remapped:  # checkpoint may already be the bare module state_dict
+            oracle_remapped = oracle_sd
+        oracle_load = orchestrator.oracle_model.load_state_dict(oracle_remapped, strict=False)
+        if oracle_load.missing_keys:
+            print("\n--- ORACLE MISSING KEYS ---")
+            for key in oracle_load.missing_keys:
+                print(f"  [!] {key}")
+        if oracle_load.unexpected_keys:
+            print("\n--- ORACLE UNEXPECTED KEYS ---")
+            for key in oracle_load.unexpected_keys:
+                print(f"  [?] {key}")
+        del disc_ckpt
+        torch.cuda.empty_cache()
+
     # === Training/Evaluation/Generation Execution ===
     if cfg.mode == "debug" or cfg.mode == "train":
         # Train the model with periodic validation
         trainer.fit(
-            model=lightning,
+            model=orchestrator,
             train_dataloaders=train_loader,
             val_dataloaders=val_loader,
             ckpt_path=ckpt_path_for_trainer,  # Resume from checkpoint if provided
@@ -412,12 +457,12 @@ def main(cfg: Config) -> None:
     elif cfg.mode == "eval":
         # Evaluate model performance on test set
         trainer.test(
-            model=lightning,
+            model=orchestrator,
             dataloaders=test_loader,
         )
     elif cfg.mode == "generate":
         # Generate predictions for single atomic structure
         trainer.predict(
-            model=lightning,
+            model=orchestrator,
             dataloaders=gen_loader,
         )

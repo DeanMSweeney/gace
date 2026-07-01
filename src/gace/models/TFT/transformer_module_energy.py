@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch import Tensor
 
 from .architectures.common import SwiGLU
@@ -24,8 +25,21 @@ from gace.utils.tft.typing_utils import Bool, Float, Int, typecheck
 log = RankedLogger(__name__, rank_zero_only=True)
 
 
-class TransformerModule(nn.Module):
-    """Basic Transformer model for molecule and material representation learning.
+class TransformerModuleEnergy(nn.Module):
+    """Energy regressor built on the zatom transformer trunk.
+
+    Maps a (slab + adsorbate) structure to a single scalar binding energy.
+    Shares the input embedding stack and shared transformer trunk of
+    ``TransformerModule`` but removes the generation output heads and the
+    binding-energy *conditioning* input (binding energy is the target here),
+    and adds a single energy regression head at the decoder layer.
+
+    The primitive-cell atom-type embedding is a *soft* embedding over the type
+    simplex (``nn.Linear(atom_dim, hidden_dim)``): a hard one-hot input is
+    identical to an ``nn.Embedding`` lookup, while a softmax distribution lets
+    guidance gradients flow back into the flow model's atom-type logits.
+
+    Original (generation) docstring follows.
 
     Args:
         spatial_dim: Dimension of spatial coordinates (e.g., 3 for 3D).
@@ -81,8 +95,8 @@ class TransformerModule(nn.Module):
 
         self.input_dim = spatial_dim + atom_dim
         self.time_dim = 1
-        self.prim_cond_dim = 9   # atom_types, frac_coords, lengths, angles, T_matrix, supercell_lattice, posenc, conditions, type
-        self.ads_cond_dim = 6    # ads_atom_types, ads_pos, ads_ref_centered_pos, posenc, conditions, type
+        self.prim_cond_dim = 8   # atom_types, frac_coords, lengths, angles, T_matrix, supercell_lattice, posenc, type
+        self.ads_cond_dim = 4    # ads_atom_types, ads_pos, posenc, type
         self.comb_input_dim = self.input_dim + self.time_dim
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
@@ -94,9 +108,13 @@ class TransformerModule(nn.Module):
         self.concat_combine_input = concat_combine_input
         self.custom_weight_init = custom_weight_init
         self.disable_prenorm = disable_prenorm
+        self.atom_dim = atom_dim
 
         # Embeddings for each the primitive cell
-        self.atom_type_embed = nn.Embedding(atom_dim, hidden_dim)  # for mask token; shared with adsorbate
+        # Soft embedding over the type simplex (B, *, atom_dim) -> (B, *, C).
+        # A hard one-hot input equals an nn.Embedding lookup; a softmax input
+        # keeps the path differentiable w.r.t. atom-type logits. Shared with ads.
+        self.atom_type_embed = nn.Linear(atom_dim, hidden_dim, bias=False)
         self.frac_coords_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
         self.lengths_scaled_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
         self.angles_radians_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
@@ -105,7 +123,6 @@ class TransformerModule(nn.Module):
 
         # Embeddings for the adsorbate
         self.pos_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)       # absolute positions (B, N,  3) → (B, N,  C)
-        self.ads_ref_centered_pos_embed = nn.Linear(3, hidden_dim, bias=False)  # (B, N, 3) → (B, N, C)
 
         # type embedding: 0 -> slab, 1 -> adsorbate
         self.type_embed = nn.Embedding(2, hidden_dim)
@@ -119,9 +136,9 @@ class TransformerModule(nn.Module):
             self.combine_input_prim = nn.Linear(self.prim_cond_dim * hidden_dim, hidden_dim)
             self.combine_input_ads = nn.Linear(self.ads_cond_dim * hidden_dim, hidden_dim)
 
-        self.time_encoding = TimeFourierEncoding(posenc_dim=hidden_dim, max_len=200)
-        self.ads_binding_energy_embed = nn.Linear(1, hidden_dim)
-        self.null_binding_energy = nn.Parameter(torch.zeros(hidden_dim))
+        # NOTE: the energy regressor scores a clean structure — there is no flow
+        # time conditioning and no ads_binding_energy conditioning (binding energy
+        # is the regression target here), so both embeddings are removed.
 
         if activation == "SiLU":
             activation = nn.SiLU(inplace=False)
@@ -158,37 +175,12 @@ class TransformerModule(nn.Module):
         else:
             raise ValueError(f"Invalid implementation: {self.implementation}")
         
-        # ── Prim output heads ────────────────────────────────────────────────
-        # Output head predicts real atom types only (0–98); mask token (99) is input-only.
-        self.out_atom_types = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.SiLU(inplace=False),
-            nn.Linear(hidden_dim, atom_dim),
-        )
-        self.out_frac_coords = nn.Sequential(
-            nn.LayerNorm(hidden_dim),
-            nn.Linear(hidden_dim, spatial_dim, bias=False),
-        )
-        self.out_lengths_scaled = nn.Sequential(
-            nn.LayerNorm(hidden_dim),
-            nn.Linear(hidden_dim, spatial_dim, bias=False),
-        )
-        self.out_angles_radians = nn.Sequential(
-            nn.LayerNorm(hidden_dim),
-            nn.Linear(hidden_dim, spatial_dim, bias=False),
-        )
-        self.out_transformation_matrix = nn.Sequential(
-            nn.LayerNorm(hidden_dim),
-            nn.Linear(hidden_dim, 9, bias=False),
-        )
-
-        # ── Ads output head (atom types are conditioning — not predicted) ────
-        self.out_pos = nn.Sequential(
-            nn.LayerNorm(hidden_dim),
-            nn.Linear(hidden_dim, spatial_dim, bias=False),
-        )
-
-        # ── Cross attention layers ───────────────────────────────────────────
+        # ── Energy regression head ───────────────────────────────────────────
+        # The trunk is dedicated to energy (no generation task), so its final
+        # per-token output already carries deep, energy-specialized token mixing.
+        # When cross_attention is enabled we re-read the input embeddings via one
+        # cross-attention step (query = trunk output, memory = input embeddings),
+        # then mean-pool over real tokens and map to a scalar with an MLP.
         if self.cross_attention:
             decoder_layer = partial(
                 nn.TransformerDecoderLayer,
@@ -210,15 +202,14 @@ class TransformerModule(nn.Module):
                     jvp_attn=jvp_attn,
                 )
 
-            # Prim cross-attention
-            self.atom_types_cross_attention = decoder_layer()
-            self.frac_coords_cross_attention = decoder_layer()
-            self.lengths_scaled_cross_attention = decoder_layer()
-            self.angles_radians_cross_attention = decoder_layer()
-            self.transformation_matrix_cross_attention = decoder_layer()
+            self.energy_cross_attention = decoder_layer()
 
-            # Ads cross-attention (atom types are conditioning — no cross-attn head)
-            self.pos_cross_attention = decoder_layer()
+        self.out_energy = nn.Sequential(
+            nn.LayerNorm(hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.SiLU(inplace=False),
+            nn.Linear(hidden_dim, 1),
+        )
 
         # Initialize weights
         if self.custom_weight_init is not None:
@@ -267,69 +258,38 @@ class TransformerModule(nn.Module):
             Tuple[
                 Int["b n"],      # type: ignore - ads_atom_types (integer indices, conditioning)
                 Float["b n 3"],  # type: ignore - ads_pos (absolute Cartesian positions)
-                Float["b n 3"],  # type: ignore - ads_ref_centered_pos
             ]
             | List[torch.Tensor]
         ),
-        t_prim: (
-            Tuple[
-                Float[" b"],  # type: ignore - atom_types_t
-                Float[" b"],  # type: ignore - frac_coords_t
-                Float[" b"],  # type: ignore - lengths_scaled_t
-                Float[" b"],  # type: ignore - angles_radians_t
-            ]
-            | List[torch.Tensor]
-        ),
-        t_ads: (
-            Tuple[
-                Float[" b"],  # type: ignore - ads_pos_t
-            ]
-            | List[torch.Tensor]
-        ),
-        feats: Dict[str, Tensor],
         prim_padding_mask: Bool["b m"],  # type: ignore
         ads_padding_mask: Bool["b n"],  # type: ignore
         **kwargs: Any,
-    ) -> Tuple[
-        Tuple[
-            Float["b m v"],  # type: ignore - atom_types
-            Float["b m 3"],  # type: ignore - frac_coords
-            Float["b 1 3"],  # type: ignore - lengths_scaled
-            Float["b 1 3"],  # type: ignore - angles_radians
-            Float["b 3 3"],  # type: ignore - transformation_matrix
-        ],
-        Tuple[
-            Float["b n 3"],  # type: ignore - ads_pos
-        ],
-    ]:
-        """Forward pass of the module.
+    ) -> Float[" b"]:  # type: ignore - per-graph scalar energy
+        """Regress a single scalar (binding) energy per structure in the batch.
 
-        Primitive-cell and adsorbate atoms are embedded as **separate sequences**,
-        concatenated along the token dimension for the shared transformer trunk,
-        then split back for modality-specific cross-attention and output heads.
+        Primitive-cell and adsorbate atoms are embedded as **separate sequences**
+        and concatenated along the token dimension for the shared transformer
+        trunk. The energy head pools the trunk output (optionally after one
+        cross-attention re-read of the input embeddings) and maps it to a scalar.
+        There is no flow-time or binding-energy conditioning — the structure is
+        scored as-is, and binding energy is the regression target.
 
         Args:
-            x_prim: Prim modalities (atom_types, frac_coords, lengths, angles, T-matrix).
-            x_ads: Ads modalities (ads_atom_types, ads_pos).
-            t_prim: Per-modality flow times for prim (atom_types_t, frac_coords_t,
-                lengths_t, angles_t).
-            t_ads: Per-modality flow times for ads (ads_atom_types_t, ads_pos_t).
-            feats: Graph-level conditioning features.
+            x_prim: Prim modalities (atom_types simplex, frac_coords, lengths,
+                angles, T-matrix, supercell_lattice).
+            x_ads: Ads modalities (ads_atom_types indices, ads_pos).
             prim_padding_mask: True = padding for prim tokens (B, M).
             ads_padding_mask: True = padding for ads tokens (B, N).
 
         Returns:
-            ``(pred_prim, pred_ads)``
+            ``energy`` of shape (B,).
         """
 
-        # primitive cell data at time t
+        # primitive cell structure
         atom_types, frac_coords, lengths_scaled, angles_radians, transformation_matrix, supercell_lattice = x_prim
-        atom_types_t, frac_coords_t, lengths_scaled_t, angles_radians_t = t_prim
 
-
-        # adsorbate data at time t
-        ads_atom_types, ads_pos, ads_ref_centered_pos = x_ads
-        ads_pos_t, = t_ads
+        # adsorbate structure
+        ads_atom_types, ads_pos, = x_ads
 
         device = prim_padding_mask.device
         batch_size, prim_seq_len = prim_padding_mask.shape
@@ -344,10 +304,11 @@ class TransformerModule(nn.Module):
         prim_real_mask = 1 - prim_padding_mask.int()  # (B, M)
         ads_real_mask = 1 - ads_padding_mask.int()     # (B, N)
         combined_real_mask = torch.cat([prim_real_mask, ads_real_mask], dim=1)  # (B, M+N)
-        global_mask = combined_real_mask.any(-1, keepdim=True).unsqueeze(-1)  # (B, 1, 1)
 
         # ── Prim embeddings ──────────────────────────────────────────────────
-        embed_atom_types = self.atom_type_embed(atom_types)  # (B, M) long → (B, M, C)
+        # atom_types is a probability simplex (B, M, V); the soft embedding
+        # `simplex @ W` equals an nn.Embedding lookup when the simplex is one-hot.
+        embed_atom_types = self.atom_type_embed(atom_types)                 # (B, M,  C)
         embed_frac_coords = self.frac_coords_embed(frac_coords)             # (B, M,  C)
         embed_lengths_scaled = self.lengths_scaled_embed(lengths_scaled)    # (B, 1, C)
         embed_angles_radians = self.angles_radians_embed(angles_radians)    # (B, 1, C)
@@ -361,9 +322,11 @@ class TransformerModule(nn.Module):
         ).unsqueeze(1)  # (B, 1, C)
 
         # ── Ads embeddings ───────────────────────────────────────────────────
-        embed_ads_atom_types = self.atom_type_embed(ads_atom_types)                    # (B, N, C) — shared table
+        # ads_atom_types are integer indices (fixed conditioning); one-hot them so
+        # they pass through the same soft atom-type embedding (== a lookup).
+        ads_atom_types_onehot = F.one_hot(ads_atom_types.long(), self.atom_dim).to(embed_atom_types.dtype)
+        embed_ads_atom_types = self.atom_type_embed(ads_atom_types_onehot)            # (B, N, C) — shared table
         embed_ads_pos = self.pos_embed(ads_pos)                                      # (B, N, C)
-        embed_ads_ref_centered_pos = self.ads_ref_centered_pos_embed(ads_ref_centered_pos)  # (B, N, C)
 
         # ── Positional encoding (over combined seq) ──────────────────────────
         if self.add_sinusoid_posenc:
@@ -377,33 +340,8 @@ class TransformerModule(nn.Module):
         embed_prim_type_ids = self.type_embed(prim_type_ids)  # (B, M, C)
         embed_ads_type_ids  = self.type_embed(ads_type_ids)   # (B, N, C)
 
-        # ── Time embeddings (average prim + ads times) ───────────────────────
-        prim_modals_t = torch.cat(
-            [t_.unsqueeze(-1) for t_ in [atom_types_t, frac_coords_t, lengths_scaled_t, angles_radians_t]],
-            dim=-1,
-        )
-        ads_modals_t = ads_pos_t.unsqueeze(-1)  # (B, 1)
-        all_modals_t = torch.cat([prim_modals_t, ads_modals_t], dim=-1)  # (B, num_modals)
-        embed_time = (
-            self.time_encoding(all_modals_t.reshape(-1))
-            .reshape(batch_size, all_modals_t.shape[1], -1)
-            .mean(-2)
-        )  # (B, C)
+        # NOTE: no time / binding-energy conditioning — the structure is scored as-is.
 
-        embed_binding_energy = self.ads_binding_energy_embed(
-            feats["ads_binding_energy"].unsqueeze(-1)
-        )  # (B, C)
-
-        # CFG training dropout: replace dropped samples with the learnable null embedding.
-        # cfg_drop_mask is a (B,) bool tensor; True = this sample's condition is dropped.
-        # Only present during training steps (injected by LightFlowMatch.forward).
-        drop_mask = feats.get("cfg_drop_mask")
-        if drop_mask is not None:
-            embed_binding_energy = torch.where(
-                drop_mask.unsqueeze(-1), self.null_binding_energy, embed_binding_energy
-            )
-
-        embed_conditions = (embed_time + embed_binding_energy).unsqueeze(-2)  # (B, 1, C)
         # ── Build h_in for prim sequence ─────────────────────────────────────
         if self.concat_combine_input:
             # Broadcast graph-level embeddings to match prim seq length
@@ -411,7 +349,6 @@ class TransformerModule(nn.Module):
             embed_angles_radians_bc = embed_angles_radians.expand(-1, prim_seq_len, -1)
             embed_transformation_matrix_bc = embed_transformation_matrix.expand(-1, prim_seq_len, -1)
             embed_supercell_lattice_bc = embed_supercell_lattice.expand(-1, prim_seq_len, -1)
-            embed_conditions_prim = embed_conditions.expand(-1, prim_seq_len, -1)
 
             h_in_prim = torch.cat([
                 embed_atom_types,               # (B, M,  C)
@@ -421,9 +358,8 @@ class TransformerModule(nn.Module):
                 embed_transformation_matrix_bc, # (B, M,  C)
                 embed_supercell_lattice_bc,     # (B, M,  C)
                 embed_posenc_prim,              # (B, M,  C)
-                embed_conditions_prim,          # (B, M,  C)
                 embed_prim_type_ids,            # (B, M,  C)
-            ], dim=-1)  # (B, M,  9*C)
+            ], dim=-1)  # (B, M,  8*C)
             h_in_prim = self.combine_input_prim(h_in_prim)  # (B, M, C)
         else:
             h_in_prim = (
@@ -434,31 +370,24 @@ class TransformerModule(nn.Module):
                 + embed_transformation_matrix # (B, 1, C) → broadcasts
                 + embed_supercell_lattice     # (B, 1, C) → broadcasts
                 + embed_posenc_prim           # (B, M,  C)
-                + embed_conditions            # (B, 1, C) → broadcasts
                 + embed_prim_type_ids         # (B, M,  C)
             )
         h_in_prim = h_in_prim * prim_real_mask.unsqueeze(-1)  # (B, M, C)
 
         # ── Build h_in for ads sequence ──────────────────────────────────────
         if self.concat_combine_input:
-            embed_conditions_ads = embed_conditions.expand(-1, ads_seq_len, -1)
-
             h_in_ads = torch.cat([
                 embed_ads_atom_types,           # (B, N, C)
                 embed_ads_pos,                  # (B, N, C)
-                embed_ads_ref_centered_pos,     # (B, N, C)
                 embed_posenc_ads,               # (B, N, C)
-                embed_conditions_ads,           # (B, N, C)
                 embed_ads_type_ids,             # (B, N, C)
-            ], dim=-1)  # (B, N, 6*C)
+            ], dim=-1)  # (B, N, 5*C)
             h_in_ads = self.combine_input_ads(h_in_ads)  # (B, N,  C)
         else:
             h_in_ads = (
                 embed_ads_atom_types            # (B, N, C)
                 + embed_ads_pos                 # (B, N, C)
-                + embed_ads_ref_centered_pos    # (B, N, C)
                 + embed_posenc_ads              # (B, N, C)
-                + embed_conditions              # (B, 1, C) → broadcasts
                 + embed_ads_type_ids            # (B, N, C)
             )
         h_in_ads = h_in_ads * ads_real_mask.unsqueeze(-1)  # (B, N,  C)
@@ -468,7 +397,6 @@ class TransformerModule(nn.Module):
         padding_mask = torch.cat([prim_padding_mask, ads_padding_mask], dim=1)  # (B, M+N)
 
         pos_ids = torch.arange(total_seq_len, device=device).unsqueeze(0).repeat(batch_size, 1)
-        ads_pos_ids = pos_ids[:, prim_seq_len:]  # true positions of ads tokens in combined sequence
         attention_kwargs = {"pos_ids": pos_ids}
 
         if self.implementation == "transformer":
@@ -484,103 +412,25 @@ class TransformerModule(nn.Module):
 
         h_out = h_out * combined_real_mask.unsqueeze(-1)  # (B, M+N,  C)
 
-        # ── Split transformer output back into prim / ads ────────────────────
-        h_out_prim = h_out[:, :prim_seq_len, :]  # (B, M, C)
-        h_out_ads = h_out[:, prim_seq_len:, :]   # (B, N,  C)
-
-        # ── Cross-attention & output heads ────────────────────────────────────
+        # ── Energy head: (optional) cross-attention → masked-mean pool → MLP ──
         if self.cross_attention:
-            # Prim cross-attention (query = prim output, memory = full sequence)
-            h_atom = self.atom_types_cross_attention(
-                h_out_prim,
+            # Re-read the input embeddings: query = trunk output, memory = h_in.
+            h_energy = self.energy_cross_attention(
+                h_out,
                 h_in,
-                tgt_key_padding_mask=prim_padding_mask,
+                tgt_key_padding_mask=padding_mask,
                 memory_key_padding_mask=padding_mask,
                 **attention_kwargs,
-            )
-            h_frac_coords = self.frac_coords_cross_attention(
-                h_out_prim,
-                h_in,
-                tgt_key_padding_mask=prim_padding_mask,
-                memory_key_padding_mask=padding_mask,
-                **attention_kwargs,
-            )
-            h_lengths_scaled = self.lengths_scaled_cross_attention(
-                h_out_prim,
-                h_in,
-                tgt_key_padding_mask=prim_padding_mask,
-                memory_key_padding_mask=padding_mask,
-                **attention_kwargs,
-            )
-            h_angles_radians = self.angles_radians_cross_attention(
-                h_out_prim,
-                h_in,
-                tgt_key_padding_mask=prim_padding_mask,
-                memory_key_padding_mask=padding_mask,
-                **attention_kwargs,
-            )
-            h_transformation_matrix = self.transformation_matrix_cross_attention(
-                h_out_prim,
-                h_in,
-                tgt_key_padding_mask=prim_padding_mask,
-                memory_key_padding_mask=padding_mask,
-                **attention_kwargs,
-            )
-
-            out_atom_types = self.out_atom_types(h_atom)
-            out_frac_coords = self.out_frac_coords(h_frac_coords)
-            prim_mask_f = prim_real_mask.unsqueeze(-1).float()  # (B, M, 1)
-            prim_n = prim_mask_f.sum(-2, keepdim=True).clamp(min=1)
-            out_lengths_scaled = self.out_lengths_scaled(
-                (h_lengths_scaled * prim_mask_f).sum(-2, keepdim=True) / prim_n
-            )
-            out_angles_radians = self.out_angles_radians(
-                (h_angles_radians * prim_mask_f).sum(-2, keepdim=True) / prim_n
-            )
-            out_transformation_matrix = self.out_transformation_matrix(
-                (h_transformation_matrix * prim_mask_f).sum(-2) / prim_n.squeeze(-2)
-            ).reshape(batch_size, 3, 3)  # (B, 9) → (B, 3, 3)
-
-            # Ads cross-attention — single head for absolute positions
-            h_pos = self.pos_cross_attention(
-                h_out_ads,
-                h_in,
-                tgt_key_padding_mask=ads_padding_mask,
-                memory_key_padding_mask=padding_mask,
-                query_pos_ids=ads_pos_ids,
-                **attention_kwargs,
-            )
-            out_pos = self.out_pos(h_pos)  # (B, N,  3)
-
+            )  # (B, M+N, C)
         else:
-            out_atom_types = self.out_atom_types(h_out_prim)
-            out_frac_coords = self.out_frac_coords(h_out_prim)
-            prim_mask_f = prim_real_mask.unsqueeze(-1).float()  # (B, M, 1)
-            prim_n = prim_mask_f.sum(-2, keepdim=True).clamp(min=1)
-            out_lengths_scaled = self.out_lengths_scaled(
-                (h_out_prim * prim_mask_f).sum(-2, keepdim=True) / prim_n
-            )
-            out_angles_radians = self.out_angles_radians(
-                (h_out_prim * prim_mask_f).sum(-2, keepdim=True) / prim_n
-            )
-            out_transformation_matrix = self.out_transformation_matrix(
-                (h_out_prim * prim_mask_f).sum(-2) / prim_n.squeeze(-2)
-            ).reshape(batch_size, 3, 3)  # (B, 9) → (B, 3, 3)
+            h_energy = h_out
 
-            out_pos = self.out_pos(h_out_ads)  # (B, N,  3)
+        mask_f = combined_real_mask.unsqueeze(-1).float()        # (B, M+N, 1)
+        h_pooled = (h_energy * mask_f).sum(-2) / mask_f.sum(-2).clamp(min=1)  # (B, C)
 
-        # ── Assemble outputs ─────────────────────────────────────────────────
-        pred_prim = (
-            out_atom_types * prim_real_mask.unsqueeze(-1),    # (B, M, V)
-            out_frac_coords * prim_real_mask.unsqueeze(-1),   # (B, M, 3)
-            out_lengths_scaled * global_mask,                 # (B, 1, 3)
-            out_angles_radians * global_mask,                 # (B, 1, 3)
-            out_transformation_matrix * global_mask,          # (B, 1, 3)
-        )
-        pred_ads = (
-            out_pos * ads_real_mask.unsqueeze(-1),   # (B, N,  3)
-        )
+        energy = self.out_energy(h_pooled).squeeze(-1)  # (B,)
+        energy = energy * combined_real_mask.any(-1).float()  # zero out fully-empty graphs
 
-        return pred_prim, pred_ads
+        return energy
 
 

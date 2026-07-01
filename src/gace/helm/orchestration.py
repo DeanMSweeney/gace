@@ -21,6 +21,7 @@ from gace.utils.relaxation import Silent
 from fairchem.core import OCPCalculator
 from gace.utils.tft.tft_wrapper import PyGToTensorDict
 from gace.utils.builder import sample_prim_atom_counts
+from gace.utils.oracle import Oracle
 from gace.utils.catalyst_forge import CatalystForge
 import ase.io
 
@@ -30,7 +31,7 @@ _AVG_BINDING_ENERGY = -1.54790583
 _STD_BINDING_ENERGY = 2.27278609
 
 
-class LightFlowMatch(LightningModule, Flow):
+class LightFlowMatch(LightningModule, Flow, Oracle):
     """
     PyTorch Lightning module for training conditional flow matching models.
 
@@ -74,6 +75,8 @@ class LightFlowMatch(LightningModule, Flow):
     def __init__(
             self,
             model,
+            oracle_model=None,
+            oracle_mode: str="off",
             variant: str="forge",
             mode: str="debug",
             track_grad_norms: bool=False,
@@ -81,13 +84,12 @@ class LightFlowMatch(LightningModule, Flow):
             relaxed_strucs=None,
             sanitized_strucs=None,
             config_vasp: bool=False,
-            x_matching: Literal["flow", "endpoint"]="flow",
+            x_matching: Literal["flow", "endpoint"]="endpoint",
             schedule_type: Literal["linear", "cosine"]="linear",
             optimal_transport: bool=False,
             informed_priors: bool=True,
             num_integration_steps: int=1,
             relax_otf: bool=False,
-            batched_relaxation: bool=True,
             mlff_checkpoint: Optional[str]=None,
             accelerator: str="gpu",
             seed: int=42,
@@ -112,19 +114,25 @@ class LightFlowMatch(LightningModule, Flow):
 
         super().__init__()
         # Save hyperparameters for logging and checkpointing (ignoring model-specific args)
-        self.save_hyperparameters(ignore=["model", "variant", "mode", "rtol", "atol", "ode_method", \
-            "track_grad_norms", "generated_strucs", "relaxed_strucs", "sanitized_strucs", "config_vasp", "threshold", "x_matching", \
-            "interpolant_schedule", "write_eval_metrics", "num_integration_steps", "relax_otf", "mlff_checkpoint", \
-            "fk_mlff_checkpoint", "accelerator", "seed", "num_prim_atoms", "optimal_transport"])
+        self.save_hyperparameters(ignore=["model", "oracle_model", "oracle_mode", "variant", "mode", \
+            "track_grad_norms", "generated_strucs", "relaxed_strucs", "sanitized_strucs", "config_vasp", \
+            "write_eval_metrics", "relax_otf", "mlff_checkpoint", \
+            "fk_mlff_checkpoint", "accelerator", "seed", "num_prim_atoms"])
 
         # Model and training configuration
         self.model = model  # Neural network (e.g., Equiformer)
+        # Energy-regression oracle (None => disabled). In "guide" mode it
+        # is frozen and steers the flow model via an energy guidance loss.
+        self.oracle_model = oracle_model
+        self.oracle_mode = oracle_mode
+        if self.oracle_model is not None and self.oracle_mode == "guide":
+            # Freeze: no gradient updates. Eval mode (deterministic forward) is
+            # pinned by the train() override, which Lightning triggers each epoch.
+            for p in self.oracle_model.parameters():
+                p.requires_grad_(False)
         self.variant = variant  # "refine" or "forge"
         self.mode = mode
         self.loss_fn = nn.MSELoss()  # Base loss function (not directly used, see criterion)
-
-        # ODE solver configuration (for inference/testing)
-        self.num_integration_steps = num_integration_steps
 
         # Monitoring and output configuration
         self.track_grad_norms = track_grad_norms
@@ -135,15 +143,12 @@ class LightFlowMatch(LightningModule, Flow):
         self.config_vasp = config_vasp
         self.catalyst_dist_cutoff = catalyst_dist_cutoff
 
-        # Flow matching configuration
-        self.x_matching = x_matching  # "flow" or "endpoint"
-        self.schedule_type = schedule_type  # "linear" or "cosine"
-        self.optimal_transport = optimal_transport
-        self.informed_priors = informed_priors
+        # Post processing configruation 
         self.relax_otf = relax_otf
         self.sanitize_otf = sanitize_otf
         self.dedupe_otf = dedupe_otf
-        self.batched_relaxation = batched_relaxation
+
+        # Miscellaneous 
         self.accelerator = accelerator
         self.seed = seed
         self.num_prim_atoms = num_prim_atoms
@@ -201,7 +206,20 @@ class LightFlowMatch(LightningModule, Flow):
         self.gen_slabs_memory: list = []
         self.num_slabs_checked: int = 0
        # ==============================================================================
-       
+
+    def train(self, mode: bool = True):
+        """Keep the frozen oracle_model in eval mode during guide-mode training.
+
+        Lightning calls ``train()`` at each epoch start, which would otherwise flip
+        the frozen oracle_model back into train mode (affecting any dropout /
+        norm layers). ``requires_grad=False`` already prevents it from updating;
+        this keeps its forward deterministic too.
+        """
+        super().train(mode)
+        if self.oracle_mode == "guide" and self.oracle_model is not None:
+            self.oracle_model.eval()
+        return self
+
     def _build_target_props(self, f_prim) -> dict:
         """Build the target-property conditioning dict for the model forward pass.
 
@@ -217,25 +235,19 @@ class LightFlowMatch(LightningModule, Flow):
             )
         return feats
 
-    def forward(self, data: Data, force_unconditional: bool = False) -> dict:
-        """Run the forge model forward pass and return a flat prediction dict.
+    def _run_model(self, data: Data, force_unconditional: bool = False):
+        """Convert the PyG batch to dense tensors and call the flow transformer.
 
-        Converts the PyG batch to dense tensors, calls the transformer, and
-        unpacks outputs back to sparse form. Used both during training
-        (via _transport_loss) and sampling (via Flow.sample),
-        which calls this as `self(data)` because
-        LightFlowMatch inherits from Flow.
-
-        Args:
-            data: PyG Data/Batch with all forge fields populated.
-            force_unconditional: If True, drop all conditioning (cfg_drop_mask=True for
-                every sample). Used for the unconditional forward pass in CFG guidance.
+        This is the first half of ``forward``: it runs the model and returns the
+        **dense** padded outputs together with the wrapper batches and padding
+        masks. ``forward`` then sparsifies these; the energy-guidance path instead
+        feeds the dense outputs straight to the oracle (no lossy round-trip).
 
         Returns:
-            Dict with keys: pos, z, len, ang, M, ads_pos.
+            ``(pred_prim, pred_ads, x_prim, x_ads, prim_padding_mask, ads_padding_mask)``
         """
         wrapper = PyGToTensorDict()
-        x_prim, x_ads, t_prim, t_ads, f_prim, f_ads = wrapper.to_tensordict(data)
+        x_prim, x_ads, t_prim, t_ads, f_prim, f_ads = wrapper.to_tensordict(data=data)
 
         prim_padding_mask = ~x_prim.mask  # (B, M)
         ads_padding_mask  = ~x_ads.mask   # (B, N)
@@ -249,7 +261,7 @@ class LightFlowMatch(LightningModule, Flow):
                 "cfg_drop_mask": torch.ones(B, dtype=torch.bool, device=data.pos.device),
             }
         else:
-            feats = self._build_target_props(f_prim)
+            feats = self._build_target_props(f_prim=f_prim)
 
         pred_prim, pred_ads  = self.model(
             x_prim=(
@@ -272,6 +284,12 @@ class LightFlowMatch(LightningModule, Flow):
             ads_padding_mask=ads_padding_mask,
         )
 
+        return pred_prim, pred_ads, x_prim, x_ads, prim_padding_mask, ads_padding_mask
+
+    @staticmethod
+    def _sparsify(pred_prim, pred_ads, x_prim, x_ads) -> dict:
+        """Unpack the dense flow outputs to the sparse prediction dict (second half
+        of ``forward``)."""
         return {
             "pos":     x_prim.to_sparse(pred_prim[1]),   # (N_prim, 3)
             "z":       x_prim.to_sparse(pred_prim[0]),   # (N_prim, 100)
@@ -281,38 +299,64 @@ class LightFlowMatch(LightningModule, Flow):
             "ads_pos": x_ads.to_sparse(pred_ads[0]),     # (N_ads, 3)
         }
 
-    def _transport_loss(self, input_graph: Data) -> torch.Tensor:
-        """
-        Compute the flow matching loss for a batch of structures.
+    def forward(self, data: Data, force_unconditional: bool = False) -> dict:
+        """Run the forge model forward pass and return a flat prediction dict.
 
-        Steps:
-        1. Sample random interpolation time t for each structure
-        2. Interpolate positions: x(t) = x0 + alpha(t) * (x1 - x0)
-        3. Predict velocity field: f = model(x(t), t)
-        4. Compute loss between predicted and target velocity
+        Used both during training (via _transport_loss) and sampling (via
+        Flow.sample), which calls this as `self(data)` because LightFlowMatch
+        inherits from Flow.
 
         Args:
-            input_graph: Batch of atomic structures
+            data: PyG Data/Batch with all forge fields populated.
+            force_unconditional: If True, drop all conditioning (cfg_drop_mask=True for
+                every sample). Used for the unconditional forward pass in CFG guidance.
 
         Returns:
-            loss: Average loss over batch
-            max_loss: Maximum per-atom loss (for monitoring outliers)
-            max_loss_idx: Index of atom with maximum loss
-            velocity_predictions: Dict with t, predicted velocity, target velocity, batch, tags
+            Dict with keys: pos, z, len, ang, M, ads_pos.
         """
-        # Generate interpolated training data at random time t.
-        # path() stores supervision targets on the returned data object.
-        data = self.build_path(input_graph=input_graph) 
+        pred_prim, pred_ads, x_prim, x_ads, _, _ = self._run_model(data=data, force_unconditional=force_unconditional)
+        return self._sparsify(pred_prim=pred_prim, pred_ads=pred_ads, x_prim=x_prim, x_ads=x_ads)
 
-        # Model predicts velocity field (or dict for forge with z_logits)
-        if self.variant == "forge":
-            pred = self(data)
-            losses = self.criterion(input_graph=data, pred=pred)
-        else:
+    def criterion(self, input_graph: Data) -> torch.Tensor:
+        """
+        Compute the training loss for a batch of structures.
+
+        Behaviour depends on ``oracle_mode``:
+        - "train": train the oracle standalone (energy regression); the
+          flow model is not run.
+        - "off"/"guide": run the flow matching path; in "guide" mode also add the
+          frozen-oracle energy guidance term to the flow loss.
+        """
+        # Mode 1: standalone oracle training — no flow loss.
+        if self.oracle_mode == "train":
+            energy_loss = self.energy_criterion(data=input_graph)
+            return {"total_loss": energy_loss, "energy_loss": energy_loss}
+
+        # Flow path (off / guide). path() stores supervision targets on `data`.
+        data = self.build_path(input_graph=input_graph)
+
+        if self.variant != "forge":
             raise RuntimeError(f"Unknown variant: {self.variant}")
 
+        pred_prim, pred_ads, x_prim, x_ads, prim_pad, ads_pad = self._run_model(data=data)
+        pred = self._sparsify(pred_prim=pred_prim, pred_ads=pred_ads, x_prim=x_prim, x_ads=x_ads)
+        losses = self.flow_criterion(input_graph=data, pred=pred)
+
+        # Mode 2: frozen oracle steers the flow model toward the target energy.
+        if self.oracle_mode == "guide":
+            energy_loss = self.energy_criterion(
+                data=data,
+                pred_prim=pred_prim,
+                pred_ads=pred_ads,
+                x_ads=x_ads,
+                prim_padding_mask=prim_pad,
+                ads_padding_mask=ads_pad,
+            )
+            losses["energy_loss"] = energy_loss
+            losses["total_loss"] = losses["total_loss"] + float(self.hparams.oracle_lambda_energy) * energy_loss
+
         return losses
-    
+
     # ==================== Training and Validation Methods ====================
 
     def training_step(self, data: Data, batch_idx):
@@ -326,7 +370,7 @@ class LightFlowMatch(LightningModule, Flow):
         Returns:
             loss: Loss value for backpropagation
         """
-        losses = self._transport_loss(data)
+        losses = self.criterion(data)
 
         for name, val in losses.items():
             self.log(
@@ -355,7 +399,7 @@ class LightFlowMatch(LightningModule, Flow):
         Returns:
             loss: Validation loss for this batch
         """
-        losses = self._transport_loss(data)
+        losses = self.criterion(data)
 
         for name, val in losses.items():
             self.log(
@@ -386,7 +430,7 @@ class LightFlowMatch(LightningModule, Flow):
             loss: Test loss for this batch
         """
         
-        t = torch.linspace(0., 1, self.num_integration_steps, device=data.pos.device, dtype=data.pos.dtype)
+        t = torch.linspace(0., 1, self.hparams.num_integration_steps, device=data.pos.device, dtype=data.pos.dtype)
         B = int(data.batch.max().item()) + 1
         counts = sample_prim_atom_counts(B, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
         
@@ -446,7 +490,7 @@ class LightFlowMatch(LightningModule, Flow):
             (B,), self.target_binding_energy, device=data.pos.device, dtype=torch.float32,
         )
 
-        t = torch.linspace(0., 1., self.num_integration_steps, device=data.pos.device, dtype=torch.float32)
+        t = torch.linspace(0., 1., self.hparams.num_integration_steps, device=data.pos.device, dtype=torch.float32)
         counts = sample_prim_atom_counts(B, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
         opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts)
 
@@ -537,9 +581,17 @@ class LightFlowMatch(LightningModule, Flow):
         Returns:
             Dictionary with optimizer and lr_scheduler configuration
         """
+        # Optimise the oracle alone when training it standalone; otherwise
+        # the flow model (the oracle is frozen in "guide" mode and absent
+        # when off, so self.model.parameters() is the right set in both cases).
+        if self.oracle_mode == "train":
+            params = self.oracle_model.parameters()
+        else:
+            params = self.model.parameters()
+
         # AdamW optimizer: Adam with improved weight decay handling
         optimizer = optim.AdamW(
-            self.parameters(),
+            params,
             lr=self.hparams.lr,              # Base learning rate
             betas=self.hparams.betas,        # Adam beta parameters (momentum terms)
             weight_decay=self.hparams.weight_decay,  # L2 regularization
@@ -612,24 +664,3 @@ class LightFlowMatch(LightningModule, Flow):
                 "frequency": 1,          # Update every interval
             }
         }
-
-    # ==================== Optimization Callbacks ====================
-
-    def on_before_optimize_step(self, optimizer):
-        """
-        Called before the optimizer updates parameters.
-
-        If gradient norm tracking is enabled, computes and logs the total gradient norm.
-        Useful for monitoring training stability and detecting exploding gradients.
-
-        Args:
-            optimizer: The optimizer about to update parameters
-        """
-        if self.track_grad_norms:
-                # Compute total gradient norm without clipping (max_norm=inf)
-                # Returns: sqrt(sum(grad^2)) across all parameters
-                grad_norm = nn.utils.clip_grad_norm_(
-                    self.model.parameters(), max_norm=float('inf')
-                    )
-                # Log for monitoring (large values indicate instability)
-                self.log("unclipped grad norm", grad_norm)
