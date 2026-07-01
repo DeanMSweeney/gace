@@ -19,6 +19,9 @@ import torch.nn.functional as F
 from gace.utils.tft.tft_wrapper import PyGToTensorDict
 from gace.utils.builder import lattice_params_to_matrix
 
+_AVG_BINDING_ENERGY = -1.54790583
+_STD_BINDING_ENERGY = 2.27278609
+
 
 class Oracle:
     """Mixin providing the energy-regression oracle loss for LightFlowMatch.
@@ -95,6 +98,7 @@ class Oracle:
             ads_padding_mask=ads_padding_mask,
         )  # (B,)
 
+        target = (target.float() - _AVG_BINDING_ENERGY.float()) / _STD_BINDING_ENERGY.float() # standardize to zero 
         err = (energy_pred - target).abs()
         # Guidance only: optionally restrict to larger t, where x_hat_1 is a more
         # reliable clean-structure estimate.

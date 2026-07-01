@@ -117,16 +117,12 @@ def main(cfg: Config) -> None:
 
     # === Model Initialization ===
     # Instantiate the appropriate flow matching model based on regressor type
-    model = None
-    if cfg.oracle_cfg.oracle_mode != "train":
-        model = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
+    model = hydra.utils.instantiate(cfg.model_cfg, _convert_="partial")
     
     # Energy-regression oracle (None => disabled). Only instantiated when
     # oracle_mode is "train" or "guide" (skipped when "off"); trained standalone
     # or used (frozen) to guide the flow model, per cfg.oracle_cfg.oracle_mode.
-    oracle_model = None
-    if cfg.oracle_cfg.oracle_mode != "off" and cfg.oracle_model_cfg is not None:
-        oracle_model = hydra.utils.instantiate(cfg.oracle_model_cfg, _convert_="partial")
+    oracle_model = hydra.utils.instantiate(cfg.oracle_model_cfg, _convert_="partial")
     
     if cfg.oracle_cfg.oracle_mode == "train" and oracle_model is not None:
         declare("Oracle model initialized for standalone training/evaluation")
