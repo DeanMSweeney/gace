@@ -99,7 +99,6 @@ class OptimizerConfig:
     """Loss weight for supercell transformation matrix loss (M_loss)"""
 
 
-    
 @dataclass
 class SamplerConfig:
     """
@@ -189,9 +188,12 @@ class SamplerConfig:
     A pair is flagged as clashing if its distance is below catalyst_dist_cutoff * (r_i + r_j).
     Lower values are more permissive; higher values are stricter."""
 
-    check_diversity: bool = False
-    """Run structural uniqueness check via StructureMatcher after generation.
-    Strips adsorbate atoms and groups slab structures; result is stored in cf.diversity."""
+    dedupe_otf: bool = False
+    """Run on-the-fly structural diversity filtering during generation.
+    When True, each newly generated slab is matched (StructureMatcher) against the
+    running record of unique slabs; duplicates are marked invalid and not written.
+    Enabled in both test_step and predict_step; uniqueness is reported at epoch end
+    as (# unique slabs) / (# valid structures checked)."""
 
     # ==================== MLFF Relaxation ====================
 
@@ -271,6 +273,40 @@ class PathConfig:
 
 
 @dataclass
+class OracleConfig:
+    """Energy-regression oracle configuration.
+
+    The oracle (``TransformerModuleEnergy``) regresses ads_binding_energy
+    from a structure. Its architecture is a separate top-level Hydra-instantiable
+    spec (``Config.oracle_model_cfg``, parallel to ``model_cfg``); this holds the
+    behaviour knobs only.
+    """
+
+    oracle_mode: Literal["off", "train", "guide"] = "off"
+    """How the oracle participates in training:
+    - "off":   not instantiated / not used; flow training is unchanged.
+    - "train": train the oracle standalone on ground-truth structures
+               (regress ads_binding_energy); the flow model is not trained.
+    - "guide": load frozen pretrained weights and add an energy guidance loss
+               |oracle(x_hat_1) - ads_binding_energy| to the flow loss."""
+
+    oracle_ckpt_path: Optional[str] = None
+    """Path to pretrained oracle weights, loaded in 'guide' mode."""
+
+    oracle_lambda_energy: float = 1.0
+    """Loss weight for the energy guidance term (oracle_mode == 'guide')."""
+
+    oracle_softmax_temperature: float = 1.0
+    """Temperature for the guidance atom-type simplex fed to the oracle.
+    Lower -> sharper (closer to argmax / one-hot), narrowing the train/guidance gap."""
+
+    oracle_guidance_min_t: float = 0.0
+    """Only apply the energy guidance loss for samples with flow time t >= this
+    threshold (where the endpoint estimate x_hat_1 is a better clean-structure
+    estimate). 0.0 applies it at all times."""
+
+
+@dataclass
 class Config:
     """
     Main configuration for GACE training pipeline.
@@ -297,8 +333,17 @@ class Config:
     - GemNet-OC: embedding dimensions, interaction blocks, etc.
     """
 
+    oracle_model_cfg: Optional[DictConfig] = None
+    """Hydra-instantiable architecture spec for the oracle
+    (TransformerModuleEnergy), parallel to model_cfg. None => oracle off."""
+
     optim_cfg: OptimizerConfig = field(default_factory=OptimizerConfig)
     """Optimizer and learning rate scheduler configuration"""
+
+    # ==================== Energy oracle ====================
+
+    oracle_cfg: "OracleConfig" = field(default_factory=OracleConfig)
+    """Oracle behaviour config (mode, ckpt_path, loss weights)."""
 
     # ==================== Dataset Paths ====================
 

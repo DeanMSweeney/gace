@@ -105,16 +105,20 @@ class PyGToTensorDict:
         )
 
         # ── build time dicts — all components share the same per-graph t ─────
-        t_prim = TensorDictBatch(
-            data=TensorDict({"t": data.t}, batch_size=[batch_size], device=device),
-            mask=x_prim.mask,
-            batch_index=prim_batch,
-        )
-        t_ads = TensorDictBatch(
-            data=TensorDict({"t": data.t}, batch_size=[batch_size], device=device),
-            mask=x_ads.mask,
-            batch_index=ads_batch,
-        )
+        if hasattr(data, "t"):
+            t_prim = TensorDictBatch(
+                data=TensorDict({"t": data.t}, batch_size=[batch_size], device=device),
+                mask=x_prim.mask,
+                batch_index=prim_batch,
+            )
+            t_ads = TensorDictBatch(
+                data=TensorDict({"t": data.t}, batch_size=[batch_size], device=device),
+                mask=x_ads.mask,
+                batch_index=ads_batch,
+            )
+        else:
+            t_prim = None
+            t_ads = None
 
         # ── build feats dicts ────────────────────────────────────────────────
         f_prim = self._build_feats_dict(
@@ -174,11 +178,12 @@ class PyGToTensorDict:
                 max_num_nodes=max_num_nodes,
             )  # (B, N_ads)
 
-            sd["ads_ref_centered_pos"], _ = to_dense_batch(
-                data.ads_ref_centered_pos,
-                atom_batch,
-                max_num_nodes=max_num_nodes,
-            )  # (B, N_ads, 3)
+            if hasattr(data, "ads_ref_centered_pos"):
+                sd["ads_ref_centered_pos"], _ = to_dense_batch(
+                    data.ads_ref_centered_pos,
+                    atom_batch,
+                    max_num_nodes=max_num_nodes,
+                )  # (B, N_ads, 3)
         else:
             # Node-level: positions (already prim-only after _build_positions_path)
             sd["frac_coords"], _  = to_dense_batch(

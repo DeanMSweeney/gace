@@ -101,13 +101,10 @@ def catflow_dict_to_pyg_data(d: dict) -> Data:
         np.array(d["ads_pos"], dtype=np.float32)
     )  # (N_ads, 3)
 
+    
     ads_atomic_numbers = torch.from_numpy(
         np.array(d["ads_atomic_numbers"], dtype=np.int64)
     )  # (N_ads,)
-
-    ads_pairwise_dist = torch.from_numpy(
-        np.array(d["ads_pairwise_dist"], dtype=np.float32)
-    )  # (N_ads, MAX_ADS_NEIGHBORS)
 
     ads_com = torch.from_numpy(
         np.array(d["ads_com"], dtype=np.float32)
@@ -118,13 +115,11 @@ def catflow_dict_to_pyg_data(d: dict) -> Data:
     )  # (N_ads, 3)
 
     # ── Reference / metadata ─────────────────────────────────────────────────
-    ref_ads_pos = torch.from_numpy(
-        np.array(d["ref_ads_pos"], dtype=np.float32)
-    )  # (N_ads, 3) — fractional coordinates
+    ref_ads_pos = torch.from_numpy(np.array(d["ref_ads_pos"], dtype=np.float32)) if d.get("ref_ads_pos", None) is not None else torch.tensor(float('nan'), dtype=torch.float32)  # (N_ads, 3) — carteisn coordinates if
 
-    ref_energy = torch.tensor(float(d["ref_energy"]))
+    ref_energy = torch.tensor(float(d["ref_energy"])) if d.get("ref_energy", None) is not None else torch.tensor(float('-inf'), dtype=torch.float32)
 
-    bind_ads_atom = torch.tensor(int(d["bind_ads_atom"]))
+    bind_ads_atom = torch.tensor(int(d["bind_ads_atom"])) if d.get("bind_ads_atom", None) is not None else None
 
     sid = int(d["sid"])
 
@@ -166,7 +161,6 @@ def catflow_dict_to_pyg_data(d: dict) -> Data:
         # Adsorbate
         ads_pos=ads_pos,
         ads_atomic_numbers=ads_atomic_numbers,
-        ads_pairwise_dist=ads_pairwise_dist,
         ads_com=ads_com,
         ads_rel_pos=ads_rel_pos,
         ref_ads_pos=ref_ads_pos,

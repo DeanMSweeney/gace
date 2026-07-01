@@ -14,13 +14,11 @@ from gace.utils.euler import euler_step, ctmc_step
 from gace.utils.relaxation import relax_w_mlff
 from gace.utils.catalyst_forge import CatalystForge
 
-NUM_CLASSES = 100  # number of atom-type classes (atomic numbers 1–100, shifted to 0-indexed)
-
 class Flow():
     """
     This Mixin supports image invariant interpolation paths and masked loss for frozen atoms
     """
-    def criterion(
+    def flow_criterion(
         self,
         input_graph,
         pred: dict,
@@ -48,7 +46,7 @@ class Flow():
         x_pred = pred["pos"].float()
         x_target = data.pos_target.float()
         x_diff = x_pred - x_target
-        x_diff = x_diff - torch.round(x_diff) if self.informed_priors else x_diff
+        x_diff = x_diff - torch.round(x_diff) if self.hparams.informed_priors else x_diff
         x_loss_per_graph = scatter(x_diff.abs().mean(dim=1), prim_batch, dim=0, reduce="mean")  # (B,)
         x_loss = (x_loss_per_graph * self.time_weight).mean()
         # ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -56,7 +54,7 @@ class Flow():
         # ── Atom-type loss (catalyst only — adsorbate types are conditioned) ─────────────────────────────
         z_pred   = pred["z"].float()
         z_target = data.atomic_numbers_target.long().clone()         # (N_prim,)
-        z_target[data.atomic_numbers != NUM_CLASSES - 1] = -100      # ignore already-unmasked atoms
+        z_target[data.atomic_numbers != self.num_classes - 1] = -100      # ignore already-unmasked atoms
         z_loss_atoms = F.cross_entropy(z_pred, z_target, ignore_index=-100, reduction='none')  # (N_prim,)
         valid = (z_target != -100).float()
         z_loss_per_graph = (
@@ -204,7 +202,7 @@ class Flow():
         len1 = data.lengths_scaled.float()  # (B, 3)
         ang1 = data.angles_radians.float()  # (B, 3)
 
-        if self.informed_priors:
+        if self.hparams.informed_priors:
             ang0 = torch.empty_like(ang1).uniform_(torch.pi / 3, 2 * torch.pi / 3)  # Uniform(60°, 120°)
             len0 = torch.empty_like(len1).uniform_(1.5, 5.0)  # Uniform(1.5, 5.0) — always positive, covers typical scaled lengths
         else:
@@ -216,8 +214,8 @@ class Flow():
 
         alpha_t_len, alpha_t_len_grad, alpha_t_len_loss_coeff = self._interpolant_schedule(
             t=t_len,
-            schedule_type=self.schedule_type,
-            x_matching=self.x_matching,
+            schedule_type=self.hparams.schedule_type,
+            x_matching=self.hparams.x_matching,
             v=cosine_schd_freq, 
         )
 
@@ -226,8 +224,8 @@ class Flow():
 
         alpha_t_ang, alpha_t_ang_grad, alpha_t_ang_loss_coeff = self._interpolant_schedule(
             t=t_ang,
-            schedule_type=self.schedule_type,
-            x_matching=self.x_matching,
+            schedule_type=self.hparams.schedule_type,
+            x_matching=self.hparams.x_matching,
             v=cosine_schd_freq, 
         )
 
@@ -244,7 +242,7 @@ class Flow():
 
 
         # store velocity fields 
-        if self.x_matching == "flow":
+        if self.hparams.x_matching == "flow":
             data.u_len = alpha_t_len_grad * u_len
             data.u_ang =alpha_t_ang_grad * u_ang
 
@@ -276,8 +274,8 @@ class Flow():
 
         alpha_t_M, alpha_t_M_grad, alpha_t_M_loss_coeff = self._interpolant_schedule(
             t=t_M,
-            schedule_type=self.schedule_type,
-            x_matching=self.x_matching,
+            schedule_type=self.hparams.schedule_type,
+            x_matching=self.hparams.x_matching,
             v=cosine_schd_freq, 
         )
 
@@ -307,7 +305,7 @@ class Flow():
         data.supercell_lattice = torch.bmm(M_t, C_t)  # (B, 3, 3)
         data.cell = C_t  # Store primitive cell as well 
 
-        if self.x_matching == "flow":
+        if self.hparams.x_matching == "flow":
             data.u_M = u_M * alpha_t_M_grad.unsqueeze(-1)
 
         return data
@@ -335,16 +333,16 @@ class Flow():
         if self.variant == "forge":
             x1 = data.pos.float() # combined primtive cell 
 
-            if self.informed_priors:
+            if self.hparams.informed_priors:
                 x0 = torch.rand_like(x1, dtype=torch.float32)  # Uniform[0, 1) — fractional coords live on torus
             else:
                 x0 = torch.randn_like(x1, dtype=torch.float32)  # N(0, 1)
 
-            if self.optimal_transport:
+            if self.hparams.optimal_transport:
                 x0 = batched_ot_align(source=x0, target=x1, batch=data.batch[self.primitive_mask], pbc_aware=True)
 
             u_x = x1 - x0
-            u_x = u_x - torch.round(u_x) if self.informed_priors else u_x
+            u_x = u_x - torch.round(u_x) if self.hparams.informed_priors else u_x
 
             # Sample per-graph interpolation time
             t_x_per_graph = t # B, 1 
@@ -357,8 +355,8 @@ class Flow():
 
         alpha_t_x, alpha_t_x_grad, alpha_t_x_loss_coeff = self._interpolant_schedule(
             t=t_x,
-            schedule_type=self.schedule_type,
-            x_matching=self.x_matching,
+            schedule_type=self.hparams.schedule_type,
+            x_matching=self.hparams.x_matching,
             v=cosine_schd_freq, 
         )
 
@@ -368,7 +366,7 @@ class Flow():
         data.pos   = xt   
         data.pos_target = x1
 
-        if self.x_matching == "flow":
+        if self.hparams.x_matching == "flow":
             data.u_x = u_x * alpha_t_x_grad
 
         return data
@@ -391,14 +389,14 @@ class Flow():
         ads_pos1 = data.ads_pos.float()                                  # (N_ads, 3) raw Å
         ads_pos0 = torch.randn_like(ads_pos1)                            # N(0,1) prior
 
-        #if self.optimal_transport:
+        #if self.hparams.optimal_transport:
         #ads_pos0 = batched_ot_align(source=ads_pos0, target=ads_pos1, batch=ads_batch, pbc_aware=False)
 
         t_ads = t[ads_batch]  # (N_ads, 1)
         alpha_t_ads, alpha_t_ads_grad, _ = self._interpolant_schedule(
             t=t_ads,
-            schedule_type=self.schedule_type,
-            x_matching=self.x_matching,
+            schedule_type=self.hparams.schedule_type,
+            x_matching=self.hparams.x_matching,
             v=cosine_schd_freq,
         )
 
@@ -408,7 +406,7 @@ class Flow():
         data.ads_pos = ads_pos_t
         data.ads_pos_target = ads_pos1
 
-        if self.x_matching == "flow":
+        if self.hparams.x_matching == "flow":
             data.u_ads_pos = alpha_t_ads_grad * u_ads
 
         # Center ref_ads_pos and apply random SO(3) rotation each training step.
@@ -425,7 +423,7 @@ class Flow():
         CTMC mask-token corruption for catalyst atom types (forge variant only).
 
         Real atom types are indices 0–98 (1-indexed elements 1–99).
-        Mask token is NUM_CLASSES - 1 = 99.
+        Mask token is self.num_classes - 1 = 99.
 
         Each atom is independently masked with probability 1 - alpha_t(t),
         where alpha_t is computed from the interpolant schedule per graph then
@@ -439,13 +437,15 @@ class Flow():
 
         z1 = (data.atomic_numbers.long() - 1)  # (N_prim,) 0-indexed true types (0–98)
 
+        self.num_classes = self.model.atom_dim
+
         # Sample per-graph interpolation time
         t_z_per_graph = t
         t_z = t_z_per_graph[data.batch[self.primitive_mask]] # Nprim, 1
 
         alpha_t_z, alpha_t_z_grad, alpha_t_z_loss_coeff = self._interpolant_schedule(
             t=t_z,
-            schedule_type=self.schedule_type,
+            schedule_type=self.hparams.schedule_type,
             x_matching="endpoint",
             v=cosine_schd_freq,
         )
@@ -453,7 +453,7 @@ class Flow():
         # Per-atom independent masking against the scheduled threshold
         mask_flag = torch.rand(z1.size(0), device=device) < (1 - alpha_t_z.squeeze(1))  # (N_prim,)
         zt = z1.clone()
-        zt[mask_flag] = NUM_CLASSES - 1          # masked atoms get index 99
+        zt[mask_flag] = self.num_classes - 1          # masked atoms get index 99
 
         data.atomic_numbers        = zt          # (N_prim,) long — model input
         data.atomic_numbers_target = z1          # (N_prim,) long — loss target
@@ -523,7 +523,7 @@ class Flow():
 
             # ── Initialise all generated modalities from prior (t = 0) ───────────
             # Continuous
-            if self.informed_priors:
+            if self.hparams.informed_priors:
                 data.pos = torch.rand_like(data.pos)                            # Uniform[0,1) — fractional coords on torus
                 data.angles_radians = torch.empty(B, 3, device=device).uniform_(torch.pi / 3, 2 * torch.pi / 3)  # Uniform(60°, 120°)
                 data.lengths_scaled = torch.empty(B, 3, device=device).uniform_(1.5, 5.0)
@@ -538,7 +538,7 @@ class Flow():
 
             # Discrete: all atoms start as mask token
             N_prim = int(self.primitive_mask.sum().item())
-            data.atomic_numbers = torch.full((N_prim,), NUM_CLASSES - 1, dtype=torch.long, device=device)
+            data.atomic_numbers = torch.full((N_prim,), self.num_classes - 1, dtype=torch.long, device=device)
 
         # N^(1/3) scale factor for length denormalisation — lengths_scaled is in normalised space
         n_scale = (num_prim_atoms.float() ** (1 / 3)).unsqueeze(1)  # (B, 1)

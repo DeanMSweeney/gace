@@ -19,9 +19,17 @@ class EMACallback(Callback):
         self.decay = decay
         self.ema: ExponentialMovingAverage | None = None
 
+    @staticmethod
+    def _ema_target(pl_module):
+        """The parameters EMA should track: the oracle_model when training
+        it standalone (oracle_mode == 'train'), otherwise the flow model."""
+        if getattr(pl_module, "oracle_mode", "off") == "train":
+            return pl_module.oracle_model.parameters()
+        return pl_module.model.parameters()
+
     def on_fit_start(self, trainer, pl_module):
         self.ema = ExponentialMovingAverage(
-            pl_module.model.parameters(), decay=self.decay
+            self._ema_target(pl_module), decay=self.decay
         )
 
     def on_before_zero_grad(self, trainer, pl_module, optimizer):
@@ -30,12 +38,12 @@ class EMACallback(Callback):
 
     def on_validation_start(self, trainer, pl_module):
         # Stash live weights; copy EMA weights in for validation.
-        self.ema.store(pl_module.model.parameters())
-        self.ema.copy_to(pl_module.model.parameters())
+        self.ema.store(self._ema_target(pl_module))
+        self.ema.copy_to(self._ema_target(pl_module))
 
     def on_validation_end(self, trainer, pl_module):
         # Restore live weights so training continues correctly.
-        self.ema.restore(pl_module.model.parameters())
+        self.ema.restore(self._ema_target(pl_module))
 
     def on_save_checkpoint(self, trainer, pl_module, checkpoint):
         checkpoint["ema_state_dict"] = self.ema.state_dict()
@@ -44,6 +52,6 @@ class EMACallback(Callback):
         if "ema_state_dict" in checkpoint:
             if self.ema is None:
                 self.ema = ExponentialMovingAverage(
-                    pl_module.model.parameters(), decay=self.decay
+                    self._ema_target(pl_module), decay=self.decay
                 )
             self.ema.load_state_dict(checkpoint["ema_state_dict"])

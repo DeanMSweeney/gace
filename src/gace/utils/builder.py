@@ -194,6 +194,9 @@ def build_slab_adsorbate(
     supercell_struct = prim_struct.copy()
     supercell_struct.make_supercell(M, to_unit_cell=False)
 
+    # Convert primtive strucutre to ase atoms 
+    prim = adaptor.get_atoms(prim_struct)
+
     # Convert to ASE and add vacuum above the slab
     slab = adaptor.get_atoms(supercell_struct)
     cell = slab.get_cell().copy()
@@ -213,7 +216,11 @@ def build_slab_adsorbate(
     )
     ads.set_tags(np.full(len(ads), 2, dtype=int))
 
-    return slab + ads
+    atoms = slab + ads
+    atoms.info["primitive_cell"] = prim
+    atoms.info["transformation_matrix"] = M
+
+    return atoms
 
 
 
