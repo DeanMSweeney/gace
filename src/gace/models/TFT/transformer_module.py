@@ -66,8 +66,6 @@ class TransformerModule(nn.Module):
         add_sinusoid_posenc: bool = True,
         concat_combine_input: bool = False,
         disable_prenorm: bool = False,
-        num_rbf: int = 20,
-        rbf_max: float = 5.0,
         custom_weight_init: Optional[
             Literal["none", "xavier", "kaiming", "orthogonal", "uniform", "eye", "normal"]
         ] = None,

@@ -43,7 +43,7 @@ from torch.utils.data import Subset
 
 # Hydra and OmegaConf for configuration management
 import hydra
-from omegaconf import OmegaConf, DictConfig, MISSING
+from omegaconf import OmegaConf, DictConfig, open_dict, MISSING
 from dataclasses import dataclass, asdict
 from typing import Optional, Literal, Union, Tuple
 
@@ -258,7 +258,6 @@ def main(cfg: Config) -> None:
     # below), then drop it from oracle_cfg so the remaining knobs can be
     # **unpacked into LightFlowMatch. (oracle_model_cfg is a top-level field.)
     oracle_ckpt_path = cfg.oracle_cfg.oracle_ckpt_path
-    cfg.oracle_cfg.pop("oracle_ckpt_path")
     orchestrator = LightFlowMatch(
         model=model,
         oracle_model=oracle_model,
