@@ -77,7 +77,7 @@ class Oracle:
             frac_coords    = x_prim.data["frac_coords"]
             lengths_scaled = x_prim.data["lengths_scaled"]
             angles_radians = x_prim.data["angles_radians"]
-            M              = x_prim.data["transformation_matrix"]
+            M              = x_prim.data["transformation_matrix"].float()
             ads_atom_types = x_ads.data["ads_atomic_numbers"]
             ads_pos        = x_ads.data["ads_pos"]
             target         = f_prim.data["ads_binding_energy"].float()
