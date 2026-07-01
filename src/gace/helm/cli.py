@@ -127,6 +127,12 @@ def main(cfg: Config) -> None:
     oracle_model = None
     if cfg.oracle_cfg.oracle_mode != "off" and cfg.oracle_model_cfg is not None:
         oracle_model = hydra.utils.instantiate(cfg.oracle_model_cfg, _convert_="partial")
+    
+    if cfg.oracle_cfg.oracle_mode == "train" and oracle_model is not None:
+        declare("Model weights initialized. Training/Eval will proceed.")
+    
+    if cfg.oracle_cfg.oracle_mode == "train" and oracle_model is not None:
+        declare("Oracle model initialized for standalone training")
 
     # Print configuration at rank 0 only
     declare(f">>> Training and model configurations:\n {OmegaConf.to_yaml(cfg)}")
