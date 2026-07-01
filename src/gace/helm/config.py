@@ -277,14 +277,10 @@ class OracleConfig:
     """Energy-regression oracle configuration.
 
     The oracle (``TransformerModuleEnergy``) regresses ads_binding_energy
-    from a structure. Its architecture is a separate Hydra-instantiable spec
-    (``Config.oracle_model_cfg``, parallel to ``model_cfg``); this holds the
-    behaviour knobs.
+    from a structure. Its architecture is a separate top-level Hydra-instantiable
+    spec (``Config.oracle_model_cfg``, parallel to ``model_cfg``); this holds the
+    behaviour knobs only.
     """
-
-    oracle_model_cfg: Optional[DictConfig] = None
-    """Hydra-instantiable architecture spec for the oracle
-    (TransformerModuleEnergy), parallel to model_cfg. None => oracle off."""
 
     oracle_mode: Literal["off", "train", "guide"] = "off"
     """How the oracle participates in training:
@@ -336,6 +332,10 @@ class Config:
     - EquiformerV2: hidden_channels, num_layers, attention heads, etc.
     - GemNet-OC: embedding dimensions, interaction blocks, etc.
     """
+
+    oracle_model_cfg: Optional[DictConfig] = None
+    """Hydra-instantiable architecture spec for the oracle
+    (TransformerModuleEnergy), parallel to model_cfg. None => oracle off."""
 
     optim_cfg: OptimizerConfig = field(default_factory=OptimizerConfig)
     """Optimizer and learning rate scheduler configuration"""

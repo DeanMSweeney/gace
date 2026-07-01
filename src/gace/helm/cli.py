@@ -125,8 +125,8 @@ def main(cfg: Config) -> None:
     # oracle_mode is "train" or "guide" (skipped when "off"); trained standalone
     # or used (frozen) to guide the flow model, per cfg.oracle_cfg.oracle_mode.
     oracle_model = None
-    if cfg.oracle_cfg.oracle_mode != "off" and cfg.oracle_cfg.oracle_model_cfg is not None:
-        oracle_model = hydra.utils.instantiate(cfg.oracle_cfg.oracle_model_cfg, _convert_="partial")
+    if cfg.oracle_cfg.oracle_mode != "off" and cfg.oracle_model_cfg is not None:
+        oracle_model = hydra.utils.instantiate(cfg.oracle_model_cfg, _convert_="partial")
 
     # Print configuration at rank 0 only
     declare(f">>> Training and model configurations:\n {OmegaConf.to_yaml(cfg)}")
@@ -254,12 +254,11 @@ def main(cfg: Config) -> None:
         
     # === Lightning Module Setup ===
     # Wrap model in LightningModule for training orchestration.
-    # oracle_model_cfg (architecture) and oracle_ckpt_path are cli-only; capture
-    # the ckpt path (needed for guide-mode loading below), then drop both from
-    # oracle_cfg so the remaining knobs can be **unpacked into LightFlowMatch.
+    # oracle_ckpt_path is cli-only; capture it (needed for guide-mode loading
+    # below), then drop it from oracle_cfg so the remaining knobs can be
+    # **unpacked into LightFlowMatch. (oracle_model_cfg is a top-level field.)
     oracle_ckpt_path = cfg.oracle_cfg.oracle_ckpt_path
     cfg.oracle_cfg.pop("oracle_ckpt_path")
-    cfg.oracle_cfg.pop("oracle_model_cfg")
     orchestrator = LightFlowMatch(
         model=model,
         oracle_model=oracle_model,
@@ -268,7 +267,7 @@ def main(cfg: Config) -> None:
         track_grad_norms=cfg.track_grad_norms,
         accelerator=cfg.accelerator,
         seed=cfg.seed,
-        **cfg.oracle_cfg,   # oracle_mode, oracle_lambda_energy, oracle_softmax_temperature, oracle_guidance_min_t (ckpt_path/model_cfg popped above)
+        **cfg.oracle_cfg,   # oracle_mode, oracle_lambda_energy, oracle_softmax_temperature, oracle_guidance_min_t (ckpt_path popped above)
         **cfg.path_cfg,      # x_matching, interpolant_schedule, optimal_transport, informed_priors, cfg_dropout_prob
         **cfg.sampler_cfg,   # All sampler/generation/MLFF settings
         **cfg.optim_cfg,     # Optimizer hyperparameters (lr, weight_decay, etc.)
@@ -419,11 +418,11 @@ def main(cfg: Config) -> None:
 
     # === Oracle weight loading (guide mode) ===
     # In 'guide' mode the oracle is frozen and steers the flow model, so
-    # it must be initialised from a standalone disc-training run. Keys there are
+    # it must be initialised from a standalone oracle-training run. Keys there are
     # prefixed "oracle_model." (self.oracle_model in LightFlowMatch).
     if cfg.oracle_cfg.oracle_mode == "guide":
         if oracle_model is None:
-            raise ValueError("oracle_mode='guide' requires oracle_cfg.oracle_model_cfg to be set.")
+            raise ValueError("oracle_mode='guide' requires oracle_model_cfg to be set.")
         if not oracle_ckpt_path:
             raise ValueError("oracle_mode='guide' requires oracle_cfg.oracle_ckpt_path.")
         declare(f">>> Loading frozen oracle weights from: {oracle_ckpt_path}")
@@ -442,7 +441,7 @@ def main(cfg: Config) -> None:
             print("\n--- ORACLE UNEXPECTED KEYS ---")
             for key in oracle_load.unexpected_keys:
                 print(f"  [?] {key}")
-        del disc_ckpt
+        del oracle_ckpt
         torch.cuda.empty_cache()
 
     # === Training/Evaluation/Generation Execution ===
