@@ -111,6 +111,7 @@ class ModernAttention(nn.Module):
         use_qk_norm: bool = True,
         use_sdpa: bool = True,
         jvp_attn: bool = False,
+        dropout: float = 0.0,
     ):
         super().__init__()
         assert dim % n_heads == 0, "dim must be divisible by n_heads"
@@ -121,6 +122,8 @@ class ModernAttention(nn.Module):
         self.head_dim = dim // n_heads
         self.use_sdpa = use_sdpa
         self.jvp_attn = jvp_attn
+        self.dropout = dropout
+        self.attn_dropout = nn.Dropout(dropout)
 
         self.q_proj = nn.Linear(dim, dim, bias=False)
         self.k_proj = nn.Linear(dim, dim, bias=False)
@@ -225,7 +228,9 @@ class ModernAttention(nn.Module):
 
         if self.use_sdpa:
             # Use PyTorch's optimized scaled dot-product attention (SDPA)
-            output = F.scaled_dot_product_attention(q, k, v, attn_mask=final_mask)
+            output = F.scaled_dot_product_attention(
+                q, k, v, attn_mask=final_mask, dropout_p=self.dropout if self.training else 0.0
+            )
         elif self.jvp_attn:
             from jvp_flash_attention.jvp_attention import JVPAttn  # requires torch>=2.8.0
             output = JVPAttn.fwd_dual(q, k, v, attn_mask=final_mask)
@@ -239,6 +244,7 @@ class ModernAttention(nn.Module):
                 scores = scores.masked_fill(~final_mask, float("-inf"))
 
             scores = F.softmax(scores.float(), dim=-1).type_as(q)
+            scores = self.attn_dropout(scores)
             output = torch.matmul(scores, v)
 
         # (B, H, Seq_Len, Head_Dim) -> (B, Seq_Len, H, Head_Dim) -> (B, Seq_Len, Dim)

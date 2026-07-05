@@ -26,7 +26,7 @@ class SwiGLUFeedForward(nn.Module):
     """
 
     @typecheck
-    def __init__(self, dim: int, hidden_dim: int, multiple_of: int = 256):
+    def __init__(self, dim: int, hidden_dim: int, multiple_of: int = 256, dropout: float = 0.0):
         super().__init__()
         hidden_dim = int(2 * hidden_dim / 3)
         hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
@@ -34,6 +34,7 @@ class SwiGLUFeedForward(nn.Module):
         self.w1 = nn.Linear(dim, hidden_dim, bias=False)
         self.w2 = nn.Linear(hidden_dim, dim, bias=False)
         self.w3 = nn.Linear(dim, hidden_dim, bias=False)
+        self.dropout = nn.Dropout(dropout)
 
     @typecheck
     def forward(self, x: Tensor) -> Tensor:
@@ -48,7 +49,7 @@ class SwiGLUFeedForward(nn.Module):
         swish = F.silu(self.w1(x))
         x_V = self.w3(x)
         x = swish * x_V
-        return self.w2(x)
+        return self.dropout(self.w2(x))
 
 
 class LabelEmbedder(nn.Module):

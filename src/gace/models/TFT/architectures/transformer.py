@@ -111,6 +111,7 @@ class ModernTransformerBlock(nn.Module):
         qk_layernorm: bool = True,
         use_sdpa: bool = True,
         jvp_attn: bool = False,
+        dropout: float = 0.0,
     ):
         super().__init__()
         self.attention = ModernAttention(
@@ -121,11 +122,13 @@ class ModernTransformerBlock(nn.Module):
             use_qk_norm=qk_layernorm,
             use_sdpa=use_sdpa,
             jvp_attn=jvp_attn,
+            dropout=dropout,
         )
-        self.feed_forward = SwiGLUFeedForward(dim=dim, hidden_dim=4 * dim)
+        self.feed_forward = SwiGLUFeedForward(dim=dim, hidden_dim=4 * dim, dropout=dropout)
 
         self.attention_norm = nn.RMSNorm(dim)
         self.ffn_norm = nn.RMSNorm(dim)
+        self.resid_dropout = nn.Dropout(dropout)
 
     @typecheck
     def forward(
@@ -149,10 +152,10 @@ class ModernTransformerBlock(nn.Module):
         Returns:
             Output tensor of shape [batch_size, seq_len, dim]
         """
-        h = x + self.attention(
+        h = x + self.resid_dropout(self.attention(
             self.attention_norm(x), pos_ids=pos_ids, padding_mask=padding_mask, attn_mask=attn_mask
-        )
-        out = h + self.feed_forward(self.ffn_norm(h))
+        ))
+        out = h + self.resid_dropout(self.feed_forward(self.ffn_norm(h)))
         return out
 
 
@@ -181,6 +184,7 @@ class ModernTransformerDecoderBlock(nn.Module):
         qk_layernorm: bool = True,
         use_sdpa: bool = True,
         jvp_attn: bool = False,
+        dropout: float = 0.0,
     ):
         super().__init__()
         self.self_attention = ModernAttention(
@@ -191,6 +195,7 @@ class ModernTransformerDecoderBlock(nn.Module):
             use_qk_norm=qk_layernorm,
             use_sdpa=use_sdpa,
             jvp_attn=jvp_attn,
+            dropout=dropout,
         )
         self.cross_attention = ModernAttention(
             dim,
@@ -200,12 +205,14 @@ class ModernTransformerDecoderBlock(nn.Module):
             use_qk_norm=qk_layernorm,
             use_sdpa=use_sdpa,
             jvp_attn=jvp_attn,
+            dropout=dropout,
         )
-        self.feed_forward = SwiGLUFeedForward(dim=dim, hidden_dim=4 * dim)
+        self.feed_forward = SwiGLUFeedForward(dim=dim, hidden_dim=4 * dim, dropout=dropout)
 
         self.self_attention_norm = nn.RMSNorm(dim)
         self.cross_attention_norm = nn.RMSNorm(dim)
         self.ffn_norm = nn.RMSNorm(dim)
+        self.resid_dropout = nn.Dropout(dropout)
 
     @typecheck
     def forward(
@@ -242,21 +249,21 @@ class ModernTransformerDecoderBlock(nn.Module):
             Output tensor of shape [batch_size, seq_len, dim]
         """
         sa_pos_ids = query_pos_ids if query_pos_ids is not None else pos_ids
-        h = x + self.self_attention(
+        h = x + self.resid_dropout(self.self_attention(
             self.self_attention_norm(x),
             pos_ids=sa_pos_ids,
             padding_mask=tgt_key_padding_mask,
             attn_mask=attn_mask,
-        )
-        h = h + self.cross_attention(
+        ))
+        h = h + self.resid_dropout(self.cross_attention(
             self.cross_attention_norm(h),
             memory=memory,
             pos_ids=pos_ids,
             query_pos_ids=query_pos_ids,
             padding_mask=memory_key_padding_mask,
             attn_mask=attn_mask,
-        )
-        out = h + self.feed_forward(self.ffn_norm(h))
+        ))
+        out = h + self.resid_dropout(self.feed_forward(self.ffn_norm(h)))
         return out
 
 
@@ -388,6 +395,7 @@ class ModernTransformer(nn.Module):
         use_sdpa: bool = True,
         jvp_attn: bool = False,
         is_decoder: bool = False,
+        dropout: float = 0.0,
     ):
         super().__init__()
         self.dim = dim
@@ -408,6 +416,7 @@ class ModernTransformer(nn.Module):
                     qk_layernorm=qk_layernorm,
                     use_sdpa=use_sdpa,
                     jvp_attn=jvp_attn,
+                    dropout=dropout,
                 )
                 for _ in range(depth)
             ]
