@@ -325,7 +325,7 @@ class Config:
 
     # ==================== Model Configuration ====================
 
-    model_cfg: DictConfig = MISSING
+    model_cfg: Optional[DictConfig] = None
     """
     Model architecture configuration (loaded from YAML).
     Contains model-specific hyperparameters for:
@@ -342,7 +342,7 @@ class Config:
 
     # ==================== Energy oracle ====================
 
-    oracle_cfg: "OracleConfig" = field(default_factory=OracleConfig)
+    oracle_cfg: OracleConfig = field(default_factory=OracleConfig)
     """Oracle behaviour config (mode, ckpt_path, loss weights)."""
 
     # ==================== Dataset Paths ====================

@@ -95,6 +95,10 @@ class Oracle:
             ads_padding_mask=ads_padding_mask,
         )  # (B,)
 
+        _AVG_BINDING_ENERGY = torch.tensor(self.avg_binding_energy, device=target.device)
+        _STD_BINDING_ENERGY = torch.tensor(self.std_binding_energy, device=target.device)
+
+        target = (target.float() - _AVG_BINDING_ENERGY.float()) / _STD_BINDING_ENERGY.float() # standardize to zero 
         err = (energy_pred - target).abs()
         # Guidance only: optionally restrict to larger t, where x_hat_1 is a more
         # reliable clean-structure estimate.

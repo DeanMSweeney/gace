@@ -46,7 +46,7 @@ class Flow():
         x_pred = pred["pos"].float()
         x_target = data.pos_target.float()
         x_diff = x_pred - x_target
-        x_diff = x_diff - torch.round(x_diff) if self.hparams.informed_priors else x_diff
+        x_diff = x_diff - torch.round(x_diff) if self.hparams.informed_priors else x_diff # apply MIC when xdiff is b/t [0,1]
         x_loss_per_graph = scatter(x_diff.abs().mean(dim=1), prim_batch, dim=0, reduce="mean")  # (B,)
         x_loss = (x_loss_per_graph * self.time_weight).mean()
         # ─────────────────────────────────────────────────────────────────────────────────────────────────

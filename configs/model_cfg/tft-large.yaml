@@ -4,7 +4,6 @@ _target_: gace.models.TFT.transformer_module.TransformerModule
 spatial_dim: 3          # xyz
 atom_dim: 100           # one-hot atom-type vocab (elements 1-90)
 hidden_dim: 768         # transformer hidden size — matches zatom 80M
-num_properties: 19       # binding energy (aux heads are disabled, see below)
 
 # ── Transformer depth / width ─────────────────────────────────────────────────
 num_layers: 16

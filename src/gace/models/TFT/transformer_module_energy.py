@@ -83,6 +83,7 @@ class TransformerModuleEnergy(nn.Module):
         custom_weight_init: Optional[
             Literal["none", "xavier", "kaiming", "orthogonal", "uniform", "eye", "normal"]
         ] = None,
+        dropout: float = 0.0,
         **kwargs,
     ):
         super().__init__()
@@ -107,6 +108,7 @@ class TransformerModuleEnergy(nn.Module):
         self.custom_weight_init = custom_weight_init
         self.disable_prenorm = disable_prenorm
         self.atom_dim = atom_dim
+        self.embed_dropout = nn.Dropout(dropout)
 
         # Embeddings for each the primitive cell
         # Soft embedding over the type simplex (B, *, atom_dim) -> (B, *, C).
@@ -169,6 +171,7 @@ class TransformerModuleEnergy(nn.Module):
                 dim=hidden_dim,
                 depth=num_layers,
                 num_heads=num_heads,
+                dropout=dropout,
             )
         else:
             raise ValueError(f"Invalid implementation: {self.implementation}")
@@ -187,6 +190,7 @@ class TransformerModuleEnergy(nn.Module):
                 dim_feedforward=hidden_dim * 4,
                 batch_first=True,
                 norm_first=True,
+                dropout=dropout,
             )
             if self.implementation == "modern_transformer":
                 decoder_layer = partial(
@@ -198,6 +202,7 @@ class TransformerModuleEnergy(nn.Module):
                     qk_layernorm=qk_layernorm,
                     use_sdpa=use_sdpa,
                     jvp_attn=jvp_attn,
+                    dropout=dropout,
                 )
 
             self.energy_cross_attention = decoder_layer()
@@ -206,6 +211,7 @@ class TransformerModuleEnergy(nn.Module):
             nn.LayerNorm(hidden_dim),
             nn.Linear(hidden_dim, hidden_dim),
             nn.SiLU(inplace=False),
+            nn.Dropout(dropout),
             nn.Linear(hidden_dim, 1),
         )
 
@@ -371,6 +377,7 @@ class TransformerModuleEnergy(nn.Module):
                 + embed_prim_type_ids         # (B, M,  C)
             )
         h_in_prim = h_in_prim * prim_real_mask.unsqueeze(-1)  # (B, M, C)
+        h_in_prim = self.embed_dropout(h_in_prim)
 
         # ── Build h_in for ads sequence ──────────────────────────────────────
         if self.concat_combine_input:
@@ -389,6 +396,7 @@ class TransformerModuleEnergy(nn.Module):
                 + embed_ads_type_ids            # (B, N, C)
             )
         h_in_ads = h_in_ads * ads_real_mask.unsqueeze(-1)  # (B, N,  C)
+        h_in_ads = self.embed_dropout(h_in_ads)
 
         # ── Concatenate prim + ads into single sequence ──────────────────────
         h_in = torch.cat([h_in_prim, h_in_ads], dim=1)  # (B, M+N,  C)

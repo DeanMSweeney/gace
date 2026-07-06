@@ -193,6 +193,10 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
         self.fk_start_step      = fk_start_step
         self.fk_mlff_checkpoint = fk_mlff_checkpoint
 
+        # Mean and standard deviation of binding energy from trianing set 
+        self.avg_binding_energy = -1.54790583
+        self.std_binding_energy = 2.27278609
+
         _hist_path = os.path.join(os.path.dirname(__file__), "primitive_atom_distribution.json")
         with open(_hist_path) as f:
             hist = json.load(f)["prim_slab_num_atoms_hist"]
