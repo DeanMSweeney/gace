@@ -77,6 +77,7 @@ class TransformerModule(nn.Module):
         if isinstance(custom_weight_init, str) and custom_weight_init.lower() == "none":
             custom_weight_init = None
 
+        self.atom_dim = atom_dim
         self.input_dim = spatial_dim + atom_dim
         self.time_dim = 1
         self.prim_cond_dim = 9   # atom_types, frac_coords, lengths, angles, T_matrix, supercell_lattice, posenc, conditions, type
