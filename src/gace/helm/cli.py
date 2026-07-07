@@ -445,6 +445,11 @@ def main(cfg: Config) -> None:
         del oracle_ckpt
         torch.cuda.empty_cache()
 
+    if oracle_model is not None:
+        n_total = sum(p.numel() for p in orchestrator.oracle_model.parameters())
+        n_train = sum(p.numel() for p in orchestrator.oracle_model.parameters() if p.requires_grad)
+        declare(f">>> Oracle trainable params: {n_train:,} / {n_total:,}")
+
     # === Training/Evaluation/Generation Execution ===
     if cfg.mode == "debug" or cfg.mode == "train":
         # Train the model with periodic validation
