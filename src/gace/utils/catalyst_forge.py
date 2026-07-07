@@ -188,7 +188,7 @@ class CatalystForge:
             cat_atom_types = np.unique(cat_atomic_numbers)
             cat_atom_types_ok = bool(np.isin(cat_atom_types, cat_oc20_atom_types).any())
 
-            cat_ads_dists = dists[cat_mask, ads_mask]
+            cat_ads_dists = dists[cat_mask, :]
             cat_ads_dist_ok = bool(cat_ads_dists.min() >= 0.5)
 
         except Exception as e:
