@@ -419,7 +419,7 @@ def main(cfg: Config) -> None:
     # since forge is self.model); energy head stays random via strict=False.
     oracle_from_forge = (
         cfg.oracle_cfg.oracle_mode == "train"
-        and cfg.oracle_cfg.get("oracle_pretrained_state", False)
+        and cfg.oracle_cfg.oracle_gen_pretraining
     )
     if cfg.oracle_cfg.oracle_mode == "guide" or oracle_from_forge:
         if oracle_model is None:
