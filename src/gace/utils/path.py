@@ -8,7 +8,7 @@ from torchdiffeq import odeint
 from typing import Optional, Literal, Union, Tuple
 
 from gace.utils.invariance import pbc_aware_delta, batched_ot_align, global_ot_align
-from gace.utils.utils import adsorbate_neighborhood_mask, random_so3_rotation
+from gace.utils.utils import adsorbate_neighborhood_mask, center_and_random_so3_rotation
 from gace.utils.builder import lattice_params_to_matrix
 from gace.utils.euler import euler_step, ctmc_step
 from gace.utils.relaxation import relax_w_mlff
@@ -412,7 +412,7 @@ class Flow():
         # Center ref_ads_pos and apply random SO(3) rotation each training step.
         # Stored as ads_ref_centered_pos — conditioning signal, distinct from ads_pos.
         B = t.shape[0]
-        data.ads_ref_centered_pos = random_so3_rotation(
+        data.ads_ref_centered_pos = center_and_so3_rotation(
             data.ref_ads_pos.float(), ads_batch, B
         )  # (N_ads, 3)
 

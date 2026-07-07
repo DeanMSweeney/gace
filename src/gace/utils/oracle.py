@@ -14,7 +14,7 @@ oracle's roles, selected by whether a flow-model prediction is supplied:
 """
 
 import torch
-import torch.nn.functional as F
+from torch_scatter import scatter
 
 from gace.utils.tft.tft_wrapper import PyGToTensorDict
 from gace.utils.builder import lattice_params_to_matrix
@@ -29,98 +29,74 @@ class Oracle:
     - ``self.hparams.oracle_guidance_min_t``
     """
 
+    def prep_data_for_oracle(self, data):
+        """Populate clean-structure conditioning features on the raw batch in place.
+
+        - ``data.t``: per-graph conditioning time, all ones (clean structure).
+        - ``data.ads_ref_centered_pos``: the reference adsorbate geometry, centered
+          per graph (forge's inference conditioning, path.py:500-504). Centered in
+          both train and eval — deterministic, and the forge trunk is orientation-
+          robust from its own training-time rotation augmentation.
+        """
+        B = data.num_graphs
+        data.t = torch.ones(B, device=data.pos.device)
+        
+        # Center adsorbate 
+        ads_batch = data.batch[data.tags == 2]
+        ref = data.ref_ads_pos.float()
+        com = scatter(ref, ads_batch, dim=0, dim_size=B, reduce="mean")
+        data.ads_ref_centered_pos = ref - com[ads_batch]  # (N_ads, 3)
+
+        # Shift atomic numbers 
+        data.atomic_numbers = data.atomic_numbers - 1
+        data.ads_atomic_numbers = data.ads_atomic_numbers - 1
+
+        # Add supercell lattice 
+        n_scale = data.prim_natoms.float().unsqueeze(1) ** (1 / 3)  # (B, 1)
+        C = lattice_params_to_matrix(lengths=data.lengths_scaled.squeeze(1) * n_scale,
+                                     angles=data.angles_radians.squeeze(1))  # (B, 3, 3)
+        data.supercell_lattice = torch.bmm(data.transformation_matrix.float(), C)  # (B, 3, 3)
+
+        return data
+
     def energy_criterion(self, data, pred_prim=None, pred_ads=None, x_ads=None,
                          prim_padding_mask=None, ads_padding_mask=None) -> torch.Tensor:
-        """Oracle energy MAE loss, shared by standalone training and guidance.
+        """Standalone oracle energy MAE loss on the ground-truth structure.
 
-        The supercell lattice (L_super = M @ C) is a *derived* quantity not stored
-        on the raw data object, so it is recomputed from lengths/angles/M in both
-        cases (mirrors path.py ``_build_transformation_matrix_path``).
-
-        Args:
-            data: PyG batch. For guidance this is the interpolated build_path data;
-                for standalone it is the raw ground-truth batch.
-            pred_prim, pred_ads: Dense flow-model endpoint prediction (guidance only).
-            x_ads: Wrapper ads batch, for the conditioning ads atom types (guidance).
-            prim_padding_mask, ads_padding_mask: Padding masks (guidance only; the
-                standalone branch builds them from the wrapper).
+        build_data_feats populates data.t and data.ads_ref_centered_pos; the wrapper
+        densifies everything. The two fields the wrapper can't produce — 0-indexed
+        atom types and the derived supercell lattice (L_super = M @ C) — are written
+        onto the tensordict here so the model call is a straight pass-through.
 
         Returns:
-            The scalar energy MAE.
+            The scalar energy MAE (standardized target).
         """
-        guidance = pred_prim is not None
-
-        if guidance:
-            # Guidance: flow model's dense endpoint prediction.
-            T = float(self.hparams.oracle_softmax_temperature)
-            atom_types     = torch.softmax(pred_prim[0] / T, dim=-1)  # softmax simplex
-            frac_coords    = pred_prim[1]
-            lengths_scaled = pred_prim[2]
-            angles_radians = pred_prim[3]
-            M              = pred_prim[4]
-            ads_atom_types = x_ads.data["ads_atomic_numbers"]
-            ads_pos        = pred_ads[0]
-            target         = data.ads_binding_energy.float()
-        else:
-            # Standalone: ground-truth structure from the wrapper. The wrapper
-            # builds t_prim/t_ads from data.t; the energy model uses its own fixed
-            # t=1 conditioning internally, so a placeholder here just satisfies it.
-            if not hasattr(data, "t") or data.t is None:
-                data.t = torch.ones(data.num_graphs, device=data.pos.device)
-            wrapper = PyGToTensorDict()
-            x_prim, x_ads, t_prim, t_ads, f_prim, f_ads = wrapper.to_tensordict(data=data)
-            prim_padding_mask = ~x_prim.mask
-            ads_padding_mask  = ~x_ads.mask
-
-            # Raw data is 1-indexed (element Z); guidance feeds 0-indexed classes
-            # (path.py shifts by -1, classes 0-98, mask = 99). Shift here to match,
-            # so both oracle roles share the same embedding rows. clamp(min=0)
-            # keeps to_dense_batch's 0-padding valid; padded tokens are masked out.
-            atom_types     = (x_prim.data["atomic_numbers"].long() - 1).clamp(min=0)  # integer indices
-            frac_coords    = x_prim.data["frac_coords"]
-            lengths_scaled = x_prim.data["lengths_scaled"]
-            angles_radians = x_prim.data["angles_radians"]
-            M              = x_prim.data["transformation_matrix"].float()
-            ads_atom_types = (x_ads.data["ads_atomic_numbers"].long() - 1).clamp(min=0)
-            ads_pos        = x_ads.data["ads_pos"]
-            target         = f_prim.data["ads_binding_energy"].float()
-
-        # Supercell lattice L_super = M @ C, C built from denormalised lengths/angles.
-        n_scale = data.prim_natoms.float().unsqueeze(1) ** (1 / 3)  # (B, 1)
-        C = lattice_params_to_matrix(lengths=lengths_scaled.squeeze(1) * n_scale,
-                                     angles=angles_radians.squeeze(1))  # (B, 3, 3)
-        supercell_lattice = torch.bmm(M, C)  # (B, 3, 3)
-
-        # Random fractional-translation augmentation (standalone training only).
-        # The stored cell origin is arbitrary: shifting all prim frac coords by a
-        # common fraction (mod 1) and the adsorbate by the matching Cartesian
-        # vector s @ C describes the same structure with the same energy.
-        # In-plane (xy) only — a z-shift would wrap slab atoms through the vacuum
-        # while the Cartesian adsorbate stays put, a configuration absent from data.
-        if not guidance and self.training:
-            s = torch.rand(frac_coords.shape[0], 1, 3, device=frac_coords.device,
-                           dtype=frac_coords.dtype)  # (B, 1, 3) per-graph shift
-            s[..., 2] = 0.0
-            frac_coords = (frac_coords + s) % 1.0
-            frac_coords = frac_coords * (~prim_padding_mask).unsqueeze(-1)  # padding back to 0
-            ads_pos = ads_pos + torch.bmm(s, C)  # (B, N, 3) + (B, 1, 3)
+        self.prep_data_for_oracle(data)
+        x_prim, x_ads, t_prim, t_ads, f_prim, f_ads = PyGToTensorDict().to_tensordict(data=data)
+        t = t_prim.data["t"].squeeze(-1)  # (B,)
 
         energy_pred = self.oracle_model(
-            x_prim=(atom_types, frac_coords, lengths_scaled, angles_radians, M, supercell_lattice),
-            x_ads=(ads_atom_types, ads_pos),
-            prim_padding_mask=prim_padding_mask,
-            ads_padding_mask=ads_padding_mask,
+            x_prim=(
+                x_prim.data["atomic_numbers"],          # (B, M) long, 0-indexed
+                x_prim.data["frac_coords"],             # (B, M, 3)
+                x_prim.data["lengths_scaled"],          # (B, 1, 3)
+                x_prim.data["angles_radians"],          # (B, 1, 3)
+                x_prim.data["transformation_matrix"],   # (B, 3, 3)
+                x_prim.data["supercell_lattice"],       # (B, 3, 3)
+            ),
+            x_ads=(
+                x_ads.data["ads_atomic_numbers"],       # (B, N) long, 0-indexed
+                x_ads.data["ads_pos"],                  # (B, N, 3)
+                x_ads.data["ads_ref_centered_pos"],     # (B, N, 3)
+            ),
+            t=t,
+            prim_padding_mask=~x_prim.mask,
+            ads_padding_mask=~x_ads.mask,
         )  # (B,)
 
-        _AVG_BINDING_ENERGY = torch.tensor(self.avg_binding_energy, device=target.device)
-        _STD_BINDING_ENERGY = torch.tensor(self.std_binding_energy, device=target.device)
+        _AVG_BINDING_ENERGY = torch.tensor(self.avg_binding_energy, device=energy_pred.device)
+        _STD_BINDING_ENERGY = torch.tensor(self.std_binding_energy, device=energy_pred.device)
 
-        target = (target.float() - _AVG_BINDING_ENERGY.float()) / _STD_BINDING_ENERGY.float() # standardize to zero 
-        err = (energy_pred - target).abs()
-        # Guidance only: optionally restrict to larger t, where x_hat_1 is a more
-        # reliable clean-structure estimate.
-        min_t = float(self.hparams.oracle_guidance_min_t)
-        if guidance and min_t > 0.0:
-            gate = (data.t.reshape(-1) >= min_t).float()
-            return (err * gate).sum() / gate.sum().clamp(min=1)
-        return err.mean()
+        target = f_prim.data["ads_binding_energy"].float()
+        target = (target - _AVG_BINDING_ENERGY.float()) / _STD_BINDING_ENERGY.float()  # standardize
+        return (energy_pred - target).abs().mean()

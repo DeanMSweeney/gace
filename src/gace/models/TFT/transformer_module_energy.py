@@ -96,7 +96,7 @@ class TransformerModuleEnergy(nn.Module):
         self.input_dim = spatial_dim + atom_dim
         self.time_dim = 1
         self.prim_cond_dim = 9   # atom_types, frac_coords, lengths, angles, T_matrix, supercell_lattice, posenc, conditions, type
-        self.ads_cond_dim = 5    # ads_atom_types, ads_pos, posenc, conditions, type
+        self.ads_cond_dim = 6    # ads_atom_types, ads_pos, ads_ref_centered_pos, posenc, conditions, type
         self.comb_input_dim = self.input_dim + self.time_dim
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
@@ -126,6 +126,7 @@ class TransformerModuleEnergy(nn.Module):
 
         # Embeddings for the adsorbate
         self.pos_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)       # absolute positions (B, N,  3) → (B, N,  C)
+        self.ads_ref_centered_pos_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)  # centered ref geometry (B, N, 3) → (B, N, C)
 
         # type embedding: 0 -> slab, 1 -> adsorbate
         self.type_embed = nn.Embedding(2, hidden_dim)
@@ -273,9 +274,11 @@ class TransformerModuleEnergy(nn.Module):
             Tuple[
                 Int["b n"],      # type: ignore - ads_atom_types (integer indices, conditioning)
                 Float["b n 3"],  # type: ignore - ads_pos (absolute Cartesian positions)
+                Float["b n 3"],  # type: ignore - ads_ref_centered_pos (centered ref geometry)
             ]
             | List[torch.Tensor]
         ),
+        t: Float[" b"],  # type: ignore - per-graph conditioning time (t=1 for clean structures)
         prim_padding_mask: Bool["b m"],  # type: ignore
         ads_padding_mask: Bool["b n"],  # type: ignore
         **kwargs: Any,
@@ -304,7 +307,7 @@ class TransformerModuleEnergy(nn.Module):
         atom_types, frac_coords, lengths_scaled, angles_radians, transformation_matrix, supercell_lattice = x_prim
 
         # adsorbate structure
-        ads_atom_types, ads_pos, = x_ads
+        ads_atom_types, ads_pos, ads_ref_centered_pos = x_ads
 
         device = prim_padding_mask.device
         batch_size, prim_seq_len = prim_padding_mask.shape
@@ -340,6 +343,7 @@ class TransformerModuleEnergy(nn.Module):
         # through the shared atom-type table.
         embed_ads_atom_types = self.atom_type_embed(ads_atom_types.long())            # (B, N, C) — shared table
         embed_ads_pos = self.pos_embed(ads_pos)                                      # (B, N, C)
+        embed_ads_ref_centered_pos = self.ads_ref_centered_pos_embed(ads_ref_centered_pos)  # (B, N, C)
 
         # ── Positional encoding (over combined seq) ──────────────────────────
         if self.add_sinusoid_posenc:
@@ -354,11 +358,10 @@ class TransformerModuleEnergy(nn.Module):
         embed_ads_type_ids  = self.type_embed(ads_type_ids)   # (B, N, C)
 
         # ── Fixed conditioning (matches forge trunk's input distribution) ────
-        # Clean structure → flow time fixed at t=1; energy slot → forge's learned
-        # null (CFG "energy unknown") embedding. Reproduces the summed condition
-        # vector the trunk was pretrained with, broadcast over all tokens.
-        t_ones = torch.ones(batch_size, device=device, dtype=embed_atom_types.dtype)
-        embed_time = self.time_encoding(t_ones)  # (B, C)
+        # Time comes from the caller (t=1 for clean structures); energy slot →
+        # forge's learned null (CFG "energy unknown") embedding. Reproduces the
+        # summed condition vector the trunk was pretrained with, over all tokens.
+        embed_time = self.time_encoding(t)  # (B, C)
         embed_conditions = (embed_time + self.null_binding_energy).unsqueeze(-2)  # (B, 1, C)
 
         # ── Build h_in for prim sequence ─────────────────────────────────────
@@ -403,15 +406,17 @@ class TransformerModuleEnergy(nn.Module):
             h_in_ads = torch.cat([
                 embed_ads_atom_types,           # (B, N, C)
                 embed_ads_pos,                  # (B, N, C)
+                embed_ads_ref_centered_pos,     # (B, N, C)
                 embed_posenc_ads,               # (B, N, C)
                 embed_conditions_ads,           # (B, N, C)
                 embed_ads_type_ids,             # (B, N, C)
-            ], dim=-1)  # (B, N, 5*C)
+            ], dim=-1)  # (B, N, 6*C)
             h_in_ads = self.combine_input_ads(h_in_ads)  # (B, N,  C)
         else:
             h_in_ads = (
                 embed_ads_atom_types            # (B, N, C)
                 + embed_ads_pos                 # (B, N, C)
+                + embed_ads_ref_centered_pos    # (B, N, C)
                 + embed_posenc_ads              # (B, N, C)
                 + embed_conditions              # (B, 1, C) → broadcasts
                 + embed_ads_type_ids            # (B, N, C)
