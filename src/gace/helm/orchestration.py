@@ -438,7 +438,7 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
         B = int(data.batch.max().item()) + 1
         counts = sample_prim_atom_counts(B, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
         
-        if self.target_binding_energy:
+        if self.target_binding_energy is not None:
             data.ads_binding_energy = torch.ones(B, device=data.pos.device, dtype=data.pos.dtype) * self.target_binding_energy
         else: 
             data.ads_binding_energy = torch.normal(mean=_AVG_BINDING_ENERGY, std=_STD_BINDING_ENERGY, size=(B,), device=data.pos.device, dtype=data.pos.dtype)

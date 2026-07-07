@@ -54,7 +54,7 @@ class Flow():
         # ── Atom-type loss (catalyst only — adsorbate types are conditioned) ─────────────────────────────
         z_pred   = pred["z"].float()
         z_target = data.atomic_numbers_target.long().clone()         # (N_prim,)
-        z_target[data.atomic_numbers != self.num_classes - 1] = -100      # ignore already-unmasked atoms
+        z_target[data.atomic_numbers != self.model.atom_dim - 1] = -100      # ignore already-unmasked atoms
         z_loss_atoms = F.cross_entropy(z_pred, z_target, ignore_index=-100, reduction='none')  # (N_prim,)
         valid = (z_target != -100).float()
         z_loss_per_graph = (
@@ -423,7 +423,7 @@ class Flow():
         CTMC mask-token corruption for catalyst atom types (forge variant only).
 
         Real atom types are indices 0–98 (1-indexed elements 1–99).
-        Mask token is self.num_classes - 1 = 99.
+        Mask token is self.model.atom_dim - 1 = 99.
 
         Each atom is independently masked with probability 1 - alpha_t(t),
         where alpha_t is computed from the interpolant schedule per graph then
@@ -436,8 +436,6 @@ class Flow():
         device = data.pos.device
 
         z1 = (data.atomic_numbers.long() - 1)  # (N_prim,) 0-indexed true types (0–98)
-
-        self.num_classes = self.model.atom_dim
 
         # Sample per-graph interpolation time
         t_z_per_graph = t
@@ -453,7 +451,7 @@ class Flow():
         # Per-atom independent masking against the scheduled threshold
         mask_flag = torch.rand(z1.size(0), device=device) < (1 - alpha_t_z.squeeze(1))  # (N_prim,)
         zt = z1.clone()
-        zt[mask_flag] = self.num_classes - 1          # masked atoms get index 99
+        zt[mask_flag] = self.model.atom_dim - 1          # masked atoms get index 99
 
         data.atomic_numbers        = zt          # (N_prim,) long — model input
         data.atomic_numbers_target = z1          # (N_prim,) long — loss target
@@ -538,7 +536,7 @@ class Flow():
 
             # Discrete: all atoms start as mask token
             N_prim = int(self.primitive_mask.sum().item())
-            data.atomic_numbers = torch.full((N_prim,), self.num_classes - 1, dtype=torch.long, device=device)
+            data.atomic_numbers = torch.full((N_prim,), self.model.atom_dim - 1, dtype=torch.long, device=device)
 
         # N^(1/3) scale factor for length denormalisation — lengths_scaled is in normalised space
         n_scale = (num_prim_atoms.float() ** (1 / 3)).unsqueeze(1)  # (B, 1)
