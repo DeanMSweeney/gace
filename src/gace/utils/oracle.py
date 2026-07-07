@@ -81,7 +81,7 @@ class Oracle:
                 x_prim.data["frac_coords"],             # (B, M, 3)
                 x_prim.data["lengths_scaled"],          # (B, 1, 3)
                 x_prim.data["angles_radians"],          # (B, 1, 3)
-                x_prim.data["transformation_matrix"],   # (B, 3, 3)
+                x_prim.data["transformation_matrix"].float(),   # (B, 3, 3)
                 x_prim.data["supercell_lattice"],       # (B, 3, 3)
             ),
             x_ads=(
