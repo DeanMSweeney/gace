@@ -69,6 +69,7 @@ class TransformerModuleEnergy(nn.Module):
         num_heads: int,
         num_layers: int,
         hidden_dim: int,
+        num_energy_layers: int = 4,
         activation: Literal["SiLU", "ReLU", "SwiGLU"] = "SiLU",
         implementation: Literal["transformer", "modern_transformer"] = "modern_transformer",
         context_length: int = 2048,
@@ -94,11 +95,12 @@ class TransformerModuleEnergy(nn.Module):
 
         self.input_dim = spatial_dim + atom_dim
         self.time_dim = 1
-        self.prim_cond_dim = 8   # atom_types, frac_coords, lengths, angles, T_matrix, supercell_lattice, posenc, type
-        self.ads_cond_dim = 4    # ads_atom_types, ads_pos, posenc, type
+        self.prim_cond_dim = 9   # atom_types, frac_coords, lengths, angles, T_matrix, supercell_lattice, posenc, conditions, type
+        self.ads_cond_dim = 5    # ads_atom_types, ads_pos, posenc, conditions, type
         self.comb_input_dim = self.input_dim + self.time_dim
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
+        self.num_energy_layers = num_energy_layers
         self.implementation = implementation
         self.context_length = context_length
         self.jvp_attn = jvp_attn
@@ -111,10 +113,11 @@ class TransformerModuleEnergy(nn.Module):
         self.embed_dropout = nn.Dropout(dropout)
 
         # Embeddings for each the primitive cell
-        # Soft embedding over the type simplex (B, *, atom_dim) -> (B, *, C).
-        # A hard one-hot input equals an nn.Embedding lookup; a softmax input
-        # keeps the path differentiable w.r.t. atom-type logits. Shared with ads.
-        self.atom_type_embed = nn.Linear(atom_dim, hidden_dim, bias=False)
+        # Integer atom-type lookup (B, *) long -> (B, *, C), identical to the forge
+        # variant so its pretrained weight transfers by name. Shared with ads.
+        # The .weight is (atom_dim, C): a soft-simplex guidance path can be added
+        # later as `simplex @ self.atom_type_embed.weight` without retraining.
+        self.atom_type_embed = nn.Embedding(atom_dim, hidden_dim)
         self.frac_coords_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
         self.lengths_scaled_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
         self.angles_radians_embed = nn.Linear(spatial_dim, hidden_dim, bias=False)
@@ -136,9 +139,14 @@ class TransformerModuleEnergy(nn.Module):
             self.combine_input_prim = nn.Linear(self.prim_cond_dim * hidden_dim, hidden_dim)
             self.combine_input_ads = nn.Linear(self.ads_cond_dim * hidden_dim, hidden_dim)
 
-        # NOTE: the energy regressor scores a clean structure — there is no flow
-        # time conditioning and no ads_binding_energy conditioning (binding energy
-        # is the regression target here), so both embeddings are removed.
+        # Conditioning path, kept to match the forge trunk's input distribution so
+        # its pretrained weights transfer in-distribution. The energy regressor
+        # scores a *clean* structure, so time is fixed at t=1; binding energy is the
+        # regression target (not an input), so the energy slot always uses forge's
+        # learned `null_binding_energy` (its CFG "energy unknown" embedding). Both
+        # are frozen at finetune time — they reproduce a fixed conditioning vector.
+        self.time_encoding = TimeFourierEncoding(posenc_dim=hidden_dim, max_len=200)
+        self.null_binding_energy = nn.Parameter(torch.zeros(hidden_dim))
 
         if activation == "SiLU":
             activation = nn.SiLU(inplace=False)
@@ -207,13 +215,16 @@ class TransformerModuleEnergy(nn.Module):
 
             self.energy_cross_attention = decoder_layer()
 
-        self.out_energy = nn.Sequential(
-            nn.LayerNorm(hidden_dim),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.SiLU(inplace=False),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, 1),
+        # Deeper regression layers applied after the cross-attention re-read,
+        # before pooling to the scalar head.
+        self.energy_transformer = transformer_class(
+            dim=hidden_dim,
+            depth=num_energy_layers,
+            num_heads=num_heads,
+            dropout=dropout,
         )
+
+        self.out_energy = nn.Linear(hidden_dim, 1, bias=True)
 
         # Initialize weights
         if self.custom_weight_init is not None:
@@ -249,7 +260,7 @@ class TransformerModuleEnergy(nn.Module):
         self,
         x_prim: (
             Tuple[
-                Float["b m v"],  # type: ignore - atom_types (soft one-hot simplex)
+                Int["b m"],      # type: ignore - atom_types (integer indices)
                 Float["b m 3"],  # type: ignore - frac_coords
                 Float["b 1 3"],  # type: ignore - lengths_scaled
                 Float["b 1 3"],  # type: ignore - angles_radians
@@ -279,8 +290,8 @@ class TransformerModuleEnergy(nn.Module):
         scored as-is, and binding energy is the regression target.
 
         Args:
-            x_prim: Prim modalities (atom_types simplex, frac_coords, lengths,
-                angles, T-matrix, supercell_lattice).
+            x_prim: Prim modalities (atom_types integer indices, frac_coords,
+                lengths, angles, T-matrix, supercell_lattice).
             x_ads: Ads modalities (ads_atom_types indices, ads_pos).
             prim_padding_mask: True = padding for prim tokens (B, M).
             ads_padding_mask: True = padding for ads tokens (B, N).
@@ -310,9 +321,8 @@ class TransformerModuleEnergy(nn.Module):
         combined_real_mask = torch.cat([prim_real_mask, ads_real_mask], dim=1)  # (B, M+N)
 
         # ── Prim embeddings ──────────────────────────────────────────────────
-        # atom_types is a probability simplex (B, M, V); the soft embedding
-        # `simplex @ W` equals an nn.Embedding lookup when the simplex is one-hot.
-        embed_atom_types = self.atom_type_embed(atom_types)                 # (B, M,  C)
+        # atom_types are integer indices (B, M); a direct nn.Embedding lookup.
+        embed_atom_types = self.atom_type_embed(atom_types.long())          # (B, M,  C)
         embed_frac_coords = self.frac_coords_embed(frac_coords)             # (B, M,  C)
         embed_lengths_scaled = self.lengths_scaled_embed(lengths_scaled)    # (B, 1, C)
         embed_angles_radians = self.angles_radians_embed(angles_radians)    # (B, 1, C)
@@ -326,10 +336,9 @@ class TransformerModuleEnergy(nn.Module):
         ).unsqueeze(1)  # (B, 1, C)
 
         # ── Ads embeddings ───────────────────────────────────────────────────
-        # ads_atom_types are integer indices (fixed conditioning); one-hot them so
-        # they pass through the same soft atom-type embedding (== a lookup).
-        ads_atom_types_onehot = F.one_hot(ads_atom_types.long(), self.atom_dim).to(embed_atom_types.dtype)
-        embed_ads_atom_types = self.atom_type_embed(ads_atom_types_onehot)            # (B, N, C) — shared table
+        # ads_atom_types are integer indices (fixed conditioning); direct lookup
+        # through the shared atom-type table.
+        embed_ads_atom_types = self.atom_type_embed(ads_atom_types.long())            # (B, N, C) — shared table
         embed_ads_pos = self.pos_embed(ads_pos)                                      # (B, N, C)
 
         # ── Positional encoding (over combined seq) ──────────────────────────
@@ -344,7 +353,13 @@ class TransformerModuleEnergy(nn.Module):
         embed_prim_type_ids = self.type_embed(prim_type_ids)  # (B, M, C)
         embed_ads_type_ids  = self.type_embed(ads_type_ids)   # (B, N, C)
 
-        # NOTE: no time / binding-energy conditioning — the structure is scored as-is.
+        # ── Fixed conditioning (matches forge trunk's input distribution) ────
+        # Clean structure → flow time fixed at t=1; energy slot → forge's learned
+        # null (CFG "energy unknown") embedding. Reproduces the summed condition
+        # vector the trunk was pretrained with, broadcast over all tokens.
+        t_ones = torch.ones(batch_size, device=device, dtype=embed_atom_types.dtype)
+        embed_time = self.time_encoding(t_ones)  # (B, C)
+        embed_conditions = (embed_time + self.null_binding_energy).unsqueeze(-2)  # (B, 1, C)
 
         # ── Build h_in for prim sequence ─────────────────────────────────────
         if self.concat_combine_input:
@@ -354,6 +369,7 @@ class TransformerModuleEnergy(nn.Module):
             embed_transformation_matrix_bc = embed_transformation_matrix.expand(-1, prim_seq_len, -1)
             embed_supercell_lattice_bc = embed_supercell_lattice.expand(-1, prim_seq_len, -1)
 
+            embed_conditions_prim = embed_conditions.expand(-1, prim_seq_len, -1)
             h_in_prim = torch.cat([
                 embed_atom_types,               # (B, M,  C)
                 embed_frac_coords,              # (B, M,  C)
@@ -362,8 +378,9 @@ class TransformerModuleEnergy(nn.Module):
                 embed_transformation_matrix_bc, # (B, M,  C)
                 embed_supercell_lattice_bc,     # (B, M,  C)
                 embed_posenc_prim,              # (B, M,  C)
+                embed_conditions_prim,          # (B, M,  C)
                 embed_prim_type_ids,            # (B, M,  C)
-            ], dim=-1)  # (B, M,  8*C)
+            ], dim=-1)  # (B, M,  9*C)
             h_in_prim = self.combine_input_prim(h_in_prim)  # (B, M, C)
         else:
             h_in_prim = (
@@ -374,6 +391,7 @@ class TransformerModuleEnergy(nn.Module):
                 + embed_transformation_matrix # (B, 1, C) → broadcasts
                 + embed_supercell_lattice     # (B, 1, C) → broadcasts
                 + embed_posenc_prim           # (B, M,  C)
+                + embed_conditions            # (B, 1, C) → broadcasts
                 + embed_prim_type_ids         # (B, M,  C)
             )
         h_in_prim = h_in_prim * prim_real_mask.unsqueeze(-1)  # (B, M, C)
@@ -381,10 +399,12 @@ class TransformerModuleEnergy(nn.Module):
 
         # ── Build h_in for ads sequence ──────────────────────────────────────
         if self.concat_combine_input:
+            embed_conditions_ads = embed_conditions.expand(-1, ads_seq_len, -1)
             h_in_ads = torch.cat([
                 embed_ads_atom_types,           # (B, N, C)
                 embed_ads_pos,                  # (B, N, C)
                 embed_posenc_ads,               # (B, N, C)
+                embed_conditions_ads,           # (B, N, C)
                 embed_ads_type_ids,             # (B, N, C)
             ], dim=-1)  # (B, N, 5*C)
             h_in_ads = self.combine_input_ads(h_in_ads)  # (B, N,  C)
@@ -393,6 +413,7 @@ class TransformerModuleEnergy(nn.Module):
                 embed_ads_atom_types            # (B, N, C)
                 + embed_ads_pos                 # (B, N, C)
                 + embed_posenc_ads              # (B, N, C)
+                + embed_conditions              # (B, 1, C) → broadcasts
                 + embed_ads_type_ids            # (B, N, C)
             )
         h_in_ads = h_in_ads * ads_real_mask.unsqueeze(-1)  # (B, N,  C)
@@ -418,7 +439,7 @@ class TransformerModuleEnergy(nn.Module):
 
         h_out = h_out * combined_real_mask.unsqueeze(-1)  # (B, M+N,  C)
 
-        # ── Energy head: (optional) cross-attention → masked-mean pool → MLP ──
+        # ── Energy head: (optional) cross-attention → regression layers → pool → linear ──
         if self.cross_attention:
             # Re-read the input embeddings: query = trunk output, memory = h_in.
             h_energy = self.energy_cross_attention(
@@ -430,6 +451,9 @@ class TransformerModuleEnergy(nn.Module):
             )  # (B, M+N, C)
         else:
             h_energy = h_out
+
+        h_energy = self.energy_transformer(h_energy, padding_mask=padding_mask, **attention_kwargs)
+        h_energy = h_energy * combined_real_mask.unsqueeze(-1)  # (B, M+N, C)
 
         mask_f = combined_real_mask.unsqueeze(-1).float()        # (B, M+N, 1)
         h_pooled = (h_energy * mask_f).sum(-2) / mask_f.sum(-2).clamp(min=1)  # (B, C)

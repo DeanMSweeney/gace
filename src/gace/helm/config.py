@@ -291,7 +291,13 @@ class OracleConfig:
                |oracle(x_hat_1) - ads_binding_energy| to the flow loss."""
 
     oracle_ckpt_path: Optional[str] = None
-    """Path to pretrained oracle weights, loaded in 'guide' mode."""
+    """Checkpoint loaded into the oracle. In 'guide' mode: a standalone oracle run
+    (keys 'oracle_model.'). In 'train' mode with oracle_pretrained_state=True: a
+    trained forge checkpoint (keys 'model.') used to seed the oracle trunk."""
+
+    oracle_gen_pretraining: bool = False
+    """If True (with oracle_mode='train'), seed the oracle trunk from the forge
+    checkpoint at oracle_ckpt_path instead of training from scratch (Stage A)."""
 
     oracle_lambda_energy: float = 1.0
     """Loss weight for the energy guidance term (oracle_mode == 'guide')."""

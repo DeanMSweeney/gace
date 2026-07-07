@@ -62,9 +62,9 @@ class Oracle:
             ads_pos        = pred_ads[0]
             target         = data.ads_binding_energy.float()
         else:
-            # Standalone: ground-truth structure from the wrapper. The shared
-            # wrapper builds t_prim/t_ads from data.t; the energy model ignores
-            # time, so a clean-structure placeholder (t=1) just satisfies it.
+            # Standalone: ground-truth structure from the wrapper. The wrapper
+            # builds t_prim/t_ads from data.t; the energy model uses its own fixed
+            # t=1 conditioning internally, so a placeholder here just satisfies it.
             if not hasattr(data, "t") or data.t is None:
                 data.t = torch.ones(data.num_graphs, device=data.pos.device)
             wrapper = PyGToTensorDict()
@@ -72,13 +72,16 @@ class Oracle:
             prim_padding_mask = ~x_prim.mask
             ads_padding_mask  = ~x_ads.mask
 
-            V = self.oracle_model.atom_dim
-            atom_types     = F.one_hot(x_prim.data["atomic_numbers"].long(), V).float()  # hard one-hot
+            # Raw data is 1-indexed (element Z); guidance feeds 0-indexed classes
+            # (path.py shifts by -1, classes 0-98, mask = 99). Shift here to match,
+            # so both oracle roles share the same embedding rows. clamp(min=0)
+            # keeps to_dense_batch's 0-padding valid; padded tokens are masked out.
+            atom_types     = (x_prim.data["atomic_numbers"].long() - 1).clamp(min=0)  # integer indices
             frac_coords    = x_prim.data["frac_coords"]
             lengths_scaled = x_prim.data["lengths_scaled"]
             angles_radians = x_prim.data["angles_radians"]
             M              = x_prim.data["transformation_matrix"].float()
-            ads_atom_types = x_ads.data["ads_atomic_numbers"]
+            ads_atom_types = (x_ads.data["ads_atomic_numbers"].long() - 1).clamp(min=0)
             ads_pos        = x_ads.data["ads_pos"]
             target         = f_prim.data["ads_binding_energy"].float()
 
@@ -87,6 +90,20 @@ class Oracle:
         C = lattice_params_to_matrix(lengths=lengths_scaled.squeeze(1) * n_scale,
                                      angles=angles_radians.squeeze(1))  # (B, 3, 3)
         supercell_lattice = torch.bmm(M, C)  # (B, 3, 3)
+
+        # Random fractional-translation augmentation (standalone training only).
+        # The stored cell origin is arbitrary: shifting all prim frac coords by a
+        # common fraction (mod 1) and the adsorbate by the matching Cartesian
+        # vector s @ C describes the same structure with the same energy.
+        # In-plane (xy) only — a z-shift would wrap slab atoms through the vacuum
+        # while the Cartesian adsorbate stays put, a configuration absent from data.
+        if not guidance and self.training:
+            s = torch.rand(frac_coords.shape[0], 1, 3, device=frac_coords.device,
+                           dtype=frac_coords.dtype)  # (B, 1, 3) per-graph shift
+            s[..., 2] = 0.0
+            frac_coords = (frac_coords + s) % 1.0
+            frac_coords = frac_coords * (~prim_padding_mask).unsqueeze(-1)  # padding back to 0
+            ads_pos = ads_pos + torch.bmm(s, C)  # (B, N, 3) + (B, 1, 3)
 
         energy_pred = self.oracle_model(
             x_prim=(atom_types, frac_coords, lengths_scaled, angles_radians, M, supercell_lattice),

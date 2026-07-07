@@ -253,9 +253,8 @@ def main(cfg: Config) -> None:
         
     # === Lightning Module Setup ===
     # Wrap model in LightningModule for training orchestration.
-    # oracle_ckpt_path is cli-only; capture it (needed for guide-mode loading
-    # below), then drop it from oracle_cfg so the remaining knobs can be
-    # **unpacked into LightFlowMatch. (oracle_model_cfg is a top-level field.)
+    # oracle_ckpt_path is captured here for the oracle-loading block below; it also
+    # rides into LightFlowMatch via **cfg.oracle_cfg (lands in hparams, unused there).
     oracle_ckpt_path = cfg.oracle_cfg.oracle_ckpt_path
     orchestrator = LightFlowMatch(
         model=model,
@@ -414,19 +413,23 @@ def main(cfg: Config) -> None:
         ckpt_path_for_trainer = None
 
 
-    # === Oracle weight loading (guide mode) ===
-    # In 'guide' mode the oracle is frozen and steers the flow model, so
-    # it must be initialised from a standalone oracle-training run. Keys there are
-    # prefixed "oracle_model." (self.oracle_model in LightFlowMatch).
-    if cfg.oracle_cfg.oracle_mode == "guide":
+    # === Oracle weight loading ===
+    # guide: init frozen oracle from a standalone oracle run (keys "oracle_model.").
+    # train + oracle_pretrained_state: seed oracle trunk from forge (keys "model.",
+    # since forge is self.model); energy head stays random via strict=False.
+    oracle_from_forge = (
+        cfg.oracle_cfg.oracle_mode == "train"
+        and cfg.oracle_cfg.get("oracle_pretrained_state", False)
+    )
+    if cfg.oracle_cfg.oracle_mode == "guide" or oracle_from_forge:
         if oracle_model is None:
-            raise ValueError("oracle_mode='guide' requires oracle_model_cfg to be set.")
+            raise ValueError("oracle weight loading requires oracle_model_cfg to be set.")
         if not oracle_ckpt_path:
-            raise ValueError("oracle_mode='guide' requires oracle_cfg.oracle_ckpt_path.")
-        declare(f">>> Loading frozen oracle weights from: {oracle_ckpt_path}")
+            raise ValueError("oracle weight loading requires oracle_cfg.oracle_ckpt_path.")
+        prefix = "model." if oracle_from_forge else "oracle_model."
+        declare(f">>> Loading oracle weights (prefix '{prefix}') from: {oracle_ckpt_path}")
         oracle_ckpt = torch.load(oracle_ckpt_path, map_location="cpu")
         oracle_sd = oracle_ckpt.get("state_dict", oracle_ckpt)
-        prefix = "oracle_model."
         oracle_remapped = {k[len(prefix):]: v for k, v in oracle_sd.items() if k.startswith(prefix)}
         if not oracle_remapped:  # checkpoint may already be the bare module state_dict
             oracle_remapped = oracle_sd

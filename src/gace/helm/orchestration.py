@@ -130,6 +130,12 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
             # pinned by the train() override, which Lightning triggers each epoch.
             for p in self.oracle_model.parameters():
                 p.requires_grad_(False)
+        elif self.oracle_model is not None and self.oracle_mode == "train" \
+                and getattr(self.hparams, "oracle_gen_pretraining", False):
+            # Stage A: forge trunk is frozen; train only the random energy head.
+            for name, p in self.oracle_model.named_parameters():
+                p.requires_grad_(name.startswith(
+                    ("energy_cross_attention.", "energy_transformer.", "out_energy.")))
         self.variant = variant  # "refine" or "forge"
         self.mode = mode
         self.loss_fn = nn.MSELoss()  # Base loss function (not directly used, see criterion)
@@ -589,7 +595,8 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
         # the flow model (the oracle is frozen in "guide" mode and absent
         # when off, so self.model.parameters() is the right set in both cases).
         if self.oracle_mode == "train":
-            params = self.oracle_model.parameters()
+            # Only trainable params (Stage A freezes the forge trunk).
+            params = [p for p in self.oracle_model.parameters() if p.requires_grad]
         else:
             params = self.model.parameters()
 
