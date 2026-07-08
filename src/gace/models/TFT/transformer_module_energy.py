@@ -110,7 +110,11 @@ class TransformerModuleEnergy(nn.Module):
         self.custom_weight_init = custom_weight_init
         self.disable_prenorm = disable_prenorm
         self.atom_dim = atom_dim
-        self.embed_dropout = nn.Dropout(dropout)
+        # Dropout is scoped to the trainable energy head only. The trunk and input
+        # embeddings run clean (dropout=0) — they mirror forge's dropout-free
+        # pretraining and are frozen under oracle_gen_pretraining, so noising
+        # their activations would only corrupt features the weights can't adapt to.
+        self.embed_dropout = nn.Dropout(0.0)
 
         # Embeddings for each the primitive cell
         # Integer atom-type lookup (B, *) long -> (B, *, C), identical to the forge
@@ -180,7 +184,7 @@ class TransformerModuleEnergy(nn.Module):
                 dim=hidden_dim,
                 depth=num_layers,
                 num_heads=num_heads,
-                dropout=dropout,
+                dropout=0.0,  # frozen trunk runs clean; config dropout is head-only
             )
         else:
             raise ValueError(f"Invalid implementation: {self.implementation}")
