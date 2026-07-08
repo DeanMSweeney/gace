@@ -51,11 +51,24 @@ class Oracle:
         data.atomic_numbers = data.atomic_numbers - 1
         data.ads_atomic_numbers = data.ads_atomic_numbers - 1
 
-        # Add supercell lattice 
+        # Add supercell lattice
         n_scale = data.prim_natoms.float().unsqueeze(1) ** (1 / 3)  # (B, 1)
         C = lattice_params_to_matrix(lengths=data.lengths_scaled.squeeze(1) * n_scale,
                                      angles=data.angles_radians.squeeze(1))  # (B, 3, 3)
         data.supercell_lattice = torch.bmm(data.transformation_matrix.float(), C)  # (B, 3, 3)
+
+        # In-plane fractional-translation augmentation (training only). The cell
+        # origin is arbitrary: shifting all prim frac coords by a per-graph
+        # fraction (mod 1) and the adsorbate by the matching Cartesian vector
+        # s @ C describes the same structure with the same energy. z untouched —
+        # a z-shift would wrap slab atoms through the vacuum while ads_pos stays put.
+        if self.training:
+            prim_batch = data.batch[data.tags == 1]
+            s = torch.rand(B, 3, device=data.pos.device, dtype=data.pos.dtype)
+            s[:, 2] = 0.0
+            data.pos = (data.pos + s[prim_batch]) % 1.0          # (N_prim, 3) frac coords
+            shift_cart = torch.bmm(s.unsqueeze(1), C).squeeze(1)  # (B, 3)
+            data.ads_pos = data.ads_pos + shift_cart[ads_batch]
 
         return data
 
