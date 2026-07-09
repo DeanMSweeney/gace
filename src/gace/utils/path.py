@@ -412,7 +412,7 @@ class Flow():
         # Center ref_ads_pos and apply random SO(3) rotation each training step.
         # Stored as ads_ref_centered_pos — conditioning signal, distinct from ads_pos.
         B = t.shape[0]
-        data.ads_ref_centered_pos = center_and_so3_rotation(
+        data.ads_ref_centered_pos = center_and_random_so3_rotation(
             data.ref_ads_pos.float(), ads_batch, B
         )  # (N_ads, 3)
 
