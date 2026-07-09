@@ -91,7 +91,7 @@ class Flow():
             + lambda_M   * M_loss
         )
 
-        return {
+        losses = {
             "total_loss":   total_loss,
             "x_loss":       x_loss,
             "z_loss":       z_loss,
@@ -100,6 +100,17 @@ class Flow():
             "ang_loss":     ang_loss,
             "M_loss":       M_loss,
         }
+
+        # ── Energy loss (predict_energy: joint generation + energy regression) ──
+        if self.model.predict_energy:
+            target_energy = (
+                data.ads_binding_energy.float() - self.avg_binding_energy
+            ) / self.std_binding_energy  # standardized (B,)
+            energy_loss = ((pred["energy"].float() - target_energy).abs() * self.time_weight).mean()
+            losses["energy_loss"] = energy_loss
+            losses["total_loss"] = total_loss + float(self.hparams.lambda_energy) * energy_loss
+
+        return losses
 
     def build_path(
         self,

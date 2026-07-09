@@ -296,11 +296,10 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
 
         return pred_prim, pred_ads, x_prim, x_ads, prim_padding_mask, ads_padding_mask
 
-    @staticmethod
-    def _sparsify(pred_prim, pred_ads, x_prim, x_ads) -> dict:
+    def _sparsify(self, pred_prim, pred_ads, x_prim, x_ads) -> dict:
         """Unpack the dense flow outputs to the sparse prediction dict (second half
         of ``forward``)."""
-        return {
+        pred = {
             "pos":     x_prim.to_sparse(pred_prim[1]),   # (N_prim, 3)
             "z":       x_prim.to_sparse(pred_prim[0]),   # (N_prim, 100)
             "len":     pred_prim[2].squeeze(1),          # (B, 3)
@@ -308,6 +307,9 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
             "M":       pred_prim[4],                     # (B, 3, 3)
             "ads_pos": x_ads.to_sparse(pred_ads[0]),     # (N_ads, 3)
         }
+        if self.model.predict_energy:
+            pred["energy"] = pred_prim[5]                # (B,)
+        return pred
 
     def forward(self, data: Data, force_unconditional: bool = False) -> dict:
         """Run the forge model forward pass and return a flat prediction dict.

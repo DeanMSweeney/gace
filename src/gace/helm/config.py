@@ -98,6 +98,9 @@ class OptimizerConfig:
     lambda_M: float = 1.0
     """Loss weight for supercell transformation matrix loss (M_loss)"""
 
+    lambda_energy: float = 1.0
+    """Loss weight for the joint energy-prediction loss (model_cfg predict_energy)"""
+
 
 @dataclass
 class SamplerConfig:
