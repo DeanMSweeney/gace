@@ -504,6 +504,15 @@ class Flow():
         data = input_graph.clone()
         device = data.pos.device
 
+        # The Langevin score correction s_t = g(t)·(t·v_t − x_t)/(1−t) is only the
+        # true score under a standard-Gaussian prior. It is invalid for the uniform
+        # informed priors, so require Gaussian init whenever any γ_g is enabled.
+        if self.langevin_gamma_slab > 0.0 or self.langevin_gamma_ads > 0.0:
+            assert not self.hparams.informed_priors, (
+                "Langevin sampling (langevin_gamma_* > 0) assumes a Gaussian prior; "
+                "set informed_priors=False."
+            )
+
         self.primitive_mask = (data.tags == 1)
         self.adsorbate_mask = (data.tags == 2)
         B = int(data.batch.max().item()) + 1
@@ -617,13 +626,18 @@ class Flow():
                     else:
                         pred = pred_cond
 
-                # Update continuous modalities
+                # Update continuous modalities. noise_scale = prior-agnostic Brownian
+                # noise; langevin_gamma = score-guided Langevin term (Gaussian prior).
+                # Slab/lattice-frame modalities share one γ_g; Cartesian ads_pos its own.
                 noise_scale = self.sde_noise_scale
-                data.pos               = euler_step(data.pos,               pred["pos"],     t_curr, dt, pbc_aware=True,  noise_scale=noise_scale)
-                data.lengths_scaled    = euler_step(data.lengths_scaled,    pred["len"],     t_curr, dt, pbc_aware=False, noise_scale=noise_scale)
-                data.angles_radians    = euler_step(data.angles_radians,    pred["ang"],     t_curr, dt, pbc_aware=False, noise_scale=noise_scale)
-                data.transformation_matrix = euler_step(data.transformation_matrix, pred["M"], t_curr, dt, pbc_aware=False, noise_scale=noise_scale)
-                data.ads_pos = euler_step(data.ads_pos, pred["ads_pos"], t_curr, dt, pbc_aware=False, noise_scale=noise_scale)
+                g_slab      = self.langevin_gamma_slab
+                g_ads       = self.langevin_gamma_ads
+                cutoff      = self.langevin_cutoff
+                data.pos               = euler_step(data.pos,               pred["pos"],     t_curr, dt, pbc_aware=True,  noise_scale=noise_scale, langevin_gamma=g_slab, langevin_cutoff=cutoff)
+                data.lengths_scaled    = euler_step(data.lengths_scaled,    pred["len"],     t_curr, dt, pbc_aware=False, noise_scale=noise_scale, langevin_gamma=g_slab, langevin_cutoff=cutoff)
+                data.angles_radians    = euler_step(data.angles_radians,    pred["ang"],     t_curr, dt, pbc_aware=False, noise_scale=noise_scale, langevin_gamma=g_slab, langevin_cutoff=cutoff)
+                data.transformation_matrix = euler_step(data.transformation_matrix, pred["M"], t_curr, dt, pbc_aware=False, noise_scale=noise_scale, langevin_gamma=g_slab, langevin_cutoff=cutoff)
+                data.ads_pos = euler_step(data.ads_pos, pred["ads_pos"], t_curr, dt, pbc_aware=False, noise_scale=noise_scale, langevin_gamma=g_ads, langevin_cutoff=cutoff)
 
                 # Update discrete atom types (CTMC)
                 data.atomic_numbers = ctmc_step(data.atomic_numbers, pred["z"], t_curr, dt)

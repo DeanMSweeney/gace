@@ -102,6 +102,9 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
             cfg_w_continuous: float=1.0,
             cfg_w_discrete: float=1.0,
             sde_noise_scale: float=0.0,
+            langevin_gamma_slab: float=0.0,
+            langevin_gamma_ads: float=0.0,
+            langevin_cutoff: float=0.9,
             sanitize_otf: bool=True,
             dedupe_otf: bool=False,
             fk_steering: bool=False,
@@ -191,6 +194,11 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
         self.cfg_w_continuous = cfg_w_continuous
         self.cfg_w_discrete = cfg_w_discrete
         self.sde_noise_scale = sde_noise_scale
+
+        # Langevin (SDE) score-guided Euclidean step; per-modality γ_g. See config.py.
+        self.langevin_gamma_slab = langevin_gamma_slab
+        self.langevin_gamma_ads  = langevin_gamma_ads
+        self.langevin_cutoff     = langevin_cutoff
 
         # Feynman-Kac steering
         self.fk_steering   = fk_steering

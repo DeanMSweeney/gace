@@ -127,6 +127,33 @@ class SamplerConfig:
     continuous modalities. Recommended value with FK: 0.05.
     """
 
+    # ==================== Langevin (SDE) Euclidean Step ====================
+    # Score-guided stochastic sampling, per Algorithm 2's EUCLIDEAN STEP and
+    # zatom's SDEMetricInterpolant. Each modality adds:
+    #   s_t = g(t)·(t·v_t − x_t)/(1−t)          # score correction (guides to manifold)
+    #   dW  = sqrt(2·γ_g·g(t))·N(0, I)          # Langevin Wiener noise
+    # with g(t) = 1/(t + 1e-2) for t < langevin_cutoff, else 0.
+    # γ_g (langevin_gamma_*) is split by coordinate scale, matching zatom: all
+    # slab / lattice-frame quantities (fractional coords, normalised
+    # lengths/angles, M) share one small value; raw Cartesian needs a much
+    # larger one. ASSUMES a Gaussian prior (informed_priors=False), asserted in
+    # sample().
+
+    langevin_gamma_slab: float = 0.0
+    """γ_g for all slab / lattice-frame modalities: catalyst fractional coords
+    (pos), normalised lengths (lengths_scaled), angles (angles_radians), and the
+    transformation matrix M. These live in [0, 1) / normalised / near-integer
+    ranges, so they share one small value (zatom uses ~0.01). 0.0 disables the
+    score correction + Wiener noise for all of them."""
+
+    langevin_gamma_ads: float = 0.0
+    """γ_g for adsorbate Cartesian positions (ads_pos). Raw Ångström scale —
+    tolerates a large value (zatom uses ~50 for Cartesian pos)."""
+
+    langevin_cutoff: float = 0.9
+    """Time above which g(t) = 0, switching off the score correction and Wiener
+    noise so the endpoint commits deterministically. zatom uses 0.9–0.95."""
+
     # ==================== Structure Generation ====================
 
     num_generated_samples: int = 1
