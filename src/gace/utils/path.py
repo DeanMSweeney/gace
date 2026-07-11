@@ -117,11 +117,17 @@ class Flow():
         input_graph: Data,
         time_dist: Literal["uniform", "beta"] = "beta",
         beta_t: float = 1.8,
+        t_min: float = 0.0,
     ) -> Data:
         """
         Generate interpolated training data along a path from initial to relaxed positions.
 
         For "forge" variant: interpolates from noise/initial positions to relaxed positions
+
+        Args:
+            t_min: Floor for the sampled time, t = max(t, t_min). Oracle training
+                uses ~0.98 (zatom finetuning recipe: near-clean views, fresh
+                small corruption each visit).
 
         Returns:
             data: Modified data object with interpolated inputs/targets at time t
@@ -130,13 +136,15 @@ class Flow():
         with torch.no_grad():
             data = input_graph.clone()
 
-            # define time 
+            # define time
             if time_dist == "uniform":
                 t = torch.rand(len(torch.unique(data.batch)), 1, device=data.pos.device, dtype=torch.float32) # B , 1
             elif time_dist == "beta":
                 beta = torch.distributions.Beta(beta_t, 1.0)
                 t = beta.sample((len(torch.unique(data.batch)), 1)).to(data.pos.device) # B , 1
-            data.t = t 
+            if t_min > 0.0:
+                t = t.clamp(min=t_min)
+            data.t = t
 
             # ── Lattice and supercell (CatFlow data only) ────────────────────
             self.primitive_mask = (data.tags == 1)

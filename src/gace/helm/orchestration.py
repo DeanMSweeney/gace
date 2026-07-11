@@ -348,12 +348,13 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
           frozen-oracle energy guidance term to the flow loss.
         """
         # Mode 1: standalone oracle training — no flow loss.
-        if self.oracle_mode == "train":
-            energy_loss = self.energy_criterion(data=input_graph)
-            return {"total_loss": energy_loss, "energy_loss": energy_loss}
 
         # Flow path (off / guide). path() stores supervision targets on `data`.
         data = self.build_path(input_graph=input_graph)
+
+        if self.oracle_mode == "train":
+            energy_loss = self.energy_criterion(data=input_graph)
+            return {"total_loss": energy_loss, "energy_loss": energy_loss}
 
         if self.variant != "forge":
             raise RuntimeError(f"Unknown variant: {self.variant}")

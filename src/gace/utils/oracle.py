@@ -84,7 +84,9 @@ class Oracle:
         Returns:
             The scalar energy MAE (standardized target).
         """
-        self.prep_data_for_oracle(data)
+        if not self.training:
+            self.prep_data_for_oracle(data)
+            
         x_prim, x_ads, t_prim, t_ads, f_prim, f_ads = PyGToTensorDict().to_tensordict(data=data)
         t = t_prim.data["t"].squeeze(-1)  # (B,)
 
