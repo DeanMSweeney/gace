@@ -350,7 +350,11 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
         # Mode 1: standalone oracle training — no flow loss.
 
         # Flow path (off / guide). path() stores supervision targets on `data`.
-        t_min = 0.98 if self.oracle_mode == "train" else 0.0
+        if self.oracle_mode == "train":
+            t_min = 0.98 if self.training else 1.0
+        else:
+            t_min = 0.0
+
         data = self.build_path(input_graph=input_graph, t_min=t_min)
 
         if self.oracle_mode == "train":
