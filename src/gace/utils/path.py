@@ -470,7 +470,7 @@ class Flow():
         # Per-atom independent masking against the scheduled threshold
         mask_flag = torch.rand(z1.size(0), device=device) < (1 - alpha_t_z.squeeze(1))  # (N_prim,)
         zt = z1.clone()
-        zt[mask_flag] =  self.oracle_model.atom_dim - 1 if self.oracle_mode == "train" else self.model.atom_dim - 1  # masked atoms get index 99
+        zt[mask_flag] = (self.oracle_model.atom_dim - 1) if self.oracle_mode == "train" else (self.model.atom_dim - 1) # masked atoms get index 99
 
         data.atomic_numbers        = zt          # (N_prim,) long — model input
         data.atomic_numbers_target = z1          # (N_prim,) long — loss target
