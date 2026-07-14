@@ -138,7 +138,7 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
             # Stage A: forge trunk is frozen; train only the random energy head.
             for name, p in self.oracle_model.named_parameters():
                 p.requires_grad_(name.startswith(
-                    ("energy_cross_attention.", "energy_transformer.", "out_energy.")))
+                    ("energy_cross_attention.", "energy_proj.", "energy_transformer.", "out_energy.")))
         self.variant = variant  # "refine" or "forge"
         self.mode = mode
         self.loss_fn = nn.MSELoss()  # Base loss function (not directly used, see criterion)

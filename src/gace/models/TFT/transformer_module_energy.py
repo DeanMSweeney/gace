@@ -70,6 +70,7 @@ class TransformerModuleEnergy(nn.Module):
         num_layers: int,
         hidden_dim: int,
         num_energy_layers: int = 4,
+        energy_hidden_dim: Optional[int] = None,
         activation: Literal["SiLU", "ReLU", "SwiGLU"] = "SiLU",
         implementation: Literal["transformer", "modern_transformer"] = "modern_transformer",
         context_length: int = 2048,
@@ -101,6 +102,7 @@ class TransformerModuleEnergy(nn.Module):
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
         self.num_energy_layers = num_energy_layers
+        self.energy_hidden_dim = energy_hidden_dim if energy_hidden_dim is not None else hidden_dim
         self.implementation = implementation
         self.context_length = context_length
         self.jvp_attn = jvp_attn
@@ -221,15 +223,22 @@ class TransformerModuleEnergy(nn.Module):
             self.energy_cross_attention = decoder_layer()
 
         # Deeper regression layers applied after the cross-attention re-read,
-        # before pooling to the scalar head.
+        # before pooling to the scalar head. The tower runs at energy_hidden_dim
+        # (defaults to trunk width); a projection bridges the two when they differ
+        # (zatom's global_energy_proj).
+        self.energy_proj = (
+            nn.Linear(hidden_dim, self.energy_hidden_dim, bias=False)
+            if self.energy_hidden_dim != hidden_dim
+            else nn.Identity()
+        )
         self.energy_transformer = transformer_class(
-            dim=hidden_dim,
+            dim=self.energy_hidden_dim,
             depth=num_energy_layers,
             num_heads=num_heads,
             dropout=dropout,
         )
 
-        self.out_energy = nn.Linear(hidden_dim, 1, bias=True)
+        self.out_energy = nn.Linear(self.energy_hidden_dim, 1, bias=True)
 
         # Initialize weights
         if self.custom_weight_init is not None:
@@ -461,6 +470,7 @@ class TransformerModuleEnergy(nn.Module):
         else:
             h_energy = h_out
 
+        h_energy = self.energy_proj(h_energy)  # (B, M+N, E); Identity when widths match
         h_energy = self.energy_transformer(h_energy, padding_mask=padding_mask, **attention_kwargs)
         h_energy = h_energy * combined_real_mask.unsqueeze(-1)  # (B, M+N, C)
 
