@@ -133,18 +133,19 @@ class SamplerConfig:
     #   s_t = g(t)·(t·v_t − x_t)/(1−t)          # score correction (guides to manifold)
     #   dW  = sqrt(2·γ_g·g(t))·N(0, I)          # Langevin Wiener noise
     # with g(t) = 1/(t + 1e-2) for t < langevin_cutoff, else 0.
-    # γ_g (langevin_gamma_*) is split by coordinate scale, matching zatom: all
-    # slab / lattice-frame quantities (fractional coords, normalised
-    # lengths/angles, M) share one small value; raw Cartesian needs a much
-    # larger one. ASSUMES a Gaussian prior (informed_priors=False), asserted in
-    # sample().
+    # γ_g (langevin_gamma_*) is split by coordinate scale, matching zatom: the
+    # slab fractional/lattice quantities (fractional coords, normalised
+    # lengths/angles) share one small value; raw Cartesian needs a much larger
+    # one. The score ASSUMES a standard-Gaussian prior (informed_priors=False),
+    # asserted in sample(). The supercell matrix M is deliberately excluded: its
+    # prior is I+0.1·N(0,1), not N(0,I), so it stays fully deterministic.
 
     langevin_gamma_slab: float = 0.0
-    """γ_g for all slab / lattice-frame modalities: catalyst fractional coords
-    (pos), normalised lengths (lengths_scaled), angles (angles_radians), and the
-    transformation matrix M. These live in [0, 1) / normalised / near-integer
-    ranges, so they share one small value (zatom uses ~0.01). 0.0 disables the
-    score correction + Wiener noise for all of them."""
+    """γ_g for the slab fractional/lattice modalities: catalyst fractional coords
+    (pos), normalised lengths (lengths_scaled), and angles (angles_radians).
+    These live in [0, 1) / normalised ranges, so they share one small value
+    (zatom uses ~0.01). 0.0 disables the score correction + Wiener noise. Does
+    NOT cover the transformation matrix M (kept deterministic; see above)."""
 
     langevin_gamma_ads: float = 0.0
     """γ_g for adsorbate Cartesian positions (ads_pos). Raw Ångström scale —

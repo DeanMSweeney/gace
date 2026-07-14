@@ -636,7 +636,10 @@ class Flow():
 
                 # Update continuous modalities. noise_scale = prior-agnostic Brownian
                 # noise; langevin_gamma = score-guided Langevin term (Gaussian prior).
-                # Slab/lattice-frame modalities share one γ_g; Cartesian ads_pos its own.
+                # Slab fractional/lattice modalities share one γ_g; Cartesian ads_pos its own.
+                # M is kept fully deterministic: its prior is I+0.1·N(0,1), not N(0,I),
+                # so the score correction is invalid, and uncorrected Brownian noise just
+                # drags M off its near-integer supercell targets.
                 noise_scale = self.sde_noise_scale
                 g_slab      = self.langevin_gamma_slab
                 g_ads       = self.langevin_gamma_ads
@@ -644,7 +647,7 @@ class Flow():
                 data.pos               = euler_step(data.pos,               pred["pos"],     t_curr, dt, pbc_aware=True,  noise_scale=noise_scale, langevin_gamma=g_slab, langevin_cutoff=cutoff)
                 data.lengths_scaled    = euler_step(data.lengths_scaled,    pred["len"],     t_curr, dt, pbc_aware=False, noise_scale=noise_scale, langevin_gamma=g_slab, langevin_cutoff=cutoff)
                 data.angles_radians    = euler_step(data.angles_radians,    pred["ang"],     t_curr, dt, pbc_aware=False, noise_scale=noise_scale, langevin_gamma=g_slab, langevin_cutoff=cutoff)
-                data.transformation_matrix = euler_step(data.transformation_matrix, pred["M"], t_curr, dt, pbc_aware=False, noise_scale=noise_scale, langevin_gamma=g_slab, langevin_cutoff=cutoff)
+                data.transformation_matrix = euler_step(data.transformation_matrix, pred["M"], t_curr, dt, pbc_aware=False, noise_scale=0.0, langevin_gamma=0.0)
                 data.ads_pos = euler_step(data.ads_pos, pred["ads_pos"], t_curr, dt, pbc_aware=False, noise_scale=noise_scale, langevin_gamma=g_ads, langevin_cutoff=cutoff)
 
                 # Update discrete atom types (CTMC)
