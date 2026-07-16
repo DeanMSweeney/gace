@@ -644,7 +644,7 @@ class Flow():
                 g_slab      = self.langevin_gamma_slab
                 g_ads       = self.langevin_gamma_ads
                 cutoff      = self.langevin_cutoff
-                data.pos               = euler_step(data.pos,               pred["pos"],     t_curr, dt, pbc_aware=True,  noise_scale=noise_scale, langevin_gamma=g_slab, langevin_cutoff=cutoff)
+                data.pos               = euler_step(data.pos,               pred["pos"],     t_curr, dt, pbc_aware=False,  noise_scale=noise_scale, langevin_gamma=g_slab, langevin_cutoff=cutoff)
                 data.lengths_scaled    = euler_step(data.lengths_scaled,    pred["len"],     t_curr, dt, pbc_aware=False, noise_scale=noise_scale, langevin_gamma=g_slab, langevin_cutoff=cutoff)
                 data.angles_radians    = euler_step(data.angles_radians,    pred["ang"],     t_curr, dt, pbc_aware=False, noise_scale=noise_scale, langevin_gamma=g_slab, langevin_cutoff=cutoff)
                 data.transformation_matrix = euler_step(data.transformation_matrix, pred["M"], t_curr, dt, pbc_aware=False, noise_scale=0.0, langevin_gamma=0.0)
