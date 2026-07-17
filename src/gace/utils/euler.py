@@ -38,7 +38,6 @@ def euler_step(
     x1_pred: Tensor,
     t_scalar: float,
     dt: float,
-    pbc_aware: bool = False,
     noise_scale: float = 0.0,
     langevin_gamma: float = 0.0,
     langevin_cutoff: float = 0.9,
