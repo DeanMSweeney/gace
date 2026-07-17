@@ -327,7 +327,7 @@ def main(**kwargs):
     gen_atoms = list(preloaded.values())
 
     # Uniqueness and novelty are pure post-processing passes over the loaded set.
-    uniqueness = compute_uniqueness(gen_atoms) if args.check_diversity else None
+    uniqueness = compute_uniqueness(gen_atoms) if args.dedupe else None
 
     novelty = None
     composition_novelty = None
