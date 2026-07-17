@@ -322,7 +322,7 @@ def main(**kwargs):
     for k, v in kwargs.items():
         setattr(args, k, v)
 
-    files = collect_structure_files(args.strucs_for_eval)
+    files = collect_structure_files(args.strucs)
     preloaded = load_atoms_parallel(files, args.num_workers)
     gen_atoms = list(preloaded.values())
 
@@ -362,7 +362,7 @@ def main(**kwargs):
             energy_cutoff=args.energy_cutoff,
             fmax=args.fmax,
             steps=args.steps,
-            generated_strucs=args.strucs_for_eval,
+            generated_strucs=args.strucs,
             relaxed_strucs=args.relaxed_strucs,
             sanitized_strucs=args.sanitized_strucs,
             preloaded_atoms=preloaded,
@@ -373,7 +373,7 @@ def main(**kwargs):
         sanitisation = summarize_results(rows)
 
     report = format_report(
-        directory=args.strucs_for_eval,
+        directory=args.strucs,
         novelty=novelty,
         composition_novelty=composition_novelty,
         uniqueness=uniqueness,
