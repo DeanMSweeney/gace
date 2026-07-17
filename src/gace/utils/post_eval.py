@@ -295,8 +295,8 @@ def write_report(report: str, output_path: str) -> None:
 def parse_args():
     import argparse
     p = argparse.ArgumentParser(description="Evaluate forge-generated structures.")
-    p.add_argument("--strucs_for_eval", help="Directory of generated structure files")
-    p.add_argument("--check_diversity", default=False, action="store_true", help="Run structural uniqueness check via StructureMatcher")
+    p.add_argument("--strucs", help="Directory of generated structure files")
+    p.add_argument("--dedupe", default=False, action="store_true", help="Run structural uniqueness check via StructureMatcher")
     p.add_argument("--check_novelty_against", default=None, help="Directory of reference structures (e.g. OC20); reports fraction of generated slabs absent from it")
     p.add_argument("--sanitize", default=False, action="store_true",
                    help="Run validity checks (and optionally MLFF relaxation) on structures")
