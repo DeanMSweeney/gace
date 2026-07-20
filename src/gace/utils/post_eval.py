@@ -69,7 +69,7 @@ def _atoms_to_slab_structures(atoms_iter) -> list:
         if a is None:
             continue
         try:
-            slab = a[a.get_tags() != 2]
+            slab = a #[a.get_tags() != 2]
             slab.center(vacuum=20, axis=2)
             if len(slab) == 0:
                 continue
