@@ -121,7 +121,8 @@ class CatalystForge:
             if atoms is not None:
                 atoms.info["fname"]             = f"{self.batch_idx}_{b}{self.file_ext}"
                 atoms.info["target_binding_E"]  = self.binding_energies[b]
-                atoms.info["sid"]               = getattr(self.opt_graph, "sid", "")[b]
+                sid                             = getattr(self.opt_graph, "sid", None)
+                atoms.info["sid"]               = sid[b] if sid is not None else ""
             items.append(atoms)
         return items
 
