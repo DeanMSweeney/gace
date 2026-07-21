@@ -42,7 +42,6 @@ def main():
     parser.add_argument("--fmax", type=float, default=0.05)
     parser.add_argument("--steps", type=int, default=200)
     parser.add_argument("--optimizer", type=str, default="BFGS", choices=["BFGS", "LBFGS", "FIRE"])
-    parser.add_argument("--gpu", action="store_true", help="Run the MLFF on GPU")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
@@ -67,7 +66,7 @@ def main():
         calculator = OCPCalculator(
             model_name=args.mlff_checkpoint,
             local_cache="./mlff_checkpoint_cache",
-            cpu=not args.gpu,
+            cpu=False,
             seed=args.seed,
         )
 
