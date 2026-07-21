@@ -5,12 +5,14 @@ files whose adsorbate id is in the requested set are relaxed with the MLFF and
 the final potential energy is recorded. The output CSV has one column per
 adsorbate id, rows are the energies (eV) of the structures with that adsorbate.
 
+Outputs are written to <out_dir>/ads_<id>/ so the script can be run once per
+adsorbate id without overwriting previous results.
+
 Usage:
     python scripts/relax_by_ads.py \
         --traj_dir for_uma/1_threshold \
         --ads_map traj_by_ads.csv \
-        --ads_ids 5 12 74 \
-        --out energies_by_ads.csv
+        --ads_ids 5
 """
 
 import argparse
@@ -33,9 +35,8 @@ def main():
     parser.add_argument("--traj_dir", type=Path, required=True, help="Directory containing .traj files")
     parser.add_argument("--ads_map", type=Path, required=True, help="filename,ads_id CSV from list_traj_by_ads.py")
     parser.add_argument("--ads_ids", type=int, nargs="+", required=True, help="Adsorbate ids to keep")
-    parser.add_argument("--out", type=Path, default=Path("energies_by_ads.csv"), help="Output CSV path")
-    parser.add_argument("--target_out", type=Path, default=Path("target_binding_E_by_ads.csv"),
-                        help="Output CSV path for target binding energies")
+    parser.add_argument("--out_dir", type=Path, default=Path("."),
+                        help="Root output directory; CSVs go in <out_dir>/ads_<id>/")
     parser.add_argument("--mlff_checkpoint", type=str, default="EquiformerV2-31M-S2EF-OC20-All+MD",
                         help="fairchem model name for OCPCalculator (default matches helm/config.py)")
     parser.add_argument("--fmax", type=float, default=0.05)
@@ -46,6 +47,10 @@ def main():
     args = parser.parse_args()
 
     keep_ads_ids = set(args.ads_ids)
+
+    # One folder per run, named by the requested adsorbate id(s)
+    run_dir = args.out_dir / ("ads_" + "_".join(str(i) for i in sorted(keep_ads_ids)))
+    run_dir.mkdir(parents=True, exist_ok=True)
 
     # filename -> ads_id for files with a resolved integer id in the requested set
     ads_id_by_file = {}
@@ -103,8 +108,8 @@ def main():
         df.to_csv(out_path, index=False)
         logging.info(f"Wrote {out_path}: " + ", ".join(f"{c}={df[c].notna().sum()}" for c in df.columns))
 
-    write_wide_csv(values_by_ads=energies_by_ads, out_path=args.out)
-    write_wide_csv(values_by_ads=targets_by_ads, out_path=args.target_out)
+    write_wide_csv(values_by_ads=energies_by_ads, out_path=run_dir / "energies.csv")
+    write_wide_csv(values_by_ads=targets_by_ads, out_path=run_dir / "target_binding_E.csv")
 
 
 if __name__ == "__main__":
