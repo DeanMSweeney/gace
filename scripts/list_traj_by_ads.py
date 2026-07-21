@@ -1,19 +1,21 @@
-"""List .traj filenames grouped by adsorbate id.
+"""Map .traj filenames to adsorbate ids.
 
 Reads the sid from each traj's atoms.info, resolves the adsorbate id via
-oc20_mapping.pkl, and writes a .txt with one section per adsorbate id.
+oc20_mapping.pkl, and writes a CSV with columns filename,ads_id. Files that
+can't be resolved get a string label (no_sid, sid_not_in_mapping, unreadable)
+in the ads_id column.
 
 Usage:
     python scripts/list_traj_by_ads.py \
         --traj_dir for_uma/1_threshold \
         --mapping /path/to/oc20_mapping.pkl \
-        --out traj_by_ads.txt
+        --out traj_by_ads.csv
 """
 
 import argparse
+import csv
 import os
 import pickle
-from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -42,7 +44,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--traj_dir", type=Path, required=True, help="Directory containing .traj files")
     parser.add_argument("--mapping", type=Path, required=True, help="Path to oc20_mapping.pkl")
-    parser.add_argument("--out", type=Path, default=Path("traj_by_ads.txt"), help="Output txt path")
+    parser.add_argument("--out", type=Path, default=Path("traj_by_ads.csv"), help="Output CSV path")
     parser.add_argument("--workers", type=int, default=os.cpu_count(), help="Number of parallel workers")
     args = parser.parse_args()
 
@@ -55,34 +57,23 @@ def main():
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         results = list(tqdm(pool.map(read_sid, traj_paths), total=len(traj_paths), desc="Reading trajs"))
 
-    files_by_ads = defaultdict(list)
+    rows = []
     for name, sid, error in results:
         if error is not None:
-            files_by_ads["unreadable"].append(f"{name}  ({error})")
-            continue
-        if sid is None:
-            files_by_ads["no_sid"].append(name)
-            continue
+            rows.append((name, "unreadable"))
+        elif sid is None:
+            rows.append((name, "no_sid"))
+        else:
+            ads_id = lookup_ads_id(mapping=mapping, sid=int(sid))
+            rows.append((name, ads_id if ads_id is not None else "sid_not_in_mapping"))
 
-        ads_id = lookup_ads_id(mapping=mapping, sid=int(sid))
-        if ads_id is None:
-            files_by_ads["sid_not_in_mapping"].append(name)
-            continue
+    with open(args.out, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["filename", "ads_id"])
+        writer.writerows(rows)
 
-        files_by_ads[ads_id].append(name)
-
-    with open(args.out, "w") as f:
-        # Integer ads ids first (sorted), then any string buckets (no_sid, etc.)
-        keys = sorted([k for k in files_by_ads if isinstance(k, int)])
-        keys += sorted([k for k in files_by_ads if not isinstance(k, int)])
-        for key in keys:
-            header = f"ads_{key}" if isinstance(key, int) else key
-            f.write(f"{header} ({len(files_by_ads[key])} files)\n")
-            for name in files_by_ads[key]:
-                f.write(f"    {name}\n")
-            f.write("\n")
-
-    print(f"Wrote {args.out} ({sum(len(v) for v in files_by_ads.values())} files across {len(keys)} groups)")
+    n_resolved = sum(1 for _, ads_id in rows if isinstance(ads_id, int))
+    print(f"Wrote {args.out}: {n_resolved}/{len(rows)} files resolved to an adsorbate id")
 
 
 if __name__ == "__main__":
