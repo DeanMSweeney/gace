@@ -59,10 +59,7 @@ def main():
         files = files_by_ads[ads_id]
         logging.info(f"ads_id={ads_id}: {len(files)} structures")
         atoms_by_path = load_atoms_parallel(files=files, num_workers=args.workers)
-        # Slab only: drop adsorbate atoms (tags == 2) before matching.
-        # post_eval's own strip is currently commented out, so do it here.
-        slabs = [a[a.get_tags() != 2] for a in atoms_by_path.values() if a is not None]
-        uniqueness_dict = compute_uniqueness(atoms=slabs)
+        uniqueness_dict = compute_uniqueness(atoms=atoms_by_path.values())
         # compute_uniqueness returns e.g. {'uniqueness (100)': 0.85}; unpack it
         (key, ratio), = uniqueness_dict.items()
         n_structures = int(key.split("(")[1].rstrip(")"))
