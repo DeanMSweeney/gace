@@ -11,8 +11,10 @@ Usage:
 """
 
 import argparse
+import os
 import pickle
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from ase.io import read
@@ -27,35 +29,47 @@ def lookup_ads_id(mapping: dict, sid: int):
     return None
 
 
+def read_sid(traj_path: Path):
+    """Worker: read one traj and return (filename, sid, error). Runs in a subprocess."""
+    try:
+        atoms = read(traj_path)
+    except Exception as e:
+        return traj_path.name, None, str(e)
+    return traj_path.name, atoms.info.get("sid"), None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--traj_dir", type=Path, required=True, help="Directory containing .traj files")
     parser.add_argument("--mapping", type=Path, required=True, help="Path to oc20_mapping.pkl")
     parser.add_argument("--out", type=Path, default=Path("traj_by_ads.txt"), help="Output txt path")
+    parser.add_argument("--workers", type=int, default=os.cpu_count(), help="Number of parallel workers")
     args = parser.parse_args()
 
     with open(args.mapping, "rb") as f:
         mapping = pickle.load(f)
 
-    files_by_ads = defaultdict(list)
-    for traj_path in tqdm(sorted(args.traj_dir.glob("*.traj")), desc="Reading trajs"):
-        try:
-            atoms = read(traj_path)
-        except Exception as e:
-            files_by_ads["unreadable"].append(f"{traj_path.name}  ({e})")
-            continue
+    traj_paths = sorted(args.traj_dir.glob("*.traj"))
 
-        sid = atoms.info.get("sid")
+    # Read trajs in parallel; mapping lookup stays in the main process
+    with ProcessPoolExecutor(max_workers=args.workers) as pool:
+        results = list(tqdm(pool.map(read_sid, traj_paths), total=len(traj_paths), desc="Reading trajs"))
+
+    files_by_ads = defaultdict(list)
+    for name, sid, error in results:
+        if error is not None:
+            files_by_ads["unreadable"].append(f"{name}  ({error})")
+            continue
         if sid is None:
-            files_by_ads["no_sid"].append(traj_path.name)
+            files_by_ads["no_sid"].append(name)
             continue
 
         ads_id = lookup_ads_id(mapping=mapping, sid=int(sid))
         if ads_id is None:
-            files_by_ads["sid_not_in_mapping"].append(traj_path.name)
+            files_by_ads["sid_not_in_mapping"].append(name)
             continue
 
-        files_by_ads[ads_id].append(traj_path.name)
+        files_by_ads[ads_id].append(name)
 
     with open(args.out, "w") as f:
         # Integer ads ids first (sorted), then any string buckets (no_sid, etc.)
