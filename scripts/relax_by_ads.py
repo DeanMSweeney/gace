@@ -1,9 +1,9 @@
 """Relax .traj structures with an MLFF, filtered by adsorbate id, and save energies to CSV.
 
 Uses the filename→ads_id CSV from list_traj_by_ads.py to select structures:
-files whose adsorbate id is in the requested set are relaxed with the MLFF and
-the final potential energy is recorded. The output CSV has one column per
-adsorbate id, rows are the energies (eV) of the structures with that adsorbate.
+files whose adsorbate id is in the requested set are relaxed with the MLFF.
+The output CSV has two columns per adsorbate id — the calculated adsorption
+energy and the target binding energy (eV) — with one row per structure.
 
 Outputs are written to <out_dir>/ads_<id>/ so the script can be run once per
 adsorbate id without overwriting previous results.
@@ -98,17 +98,18 @@ def main():
         energies_by_ads[ads_id].append(energy)
         # Appended in lockstep with energies so rows align across the two CSVs
         targets_by_ads[ads_id].append(atoms.info.get("target_binding_E", float("nan")))
-        logging.info(f"{filename}: ads_id={ads_id} E={energy:.4f} eV")
+        logging.info(f"{filename}: ads_id={ads_id} E={energy:.4f} eV target_E={atoms.info.get('target_binding_E', float('nan')):.4f} eV")
 
-    def write_wide_csv(values_by_ads: dict, out_path: Path):
-        # Pad ragged columns with NaN so every adsorbate id gets its own column
-        df = pd.DataFrame.from_dict(values_by_ads, orient="index").transpose()
-        df.columns = [f"ads_{ads_id}" for ads_id in df.columns]
-        df.to_csv(out_path, index=False)
-        logging.info(f"Wrote {out_path}: " + ", ".join(f"{c}={df[c].notna().sum()}" for c in df.columns))
+    # One CSV with paired columns per adsorbate id; ragged columns padded with NaN
+    columns = {}
+    for ads_id in sorted(keep_ads_ids):
+        columns[f"ads_{ads_id}_adsorption_E"] = energies_by_ads[ads_id]
+        columns[f"ads_{ads_id}_target_E"] = targets_by_ads[ads_id]
+    df = pd.DataFrame.from_dict(columns, orient="index").transpose()
 
-    write_wide_csv(values_by_ads=energies_by_ads, out_path=run_dir / "energies.csv")
-    write_wide_csv(values_by_ads=targets_by_ads, out_path=run_dir / "target_binding_E.csv")
+    out_path = run_dir / "energies.csv"
+    df.to_csv(out_path, index=False)
+    logging.info(f"Wrote {out_path}: " + ", ".join(f"{c}={df[c].notna().sum()}" for c in df.columns))
 
 
 if __name__ == "__main__":
