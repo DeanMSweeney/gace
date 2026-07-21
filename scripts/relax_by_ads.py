@@ -21,6 +21,7 @@ from pathlib import Path
 import pandas as pd
 from ase.io import read
 from fairchem.core import OCPCalculator
+from tqdm import tqdm
 
 from gace.utils.relaxation import Silent, relax_w_mlff
 
@@ -71,7 +72,7 @@ def main():
     traj_files = sorted(args.traj_dir.glob("*.traj"))
     logging.info(f"Found {len(traj_files)} .traj files in {args.traj_dir}")
 
-    for traj_path in traj_files:
+    for traj_path in tqdm(traj_files, desc="Relaxing"):
         try:
             atoms = read(traj_path)
         except Exception as e:

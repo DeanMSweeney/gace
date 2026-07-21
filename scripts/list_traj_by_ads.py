@@ -16,6 +16,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from ase.io import read
+from tqdm import tqdm
 
 
 def lookup_ads_id(mapping: dict, sid: int):
@@ -37,7 +38,7 @@ def main():
         mapping = pickle.load(f)
 
     files_by_ads = defaultdict(list)
-    for traj_path in sorted(args.traj_dir.glob("*.traj")):
+    for traj_path in tqdm(sorted(args.traj_dir.glob("*.traj")), desc="Reading trajs"):
         try:
             atoms = read(traj_path)
         except Exception as e:
