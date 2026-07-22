@@ -45,6 +45,7 @@ from tqdm import tqdm
 # Allow imports from src/
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
+from fairchem.core.common.utils import pyg2_data_transform
 from gace.utils.utils import center_and_random_so3_rotation
 
 
@@ -129,7 +130,7 @@ def run(src: Path, dst: Path, limit: int | None, seed: int, num_prim_atoms: int)
             if raw is None:
                 n_skipped += 1
                 continue
-            entry = build_entry(data=pickle.loads(raw), num_prim_atoms=num_prim_atoms)
+            entry = build_entry(data=pyg2_data_transform(pickle.loads(raw)), num_prim_atoms=num_prim_atoms)
             if entry is None:
                 n_skipped += 1
                 continue
