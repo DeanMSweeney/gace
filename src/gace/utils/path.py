@@ -536,6 +536,7 @@ class Flow():
         N_ads = int(self.adsorbate_mask.sum().item())
 
         if not build_from_truth: # TOGGLED ON ONLY FOR TESTING THE BUILD PROCESS, NORMALLY OFF 
+            # ── If num_prim_atoms is specified, build a new graph from scratch  ───────────
             if num_prim_atoms is not None:
                 total_prim = int(num_prim_atoms.sum().item())
                 ads_mask = (data.tags == 2)
