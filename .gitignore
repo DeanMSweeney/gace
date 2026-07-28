@@ -58,6 +58,8 @@ ablation_studies/
 datasets/CatFlow/
 uncond/
 manuscript/
+volcano_plot_sampling/
+
 # Data formats
 *.lmdb
 *.pkl
