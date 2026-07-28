@@ -59,6 +59,7 @@ datasets/CatFlow/
 uncond/
 manuscript/
 volcano_plot_sampling/
+build/
 
 # Data formats
 *.lmdb
