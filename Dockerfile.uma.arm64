@@ -1,0 +1,69 @@
+# UMA (fairchem-core v2) runtime for arm64 / GH200.
+#
+# Standalone image: no GACE, no PyG. Mount the repo at /workspace to run the scripts.
+#
+# Why not an NGC pytorch base: NGC's torch is built against NumPy 1.x, while fairchem
+# requires numpy>=2.0. Upgrading NumPy to satisfy fairchem breaks torch's NumPy bridge
+# ("module compiled using NumPy 1.x cannot be run in NumPy 2.x"), and honouring NGC's
+# /etc/pip/constraint.txt instead makes the fairchem install fail. The two are simply
+# incompatible. PyPI's torch 2.8.0 is built against NumPy 2.x, so this route has no conflict.
+#
+# The cu129 wheel also satisfies fairchem's torch~=2.8.0 pin outright (+cu129 is only a local
+# version tag), so pip never tries to replace it with PyPI's aarch64 wheel — which is
+# CPU-only. That means no --no-deps and no hand-maintained dependency list.
+#
+# The `base` tag is deliberate: the aarch64 wheel bundles CUDA and cuDNN in torch/lib and
+# pulls no nvidia-*-cu12 packages, so the libs in the runtime/cudnn tags are dead weight.
+# `base` still sets NVIDIA_VISIBLE_DEVICES / NVIDIA_DRIVER_CAPABILITIES for --gpus and --nv.
+# Build with: docker build --platform linux/arm64 -f Dockerfile.uma.arm64 .
+FROM nvidia/cuda:12.9.1-base-ubuntu24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-venv python3-pip git curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Ubuntu 24.04 marks its system Python externally-managed (PEP 668), so use a venv
+RUN python3 -m venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH
+
+RUN pip install --no-cache-dir --upgrade pip
+
+# CUDA torch first, from the cu129 channel — the only channel with an aarch64 torch 2.8.0
+# wheel. Its own layer so the 3.4 GB download is cached across rebuilds.
+RUN pip install --no-cache-dir torch==2.8.0 \
+    --index-url https://download.pytorch.org/whl/cu129
+
+# Hard guard: any later resolution that tries to move torch fails loudly instead of quietly
+# falling back to the CPU wheel. Also applies to pip installs done inside the container.
+RUN echo "torch==2.8.0+cu129" > /opt/constraints.txt
+ENV PIP_CONSTRAINT=/opt/constraints.txt
+
+# No --no-deps: torch already satisfies the pin, so pip resolves the rest normally.
+# pandas is only in fairchem's [extras] but scripts/relax_by_ads_uma.py imports it;
+# ase, tqdm, numpy and scipy arrive as fairchem dependencies.
+RUN pip install --no-cache-dir fairchem-core==2.21.0 pandas
+
+# Fail the build if torch moved, lost CUDA, or if NumPy and torch disagree on ABI — the
+# last one is what broke the NGC build. torch.cuda.is_available() can't be used here,
+# since there is no GPU during docker build.
+RUN python -c "\
+import numpy, torch; \
+assert torch.__version__ == '2.8.0+cu129', f'torch was replaced: {torch.__version__}'; \
+assert torch.version.cuda is not None, 'torch is a CPU-only build'; \
+torch.from_numpy(numpy.zeros(1)); \
+from fairchem.core import FAIRChemCalculator, pretrained_mlip; \
+print('ok: torch', torch.__version__, '| cuda', torch.version.cuda, '| numpy', numpy.__version__)"
+
+RUN pip check
+
+WORKDIR /workspace
+
+# HF_HOME is deliberately unset. huggingface_hub then defaults to $HOME/.cache/huggingface,
+# which under Apptainer is the user's real home — picking up the token and cache already on
+# the cluster. Setting it here would point at /root, which Apptainer neither owns nor can
+# write. Under Docker, mount the host cache to /root/.cache/huggingface instead.
+
+CMD ["bash"]

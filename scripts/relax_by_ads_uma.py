@@ -265,7 +265,7 @@ def main():
     parser.add_argument("--optimizer", type=str, default="LBFGS", choices=["BFGS", "LBFGS", "FIRE"])
     parser.add_argument("--energy_cutoff", type=float, default=10.0,
                         help="Reject |E_ads| above this (eV), matching the CatFlow convention")
-    parser.add_argument("--num_workers", type=int, default=16, help="Concurrent relaxations per GPU process")
+    parser.add_argument("--num_workers", type=int, default=32, help="Concurrent relaxations per GPU process")
     parser.add_argument("--num_gpus", type=int, default=None, help="GPUs to use (default: all available)")
     parser.add_argument("--cpu", action="store_true", help="Force CPU even if GPUs are visible")
     parser.add_argument("--save_relaxed", action="store_true",
