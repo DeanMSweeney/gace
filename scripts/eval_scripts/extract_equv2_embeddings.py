@@ -42,7 +42,6 @@ from multiprocessing import Pool
 # gace.models must NOT be imported: equiformerv2_{oc20,flow,forge}.py each call
 # @registry.register_model("equiformer_v2"), which would overwrite fairchem's own
 # entry and make OCPCalculator build the wrong class from the checkpoint config.
-from gace.utils.post_eval import load_atoms_parallel
 from gace.utils.relaxation import Silent
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
