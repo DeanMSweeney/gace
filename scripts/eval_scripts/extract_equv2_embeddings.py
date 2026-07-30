@@ -1,4 +1,4 @@
-"""Extract rotation-invariant EquiformerV2 embeddings for GACE and OC20 structures.
+"""Extract rotation-invariant EquiformerV2 embeddings for a directory of structures.
 
 Step 1 of the structural-novelty analysis. Every .traj is pushed through the
 pretrained EquiformerV2-31M-S2EF-OC20-All+MD model; a forward hook on the final
@@ -7,20 +7,18 @@ spherical-harmonic features. Only the l=0 channels are kept — those are the
 rotation-invariant ones, and flattening the full irreps tensor instead would make
 every downstream distance depend on how the structure happens to be oriented.
 The per-atom l=0 vectors are pooled (mean and max, both saved) into one vector
-per structure, tagged with its source (gace/oc20).
+per structure.
 
-One run covers one adsorbate: point it at that adsorbate's GACE and OC20
-directories and pass --adsorbate to tag the output.
+Give it a directory of .traj files; it writes embeddings.npz (plus a matching
+.csv) into that same directory. One run per directory.
 
 Usage:
-    python scripts/extract_embeddings.py \
-        --gace_dirs gen_strucs/NO2 \
-        --oc20_dirs oc20_ref/NO2 \
-        --adsorbate NO2 \
-        --out embeddings_NO2.npz
+    python extract_equv2_embeddings.py \
+        --traj_dir oc20_ads_strucs/ads_75 \
+        --adsorbate NO2
 
     # inspect the module tree to confirm the extraction point, then exit
-    python scripts/extract_embeddings.py --print_model
+    python extract_equv2_embeddings.py --print_model
 """
 
 import argparse
@@ -41,7 +39,7 @@ from tqdm import tqdm
 # gace.models must NOT be imported: equiformerv2_{oc20,flow,forge}.py each call
 # @registry.register_model("equiformer_v2"), which would overwrite fairchem's own
 # entry and make OCPCalculator build the wrong class from the checkpoint config.
-from gace.utils.post_eval import collect_structure_files, load_atoms_parallel
+from gace.utils.post_eval import load_atoms_parallel
 from gace.utils.relaxation import Silent
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -183,37 +181,30 @@ def check_rotation_invariance(embedder: InvariantEmbedder, atoms_list: list[Atom
         )
 
 
-def gather_structures(directories: list[Path], source: str, workers: int) -> list[tuple[str, Atoms]]:
-    """Load every .traj under the given directories. Returns (path, atoms) pairs."""
-    files = []
-    for directory in directories:
-        try:
-            files.extend(collect_structure_files(directory=str(directory)))
-        except FileNotFoundError as e:
-            logging.warning(f"{e}")
-
+def gather_structures(directory: Path, workers: int) -> list[tuple[str, Atoms]]:
+    """Load the .traj files in the directory. Returns (path, atoms) pairs."""
+    files = sorted(str(p) for p in directory.glob("*.traj"))
     if not files:
-        return []
+        raise SystemExit(f"No .traj files found in {directory}")
 
+    logging.info(f"Found {len(files)} .traj files in {directory}")
     atoms_by_path = load_atoms_parallel(files=files, num_workers=workers)
     loaded = [(path, atoms) for path, atoms in atoms_by_path.items() if atoms is not None]
 
     n_unreadable = len(atoms_by_path) - len(loaded)
-    logging.info(f"{source}: {len(loaded)} structures loaded ({n_unreadable} unreadable)")
+    logging.info(f"{len(loaded)} structures loaded ({n_unreadable} unreadable)")
     return loaded
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--gace_dirs", type=Path, nargs="+", default=[],
-                        help="Directories of GACE-generated .traj files (searched recursively)")
-    parser.add_argument("--oc20_dirs", type=Path, nargs="+", default=[],
-                        help="Directories of OC20 reference .traj files (searched recursively)")
+    parser.add_argument("--traj_dir", type=Path, default=None,
+                        help="Directory of .traj files to embed")
     parser.add_argument("--adsorbate", type=str, default="",
                         help="Adsorbate name for this run, e.g. NO2; stored in the output")
-    parser.add_argument("--out", type=Path, default=Path("embeddings.npz"),
-                        help="Output .npz path; a sibling .csv of the metadata is written too")
+    parser.add_argument("--out_name", type=str, default="embeddings.npz",
+                        help="Output filename, written into --traj_dir alongside a matching .csv")
     parser.add_argument("--mlff_checkpoint", type=str, default="EquiformerV2-31M-S2EF-OC20-All+MD",
                         help="fairchem model name (default matches relax_by_ads.py)")
     parser.add_argument("--local_cache", type=str, default="./mlff_checkpoint_cache",
@@ -244,21 +235,16 @@ def main():
         print(model)
         return
 
-    if not args.gace_dirs and not args.oc20_dirs:
-        raise SystemExit("Nothing to do: pass --gace_dirs and/or --oc20_dirs.")
+    # Not argparse-required so --print_model works on its own
+    if args.traj_dir is None:
+        raise SystemExit("Nothing to do: pass --traj_dir.")
 
-    atoms_list, paths, sources = [], [], []
-    for directories, source in ((args.oc20_dirs, "oc20"), (args.gace_dirs, "gace")):
-        if not directories:
-            continue
-        for path, atoms in gather_structures(directories=directories, source=source,
-                                             workers=args.num_workers):
-            atoms_list.append(atoms)
-            paths.append(path)
-            sources.append(source)
-
-    if not atoms_list:
+    loaded = gather_structures(directory=args.traj_dir, workers=args.num_workers)
+    if not loaded:
         raise SystemExit("No structures survived loading.")
+
+    paths = [path for path, _ in loaded]
+    atoms_list = [atoms for _, atoms in loaded]
 
     embedder = InvariantEmbedder(model=model, layer=args.layer, device=args.device)
 
@@ -276,28 +262,25 @@ def main():
 
     natoms = [len(atoms) for atoms in atoms_list]
 
-    args.out.parent.mkdir(parents=True, exist_ok=True)
+    # Outputs live beside the structures they describe
+    out_path = args.traj_dir / args.out_name
     np.savez(
-        args.out,
+        out_path,
         emb_mean=emb_mean,
         emb_max=emb_max,
-        source=np.array(sources),
         path=np.array(paths),
         natoms=np.array(natoms, dtype=np.int64),
         adsorbate=np.array(args.adsorbate),
+        traj_dir=np.array(str(args.traj_dir)),
     )
 
-    csv_path = args.out.with_suffix(".csv")
+    csv_path = out_path.with_suffix(".csv")
     with open(csv_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["source", "path", "natoms"])
-        writer.writerows(zip(sources, paths, natoms))
+        writer.writerow(["path", "natoms"])
+        writer.writerows(zip(paths, natoms))
 
-    for source in ("oc20", "gace"):
-        n = sources.count(source)
-        if n:
-            logging.info(f"  {source}: {n} structures")
-    logging.info(f"Wrote {args.out} and {csv_path}")
+    logging.info(f"Wrote {out_path} and {csv_path}")
 
 
 if __name__ == "__main__":
