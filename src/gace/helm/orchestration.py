@@ -22,7 +22,7 @@ from fairchem.core import OCPCalculator
 from gace.utils.tft.tft_wrapper import PyGToTensorDict
 from gace.utils.builder import sample_prim_atom_counts
 from gace.utils.oracle import Oracle
-from gace.utils.catalyst_forge import CatalystForge
+from gace.utils.forge import CatalystForge
 import ase.io
 
 from typing import Optional, Literal, Union, Tuple

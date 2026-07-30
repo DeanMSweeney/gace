@@ -295,12 +295,10 @@ def write_report(report: str, output_path: str) -> None:
 def parse_args():
     import argparse
     p = argparse.ArgumentParser(description="Evaluate forge-generated structures.")
-    p.add_argument("--strucs", help="Directory of generated structure files")
-    p.add_argument("--dedupe", default=False, action="store_true", help="Run structural uniqueness check via StructureMatcher")
-    p.add_argument("--check_novelty_against", default=None, help="Directory of reference structures (e.g. OC20); reports fraction of generated slabs absent from it")
-    p.add_argument("--sanitize", default=False, action="store_true",
-                   help="Run validity checks (and optionally MLFF relaxation) on structures")
-    p.add_argument("--relax", default=False, action="store_true", help="Run MLFF relaxation step")
+    p.add_argument("--trajs_dir", help="Directory of generated structure files")
+    p.add_argument("--eval_uniqueness", default=False, action="store_true", help="Run structural uniqueness check")
+    p.add_argument("--eval_novelty_against", default=None, help="Directory of reference structures (e.g. OC20); reports fraction of generated slabs absent from it")
+    p.add_argument("--sanitize", default=False, action="store_true", help="Run sanitisation checks")
     p.add_argument("--n_strucs", type=int, default=None, help="Number of structures to process (default: all)")
     p.add_argument("--mlff_checkpoint", default="EquiformerV2-31M-S2EF-OC20-All+MD")
     p.add_argument("--energy_cutoff", type=float, default=10.0, help="Max binding energy (eV)")
@@ -312,7 +310,7 @@ def parse_args():
     p.add_argument("--num_workers", type=int, default=8, help="Parallel workers for structure loading")
     p.add_argument("--relaxed_strucs", default="./relaxed_strucs", help="Output directory for relaxed structures")
     p.add_argument("--sanitized_strucs", default="./sanitized_strucs", help="Output directory for sanitized structures")
-    p.add_argument("--output", default="./report.txt", help="Path for output report")
+    p.add_argument("--output", default="./eval_report.txt", help="Path for output report")
     return p.parse_args()
 
 
@@ -322,24 +320,24 @@ def main(**kwargs):
     for k, v in kwargs.items():
         setattr(args, k, v)
 
-    files = collect_structure_files(args.strucs)
+    files = collect_structure_files(args.trajs_dir)
     preloaded = load_atoms_parallel(files, args.num_workers)
     gen_atoms = list(preloaded.values())
 
     # Uniqueness and novelty are pure post-processing passes over the loaded set.
-    uniqueness = compute_uniqueness(gen_atoms) if args.dedupe else None
+    uniqueness = compute_uniqueness(gen_atoms) if args.eval_uniqueness else None
 
     novelty = None
     composition_novelty = None
-    if args.check_novelty_against:
-        ref_files = collect_structure_files(args.check_novelty_against)
+    if args.eval_novelty_against:
+        ref_files = collect_structure_files(args.eval_novelty_against)
         ref_atoms = list(load_atoms_parallel(ref_files, args.num_workers).values())
         novelty = compute_novelty(gen_atoms, ref_atoms, num_workers=args.num_workers)
         composition_novelty = compute_composition_novelty(gen_atoms, ref_atoms)
 
     sanitisation = None
     if args.sanitize or args.relax:
-        from gace.utils.catalyst_forge import CatalystForge
+        from gace.utils.forge import CatalystForge
 
         calculator = None
         if args.relax:
