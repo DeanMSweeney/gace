@@ -289,7 +289,7 @@ def main() -> None:
     parser.add_argument(
         "--out_dir",
         type=Path,
-        default=Path(__file__).parent / "ads_strucs",
+        default=Path(__file__).parent,
         help="Root output directory; structures go in <out_dir>/ads_<id>/",
     )
     parser.add_argument(
