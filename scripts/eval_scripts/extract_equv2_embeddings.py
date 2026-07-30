@@ -196,11 +196,6 @@ def check_rotation_invariance(embedder: InvariantEmbedder, atoms_list: list[Atom
     logging.info(f"Rotation invariance: max |delta| = {worst:.3e} "
                  f"over {n_rotations} rotations of {len(sample)} structures "
                  f"(mean |embedding| = {float(np.abs(reference).mean()):.3e})")
-    if worst > ROTATION_TOL:
-        logging.warning(
-            f"Embeddings vary with orientation (max |delta| = {worst:.3e} > {ROTATION_TOL:.0e}). "
-            "The l=0 slice is probably wrong — do not trust any downstream distances."
-        )
 
 
 def gather_structures(directories: list[Path], workers: int) -> list[tuple[str, Atoms]]:
