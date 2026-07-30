@@ -45,6 +45,7 @@ from multiprocessing import Pool
 from gace.utils.relaxation import Silent
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+log = logging.getLogger(__name__)
 
 # Above this the l=0 slice is wrong and every downstream distance is meaningless.
 ROTATION_TOL = 1e-3
