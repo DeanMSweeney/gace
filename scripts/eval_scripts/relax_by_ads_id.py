@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Relax .traj structures with an MLFF, filtered by adsorbate id, and save energies to CSV.
 
 Uses the filename→ads_id CSV from list_traj_by_ads.py to select structures:

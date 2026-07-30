@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Relax .traj structures with UMA, filtered by adsorbate id, and save adsorption energies to CSV.
 
 Same selection interface as relax_by_ads.py — the filename->ads_id CSV from

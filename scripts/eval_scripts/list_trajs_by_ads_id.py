@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Map .traj filenames to adsorbate ids.
 
 Reads the sid from each traj's atoms.info, resolves the adsorbate id via

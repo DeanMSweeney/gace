@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Compute structural uniqueness per adsorbate id, as in post_eval.py.
 
 Uses the filename→ads_id CSV from list_traj_by_ads.py to group .traj files by

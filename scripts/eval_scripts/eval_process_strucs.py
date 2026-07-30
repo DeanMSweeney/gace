@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Evaluate forge-generated structure sets for uniqueness and binding energy.
 
 Usage:

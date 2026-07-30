@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Extract rotation-invariant EquiformerV2 embeddings for a directory of structures.
 
 Step 1 of the structural-novelty analysis. Every .traj is pushed through the
@@ -9,12 +10,12 @@ every downstream distance depend on how the structure happens to be oriented.
 The per-atom l=0 vectors are pooled (mean and max, both saved) into one vector
 per structure.
 
-Give it a directory of .traj files; it writes embeddings.npz (plus a matching
-.csv) into that same directory. One run per directory.
+Give it one or more directories of .traj files; everything found is embedded
+into a single embeddings.npz (plus a matching .csv) in the current directory.
 
 Usage:
     python extract_equv2_embeddings.py \
-        --traj_dir oc20_ads_strucs/ads_75 \
+        --traj_dir for_uma/1_threshold for_uma/2_threshold for_uma/3_threshold \
         --adsorbate NO2
 
     # inspect the module tree to confirm the extraction point, then exit
@@ -202,13 +203,16 @@ def check_rotation_invariance(embedder: InvariantEmbedder, atoms_list: list[Atom
         )
 
 
-def gather_structures(directory: Path, workers: int) -> list[tuple[str, Atoms]]:
-    """Load the .traj files in the directory. Returns (path, atoms) pairs."""
-    files = sorted(str(p) for p in directory.glob("*.traj"))
-    if not files:
-        raise SystemExit(f"No .traj files found in {directory}")
+def gather_structures(directories: list[Path], workers: int) -> list[tuple[str, Atoms]]:
+    """Load the .traj files across all given directories. Returns (path, atoms) pairs."""
+    files = []
+    for directory in directories:
+        found = sorted(str(p) for p in directory.glob("*.traj"))
+        logging.info(f"Found {len(found)} .traj files in {directory}")
+        files.extend(found)
 
-    logging.info(f"Found {len(files)} .traj files in {directory}")
+    if not files:
+        raise SystemExit(f"No .traj files found in {', '.join(str(d) for d in directories)}")
     atoms_by_path = load_atoms_parallel(files=files, num_workers=workers)
     loaded = [(path, atoms) for path, atoms in atoms_by_path.items() if atoms is not None]
 
@@ -220,12 +224,12 @@ def gather_structures(directory: Path, workers: int) -> list[tuple[str, Atoms]]:
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--traj_dir", type=Path, default=None,
-                        help="Directory of .traj files to embed")
+    parser.add_argument("--traj_dir", type=Path, nargs="+", default=None,
+                        help="One or more directories of .traj files; all are embedded together")
     parser.add_argument("--adsorbate", type=str, default="",
                         help="Adsorbate name for this run, e.g. NO2; stored in the output")
     parser.add_argument("--out_name", type=str, default="embeddings.npz",
-                        help="Output filename, written into --traj_dir alongside a matching .csv")
+                        help="Output filename, written to the current directory with a matching .csv")
     parser.add_argument("--mlff_checkpoint", type=str, default="EquiformerV2-31M-S2EF-OC20-All+MD",
                         help="fairchem model name (default matches relax_by_ads.py)")
     parser.add_argument("--local_cache", type=str, default="./mlff_checkpoint_cache",
@@ -260,7 +264,7 @@ def main():
     if args.traj_dir is None:
         raise SystemExit("Nothing to do: pass --traj_dir.")
 
-    loaded = gather_structures(directory=args.traj_dir, workers=args.num_workers)
+    loaded = gather_structures(directories=args.traj_dir, workers=args.num_workers)
     if not loaded:
         raise SystemExit("No structures survived loading.")
 
@@ -283,8 +287,7 @@ def main():
 
     natoms = [len(atoms) for atoms in atoms_list]
 
-    # Outputs live beside the structures they describe
-    out_path = args.traj_dir / args.out_name
+    out_path = Path(args.out_name)
     np.savez(
         out_path,
         emb_mean=emb_mean,
@@ -292,7 +295,7 @@ def main():
         path=np.array(paths),
         natoms=np.array(natoms, dtype=np.int64),
         adsorbate=np.array(args.adsorbate),
-        traj_dir=np.array(str(args.traj_dir)),
+        traj_dir=np.array([str(d) for d in args.traj_dir]),
     )
 
     csv_path = out_path.with_suffix(".csv")
