@@ -159,8 +159,8 @@ class InvariantEmbedder:
 
             for i in range(len(chunk)):
                 vectors = per_atom[atom_to_struct == i]
-                pooled_mean.append(vectors.mean(dim=0).detach().numpy())
-                pooled_max.append(vectors.amax(dim=0).detach().numpy())
+                pooled_mean.append(vectors.mean(dim=0).detach().cpu().numpy())
+                pooled_max.append(vectors.amax(dim=0).detach().cpu().numpy())
 
         return (
             np.asarray(pooled_mean, dtype=np.float32),
