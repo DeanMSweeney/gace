@@ -30,6 +30,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from ase import Atoms
+import ase.io
 from fairchem.core import OCPCalculator
 from fairchem.core.models.model_registry import model_name_to_local_file
 from fairchem.core.preprocessing import AtomsToGraphs
@@ -49,6 +50,13 @@ log = logging.getLogger(__name__)
 
 # Above this the l=0 slice is wrong and every downstream distance is meaningless.
 ROTATION_TOL = 1e-3
+
+def _load_full_atoms(path: str) -> tuple[str, "Atoms | None"]:
+    """Worker: load full atoms (with adsorbate) and return (path, atoms)."""
+    try:
+        return path, ase.io.read(path)
+    except Exception:
+        return path, None
 
 def load_atoms_parallel(files: list[str], num_workers: int) -> dict[str, "Atoms | None"]:
     """Load all structure files in parallel. Returns path → Atoms mapping."""
