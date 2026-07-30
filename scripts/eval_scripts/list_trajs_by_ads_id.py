@@ -45,7 +45,7 @@ def main():
     parser.add_argument("--traj_dir", type=Path, required=True, help="Directory containing .traj files")
     parser.add_argument("--mapping", type=Path, required=True, help="Path to oc20_mapping.pkl")
     parser.add_argument("--out", type=Path, default=Path("traj_by_ads.csv"), help="Output CSV path")
-    parser.add_argument("--workers", type=int, default=os.cpu_count(), help="Number of parallel workers")
+    parser.add_argument("--num_workers", type=int, default=os.cpu_count(), help="Number of parallel workers")
     args = parser.parse_args()
 
     with open(args.mapping, "rb") as f:
@@ -54,7 +54,7 @@ def main():
     traj_paths = sorted(args.traj_dir.glob("*.traj"))
 
     # Read trajs in parallel; mapping lookup stays in the main process
-    with ProcessPoolExecutor(max_workers=args.workers) as pool:
+    with ProcessPoolExecutor(max_workers=args.num_workers) as pool:
         results = list(tqdm(pool.map(read_sid, traj_paths), total=len(traj_paths), desc="Reading trajs"))
 
     rows = []

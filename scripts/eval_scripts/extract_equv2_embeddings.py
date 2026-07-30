@@ -228,7 +228,7 @@ def main():
                         help="Random rotations for the invariance check (0 to skip)")
     parser.add_argument("--check_structures", type=int, default=2,
                         help="Structures used in the invariance check")
-    parser.add_argument("--workers", type=int, default=os.cpu_count(),
+    parser.add_argument("--num_workers", type=int, default=os.cpu_count(),
                         help="Workers for parallel structure loading")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
@@ -252,7 +252,7 @@ def main():
         if not directories:
             continue
         for path, atoms in gather_structures(directories=directories, source=source,
-                                             workers=args.workers):
+                                             workers=args.num_workers):
             atoms_list.append(atoms)
             paths.append(path)
             sources.append(source)

@@ -35,7 +35,7 @@ def main():
     parser.add_argument("--ads_ids", type=int, nargs="+", default=None,
                         help="Adsorbate ids to evaluate (default: all resolved ids in the CSV)")
     parser.add_argument("--out", type=Path, default=Path("uniqueness_by_ads.csv"), help="Output CSV path")
-    parser.add_argument("--workers", type=int, default=os.cpu_count(), help="Workers for parallel structure loading")
+    parser.add_argument("--num_workers", type=int, default=os.cpu_count(), help="Workers for parallel structure loading")
     args = parser.parse_args()
 
     keep_ads_ids = set(args.ads_ids) if args.ads_ids is not None else None
@@ -58,7 +58,7 @@ def main():
     for ads_id in sorted(files_by_ads):
         files = files_by_ads[ads_id]
         logging.info(f"ads_id={ads_id}: {len(files)} structures")
-        atoms_by_path = load_atoms_parallel(files=files, num_workers=args.workers)
+        atoms_by_path = load_atoms_parallel(files=files, num_workers=args.num_workers)
         uniqueness_dict = compute_uniqueness(atoms=atoms_by_path.values())
         # compute_uniqueness returns e.g. {'uniqueness (100)': 0.85}; unpack it
         (key, ratio), = uniqueness_dict.items()
