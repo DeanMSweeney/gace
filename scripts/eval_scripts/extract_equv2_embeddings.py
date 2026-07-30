@@ -35,6 +35,9 @@ from fairchem.core.models.model_registry import model_name_to_local_file
 from fairchem.core.preprocessing import AtomsToGraphs
 from torch_geometric.data import Batch as PygBatch
 from tqdm import tqdm
+import time
+from multiprocessing import Pool
+
 
 # gace.models must NOT be imported: equiformerv2_{oc20,flow,forge}.py each call
 # @registry.register_model("equiformer_v2"), which would overwrite fairchem's own
@@ -46,6 +49,16 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 # Above this the l=0 slice is wrong and every downstream distance is meaningless.
 ROTATION_TOL = 1e-3
+
+def load_atoms_parallel(files: list[str], num_workers: int) -> dict[str, "Atoms | None"]:
+    """Load all structure files in parallel. Returns path → Atoms mapping."""
+    log.info(f"Loading {len(files)} structures ({num_workers} workers)...")
+    t0 = time.time()
+    with Pool(processes=num_workers) as pool:
+        pairs = list(tqdm(pool.imap(_load_full_atoms, files),
+                          total=len(files), desc="Loading structures"))
+    log.info(f"Loaded in {time.time() - t0:.1f}s")
+    return dict(pairs)
 
 
 def load_model(model_name: str, local_cache: str, device: str, seed: int):
