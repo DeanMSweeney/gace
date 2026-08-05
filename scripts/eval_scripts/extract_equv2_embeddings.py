@@ -10,13 +10,21 @@ every downstream distance depend on how the structure happens to be oriented.
 The per-atom l=0 vectors are pooled (mean and max, both saved) into one vector
 per structure.
 
+--pool_atoms chooses which atoms enter that pooling. The default, ``all``, uses
+the whole system. ``slab`` pools only ``tags != 2``, which drops the adsorbate's
+own features so that binding site, height and orientation stop moving the
+embedding. The adsorbate stays in the forward pass in both modes: this checkpoint
+was trained on adsorbate+slab systems only, so feeding it a bare slab would put
+the surface atoms in a neighborhood the model never saw. Embeddings from the two
+modes are not comparable, so the mode is recorded in the .npz.
+
 Give it one or more directories of .traj files; everything found is embedded
 into a single embeddings.npz (plus a matching .csv) in the current directory.
 
 Usage:
     python extract_equv2_embeddings.py \
         --traj_dir for_uma/1_threshold for_uma/2_threshold for_uma/3_threshold \
-        --adsorbate NO2
+        --adsorbate NO2 [--pool_atoms slab]
 
     # inspect the module tree to confirm the extraction point, then exit
     python extract_equv2_embeddings.py --print_model
@@ -131,7 +139,7 @@ class InvariantEmbedder:
         self._captured = getattr(output, "embedding", output)
 
     def _forward(self, atoms_list: list[Atoms]):
-        """Run one batch; return per-atom l=0 features and the atom -> structure index."""
+        """Run one batch; return per-atom l=0 features, atom -> structure index, and tags."""
         batch = PygBatch.from_data_list(
             [self.a2g.convert(atoms, sid=i) for i, atoms in enumerate(atoms_list)]
         )
@@ -147,19 +155,30 @@ class InvariantEmbedder:
 
         # [n_atoms, n_coefficients, channels] -> [n_atoms, n_res * channels]
         features = self._captured
-        return features[:, self.offsets, :].reshape(features.shape[0], -1), batch.batch
+        return (features[:, self.offsets, :].reshape(features.shape[0], -1),
+                batch.batch, batch.tags)
 
-    def embed(self, atoms_list: list[Atoms], batch_size: int, quiet: bool = False):
-        """Return (mean-pooled, max-pooled) embeddings, one row per input structure."""
+    def embed(self, atoms_list: list[Atoms], batch_size: int, quiet: bool = False,
+              slab_only: bool = False):
+        """Return (mean-pooled, max-pooled) embeddings, one row per input structure.
+
+        ``slab_only`` restricts the pooling to ``tags != 2``. The adsorbate is still
+        part of the forward pass — dropping it from the input would hand the model a
+        bare slab, which is not what the S2EF-OC20 checkpoint was trained on — it just
+        does not enter the pooled vector, so binding pose stops moving the embedding.
+        """
         pooled_mean, pooled_max = [], []
 
         starts = range(0, len(atoms_list), batch_size)
         for start in tqdm(starts, desc="Embedding", disable=quiet):
             chunk = atoms_list[start:start + batch_size]
-            per_atom, atom_to_struct = self._forward(atoms_list=chunk)
+            per_atom, atom_to_struct, tags = self._forward(atoms_list=chunk)
 
             for i in range(len(chunk)):
-                vectors = per_atom[atom_to_struct == i]
+                selected = atom_to_struct == i
+                if slab_only:
+                    selected = selected & (tags != 2)
+                vectors = per_atom[selected]
                 pooled_mean.append(vectors.mean(dim=0).detach().cpu().numpy())
                 pooled_max.append(vectors.amax(dim=0).detach().cpu().numpy())
 
@@ -170,14 +189,16 @@ class InvariantEmbedder:
 
 
 def check_rotation_invariance(embedder: InvariantEmbedder, atoms_list: list[Atoms],
-                              n_structures: int, n_rotations: int, seed: int) -> None:
+                              n_structures: int, n_rotations: int, seed: int,
+                              slab_only: bool = False) -> None:
     """Re-embed a few structures under random SO(3) rotations and log the deviation."""
     rng = np.random.default_rng(seed)
     sample = atoms_list[:n_structures]
     if not sample:
         return
 
-    reference, _ = embedder.embed(atoms_list=sample, batch_size=len(sample), quiet=True)
+    reference, _ = embedder.embed(atoms_list=sample, batch_size=len(sample), quiet=True,
+                                  slab_only=slab_only)
     worst = 0.0
 
     for _ in range(n_rotations):
@@ -190,12 +211,30 @@ def check_rotation_invariance(embedder: InvariantEmbedder, atoms_list: list[Atom
             copy.rotate(rng.uniform(0.0, 360.0), axis / np.linalg.norm(axis), rotate_cell=True)
             rotated.append(copy)
 
-        candidate, _ = embedder.embed(atoms_list=rotated, batch_size=len(rotated), quiet=True)
+        candidate, _ = embedder.embed(atoms_list=rotated, batch_size=len(rotated), quiet=True,
+                                      slab_only=slab_only)
         worst = max(worst, float(np.abs(candidate - reference).max()))
 
     logging.info(f"Rotation invariance: max |delta| = {worst:.3e} "
                  f"over {n_rotations} rotations of {len(sample)} structures "
                  f"(mean |embedding| = {float(np.abs(reference).mean()):.3e})")
+
+
+def require_adsorbate_tags(loaded: list[tuple[str, Atoms]]) -> None:
+    """Abort unless every structure has tagged adsorbate atoms.
+
+    A .traj that lost its tags reads back as all-zero, and ``tags != 2`` then selects
+    every atom — slab pooling would quietly return full-system embeddings instead of
+    failing, and nothing downstream could tell the difference.
+    """
+    untagged = [path for path, atoms in loaded if not (atoms.get_tags() == 2).any()]
+    if untagged:
+        listed = "\n  ".join(untagged[:10])
+        more = f"\n  ... and {len(untagged) - 10} more" if len(untagged) > 10 else ""
+        raise SystemExit(
+            f"--pool_atoms slab needs tags==2 to mark the adsorbate, but "
+            f"{len(untagged)} / {len(loaded)} structures have none:\n  {listed}{more}"
+        )
 
 
 def gather_structures(directories: list[Path], workers: int) -> list[tuple[str, Atoms]]:
@@ -233,6 +272,10 @@ def main():
                         help="Submodule to hook: the final layer norm before the output heads")
     parser.add_argument("--print_model", action="store_true",
                         help="Print the module tree and exit, to confirm the extraction point")
+    parser.add_argument("--pool_atoms", choices=["all", "slab"], default="all",
+                        help="Pool over every atom (default) or only the slab (tags != 2). "
+                             "The adsorbate is in the forward pass either way; 'slab' only "
+                             "keeps it out of the pooled vector. Not comparable across modes.")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--check_rotations", type=int, default=3,
@@ -263,6 +306,10 @@ def main():
     if not loaded:
         raise SystemExit("No structures survived loading.")
 
+    slab_only = args.pool_atoms == "slab"
+    if slab_only:
+        require_adsorbate_tags(loaded=loaded)
+
     paths = [path for path, _ in loaded]
     atoms_list = [atoms for _, atoms in loaded]
 
@@ -275,10 +322,16 @@ def main():
             n_structures=args.check_structures,
             n_rotations=args.check_rotations,
             seed=args.seed,
+            slab_only=slab_only,
         )
 
-    emb_mean, emb_max = embedder.embed(atoms_list=atoms_list, batch_size=args.batch_size)
-    logging.info(f"Embedded {emb_mean.shape[0]} structures into {emb_mean.shape[1]} dimensions")
+    emb_mean, emb_max = embedder.embed(
+        atoms_list=atoms_list,
+        batch_size=args.batch_size,
+        slab_only=slab_only,
+    )
+    logging.info(f"Embedded {emb_mean.shape[0]} structures into {emb_mean.shape[1]} dimensions "
+                 f"(pooling over {'slab atoms only' if slab_only else 'all atoms'})")
 
     natoms = [len(atoms) for atoms in atoms_list]
 
@@ -291,6 +344,7 @@ def main():
         natoms=np.array(natoms, dtype=np.int64),
         adsorbate=np.array(args.adsorbate),
         traj_dir=np.array([str(d) for d in args.traj_dir]),
+        pool_atoms=np.array(args.pool_atoms),
     )
 
     csv_path = out_path.with_suffix(".csv")
