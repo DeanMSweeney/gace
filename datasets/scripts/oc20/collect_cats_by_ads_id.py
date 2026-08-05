@@ -11,6 +11,11 @@ Adsorbate atoms are identified by ``tags == 2`` (slab/surface = other tags).
 Each saved Atoms object carries its source LMDB index, sid, adsorbate id and
 adsorbate formula in ``atoms.info`` so downstream code can trace it back.
 
+The IS2RE energies (``y_relaxed``, and ``y_init`` when present) are stored in
+``atoms.info``, and the one matching the written geometry is attached as a
+``SinglePointCalculator`` result so ``atoms.get_potential_energy()`` works after
+reading the .traj back.
+
 --positions selects which geometry is written. ``relaxed`` (the default) uses
 ``pos_relaxed``, which is what you want when comparing against MLFF-relaxed
 generated structures — mixing relaxed and unrelaxed geometries puts a
@@ -50,7 +55,16 @@ import lmdb
 import numpy as np
 from ase import Atoms
 from ase.io import write
+from ase.calculators.singlepoint import SinglePointCalculator
 from tqdm import tqdm
+
+
+def _to_float(x) -> float | None:
+    """Convert a scalar tensor / array / number to a python float, or None."""
+    try:
+        return float(_to_np(x).reshape(-1)[0])
+    except (AttributeError, TypeError, ValueError, IndexError):
+        return None
 
 
 def _to_np(x):
@@ -118,6 +132,11 @@ def build_atoms(data, idx: int, sid: int, ads_id: int, formula: str,
     if not (tags == 2).any():
         return None
 
+    # IS2RE entries carry y_relaxed (relaxed adsorption energy); y_init is only
+    # present in some builds, so it stays optional.
+    y_relaxed = _to_float(getattr(data, "y_relaxed", None))
+    y_init = _to_float(getattr(data, "y_init", None))
+
     atoms = Atoms(numbers=numbers, positions=pos, cell=cell, pbc=True)
     atoms.set_tags(tags)
     atoms.info["lmdb_index"] = idx
@@ -125,6 +144,16 @@ def build_atoms(data, idx: int, sid: int, ads_id: int, formula: str,
     atoms.info["ads_id"] = ads_id
     atoms.info["ads_symbols"] = formula
     atoms.info["positions"] = positions
+    if y_relaxed is not None:
+        atoms.info["y_relaxed"] = y_relaxed
+    if y_init is not None:
+        atoms.info["y_init"] = y_init
+
+    # Attach the energy belonging to the geometry actually written, so
+    # atoms.get_potential_energy() on the reloaded .traj is not mixing states.
+    energy = y_relaxed if positions == "relaxed" else y_init
+    if energy is not None:
+        atoms.calc = SinglePointCalculator(atoms, energy=energy)
     return atoms
 
 
@@ -157,7 +186,8 @@ def _init_worker(lmdb_path: str, out_dir: str, ads_id_by_sid: dict, formula_by_a
 def _process_chunk(index_range: tuple[int, int]) -> dict:
     """Process [start, stop) of LMDB indices, writing matched .traj files."""
     start, stop = index_range
-    counts: dict = {"_missing": 0, "_no_sid": 0, "_unmapped": 0, "_unbuildable": 0, "by_ads": {}}
+    counts: dict = {"_missing": 0, "_no_sid": 0, "_unmapped": 0, "_unbuildable": 0,
+                    "_no_energy": 0, "by_ads": {}}
 
     with _ENV.begin() as txn:
         for idx in range(start, stop):
@@ -190,6 +220,8 @@ def _process_chunk(index_range: tuple[int, int]) -> dict:
             if atoms is None:
                 counts["_unbuildable"] += 1
                 continue
+            if atoms.calc is None:
+                counts["_no_energy"] += 1
 
             ads_dir = _OUT_DIR / f"ads_{ads_id}"
             if ads_id not in _CREATED_DIRS:
@@ -240,7 +272,7 @@ def run(lmdb_path: str, mapping_path: Path, out_dir: Path, keep_ads_ids: set[int
           f"({scope}, {positions} positions, {workers} workers)")
 
     totals: dict[int, int] = {}
-    n_missing = n_no_sid = n_unmapped = n_unbuildable = 0
+    n_missing = n_no_sid = n_unmapped = n_unbuildable = n_no_energy = 0
     with Pool(
         processes=workers,
         initializer=_init_worker,
@@ -256,6 +288,7 @@ def run(lmdb_path: str, mapping_path: Path, out_dir: Path, keep_ads_ids: set[int
             n_no_sid += counts["_no_sid"]
             n_unmapped += counts["_unmapped"]
             n_unbuildable += counts["_unbuildable"]
+            n_no_energy += counts["_no_energy"]
             for ads_id, c in counts["by_ads"].items():
                 totals[ads_id] = totals.get(ads_id, 0) + c
 
@@ -266,6 +299,8 @@ def run(lmdb_path: str, mapping_path: Path, out_dir: Path, keep_ads_ids: set[int
     print(f"  sid not kept / mapped : {n_unmapped}")
     print(f"  could not build atoms : {n_unbuildable}"
           + ("   (missing pos_relaxed?)" if positions == "relaxed" and n_unbuildable else ""))
+    print(f"  written without energy: {n_no_energy}"
+          + (f"   (no y_{'relaxed' if positions == 'relaxed' else 'init'} field)" if n_no_energy else ""))
     for ads_id in sorted(totals):
         print(f"  ads_{ads_id:<4} {formula_by_ads_id.get(ads_id, ''):<12} : {totals[ads_id]}")
     print(f"\nSaved {n_matched} .traj files → {out_dir}")
