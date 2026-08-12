@@ -105,20 +105,16 @@ class PyGToTensorDict:
         )
 
         # ── build time dicts — all components share the same per-graph t ─────
-        if hasattr(data, "t"):
-            t_prim = TensorDictBatch(
-                data=TensorDict({"t": data.t}, batch_size=[batch_size], device=device),
-                mask=x_prim.mask,
-                batch_index=prim_batch,
-            )
-            t_ads = TensorDictBatch(
-                data=TensorDict({"t": data.t}, batch_size=[batch_size], device=device),
-                mask=x_ads.mask,
-                batch_index=ads_batch,
-            )
-        else:
-            t_prim = None
-            t_ads = None
+        t_prim = TensorDictBatch(
+            data=TensorDict({"t": data.t}, batch_size=[batch_size], device=device),
+            mask=x_prim.mask,
+            batch_index=prim_batch,
+        )
+        t_ads = TensorDictBatch(
+            data=TensorDict({"t": data.t}, batch_size=[batch_size], device=device),
+            mask=x_ads.mask,
+            batch_index=ads_batch,
+        )
 
         # ── build feats dicts ────────────────────────────────────────────────
         f_prim = self._build_feats_dict(
@@ -178,12 +174,11 @@ class PyGToTensorDict:
                 max_num_nodes=max_num_nodes,
             )  # (B, N_ads)
 
-            if hasattr(data, "ads_ref_centered_pos"):
-                sd["ads_ref_centered_pos"], _ = to_dense_batch(
-                    data.ads_ref_centered_pos,
-                    atom_batch,
-                    max_num_nodes=max_num_nodes,
-                )  # (B, N_ads, 3)
+            sd["ads_ref_centered_pos"], _ = to_dense_batch(
+                data.ads_ref_centered_pos,
+                atom_batch,
+                max_num_nodes=max_num_nodes,
+            )  # (B, N_ads, 3)
         else:
             # Node-level: positions (already prim-only after _build_positions_path)
             sd["frac_coords"], _  = to_dense_batch(
@@ -199,14 +194,10 @@ class PyGToTensorDict:
                 max_num_nodes=max_num_nodes,
             )
 
-        # Graph-level lattice parameters (prim only)
-        if hasattr(data, "lengths_scaled"):
+            # Graph-level lattice parameters (prim only)
             sd["lengths_scaled"] = data.lengths_scaled.unsqueeze(1)  # (B, 1, 3)
-        if hasattr(data, "angles_radians"):
             sd["angles_radians"] = data.angles_radians.unsqueeze(1)  # (B, 1, 3)
-        if hasattr(data, "transformation_matrix"):
             sd["transformation_matrix"] = data.transformation_matrix  # (B, 3, 3)
-        if hasattr(data, "supercell_lattice"):
             sd["supercell_lattice"] = data.supercell_lattice  # (B, 3, 3) = S @ L
 
         return TensorDictBatch(data=sd, mask=mask, batch_index=atom_batch)

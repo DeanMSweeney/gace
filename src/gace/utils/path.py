@@ -8,7 +8,7 @@ from torchdiffeq import odeint
 from typing import Optional, Literal, Union, Tuple
 
 from gace.utils.invariance import pbc_aware_delta, batched_ot_align, global_ot_align
-from gace.utils.utils import adsorbate_neighborhood_mask, random_so3_rotation
+from gace.utils.utils import adsorbate_neighborhood_mask, center_and_random_so3_rotation
 from gace.utils.builder import lattice_params_to_matrix
 from gace.utils.euler import euler_step, ctmc_step
 from gace.utils.relaxation import relax_w_mlff
@@ -54,7 +54,7 @@ class Flow():
         # ── Atom-type loss (catalyst only — adsorbate types are conditioned) ─────────────────────────────
         z_pred   = pred["z"].float()
         z_target = data.atomic_numbers_target.long().clone()         # (N_prim,)
-        z_target[data.atomic_numbers != self.num_classes - 1] = -100      # ignore already-unmasked atoms
+        z_target[data.atomic_numbers != self.model.atom_dim - 1] = -100      # ignore already-unmasked atoms
         z_loss_atoms = F.cross_entropy(z_pred, z_target, ignore_index=-100, reduction='none')  # (N_prim,)
         valid = (z_target != -100).float()
         z_loss_per_graph = (
@@ -91,7 +91,7 @@ class Flow():
             + lambda_M   * M_loss
         )
 
-        return {
+        losses = {
             "total_loss":   total_loss,
             "x_loss":       x_loss,
             "z_loss":       z_loss,
@@ -101,16 +101,33 @@ class Flow():
             "M_loss":       M_loss,
         }
 
+        # ── Energy loss (predict_energy: joint generation + energy regression) ──
+        if self.model.predict_energy:
+            target_energy = (
+                data.ads_binding_energy.float() - self.avg_binding_energy
+            ) / self.std_binding_energy  # standardized (B,)
+            energy_loss = ((pred["energy"].float() - target_energy).abs() * self.time_weight).mean()
+            losses["energy_loss"] = energy_loss
+            losses["total_loss"] = total_loss + float(self.hparams.lambda_energy) * energy_loss
+
+        return losses
+
     def build_path(
         self,
         input_graph: Data,
         time_dist: Literal["uniform", "beta"] = "beta",
         beta_t: float = 1.8,
+        t_min: float = 0.0,
     ) -> Data:
         """
         Generate interpolated training data along a path from initial to relaxed positions.
 
         For "forge" variant: interpolates from noise/initial positions to relaxed positions
+
+        Args:
+            t_min: Floor for the sampled time, t = max(t, t_min). Oracle training
+                uses ~0.98 (zatom finetuning recipe: near-clean views, fresh
+                small corruption each visit).
 
         Returns:
             data: Modified data object with interpolated inputs/targets at time t
@@ -119,18 +136,20 @@ class Flow():
         with torch.no_grad():
             data = input_graph.clone()
 
-            # define time 
+            # define time
             if time_dist == "uniform":
                 t = torch.rand(len(torch.unique(data.batch)), 1, device=data.pos.device, dtype=torch.float32) # B , 1
             elif time_dist == "beta":
                 beta = torch.distributions.Beta(beta_t, 1.0)
                 t = beta.sample((len(torch.unique(data.batch)), 1)).to(data.pos.device) # B , 1
-            data.t = t 
+            if t_min > 0.0:
+                t = t.clamp(min=t_min)
+            data.t = t
 
             # ── Lattice and supercell (CatFlow data only) ────────────────────
             self.primitive_mask = (data.tags == 1)
             self.adsorbate_mask = (data.tags == 2)
-        
+            
             data = self._build_lattice_path(data, t=t) # lattice 
             data = self._build_transformation_matrix_path(data, t=t) # transformation matrix 
             data = self._build_ads_path(data, t=t) # adsorbate position 
@@ -412,7 +431,7 @@ class Flow():
         # Center ref_ads_pos and apply random SO(3) rotation each training step.
         # Stored as ads_ref_centered_pos — conditioning signal, distinct from ads_pos.
         B = t.shape[0]
-        data.ads_ref_centered_pos = random_so3_rotation(
+        data.ads_ref_centered_pos = center_and_random_so3_rotation(
             data.ref_ads_pos.float(), ads_batch, B
         )  # (N_ads, 3)
 
@@ -423,7 +442,7 @@ class Flow():
         CTMC mask-token corruption for catalyst atom types (forge variant only).
 
         Real atom types are indices 0–98 (1-indexed elements 1–99).
-        Mask token is self.num_classes - 1 = 99.
+        Mask token is self.model.atom_dim - 1 = 99.
 
         Each atom is independently masked with probability 1 - alpha_t(t),
         where alpha_t is computed from the interpolant schedule per graph then
@@ -436,8 +455,6 @@ class Flow():
         device = data.pos.device
 
         z1 = (data.atomic_numbers.long() - 1)  # (N_prim,) 0-indexed true types (0–98)
-
-        self.num_classes = self.model.atom_dim
 
         # Sample per-graph interpolation time
         t_z_per_graph = t
@@ -453,7 +470,7 @@ class Flow():
         # Per-atom independent masking against the scheduled threshold
         mask_flag = torch.rand(z1.size(0), device=device) < (1 - alpha_t_z.squeeze(1))  # (N_prim,)
         zt = z1.clone()
-        zt[mask_flag] = self.num_classes - 1          # masked atoms get index 99
+        zt[mask_flag] = (self.oracle_model.atom_dim - 1) if self.oracle_mode == "train" else (self.model.atom_dim - 1) # masked atoms get index 99
 
         data.atomic_numbers        = zt          # (N_prim,) long — model input
         data.atomic_numbers_target = z1          # (N_prim,) long — loss target
@@ -495,6 +512,15 @@ class Flow():
         data = input_graph.clone()
         device = data.pos.device
 
+        # The Langevin score correction s_t = g(t)·(t·v_t − x_t)/(1−t) is only the
+        # true score under a standard-Gaussian prior. It is invalid for the uniform
+        # informed priors, so require Gaussian init whenever any γ_g is enabled.
+        if self.langevin_gamma_slab > 0.0 or self.langevin_gamma_ads > 0.0:
+            assert not self.hparams.informed_priors, (
+                "Langevin sampling (langevin_gamma_* > 0) assumes a Gaussian prior; "
+                "set informed_priors=False."
+            )
+
         self.primitive_mask = (data.tags == 1)
         self.adsorbate_mask = (data.tags == 2)
         B = int(data.batch.max().item()) + 1
@@ -510,6 +536,7 @@ class Flow():
         N_ads = int(self.adsorbate_mask.sum().item())
 
         if not build_from_truth: # TOGGLED ON ONLY FOR TESTING THE BUILD PROCESS, NORMALLY OFF 
+            # ── If num_prim_atoms is specified, build a new graph from scratch  ───────────
             if num_prim_atoms is not None:
                 total_prim = int(num_prim_atoms.sum().item())
                 ads_mask = (data.tags == 2)
@@ -538,7 +565,7 @@ class Flow():
 
             # Discrete: all atoms start as mask token
             N_prim = int(self.primitive_mask.sum().item())
-            data.atomic_numbers = torch.full((N_prim,), self.num_classes - 1, dtype=torch.long, device=device)
+            data.atomic_numbers = torch.full((N_prim,), self.model.atom_dim - 1, dtype=torch.long, device=device)
 
         # N^(1/3) scale factor for length denormalisation — lengths_scaled is in normalised space
         n_scale = (num_prim_atoms.float() ** (1 / 3)).unsqueeze(1)  # (B, 1)
@@ -608,13 +635,21 @@ class Flow():
                     else:
                         pred = pred_cond
 
-                # Update continuous modalities
+                # Update continuous modalities. noise_scale = prior-agnostic Brownian
+                # noise; langevin_gamma = score-guided Langevin term (Gaussian prior).
+                # Slab fractional/lattice modalities share one γ_g; Cartesian ads_pos its own.
+                # M is kept fully deterministic: its prior is I+0.1·N(0,1), not N(0,I),
+                # so the score correction is invalid, and uncorrected Brownian noise just
+                # drags M off its near-integer supercell targets.
                 noise_scale = self.sde_noise_scale
-                data.pos               = euler_step(data.pos,               pred["pos"],     t_curr, dt, pbc_aware=True,  noise_scale=noise_scale)
-                data.lengths_scaled    = euler_step(data.lengths_scaled,    pred["len"],     t_curr, dt, pbc_aware=False, noise_scale=noise_scale)
-                data.angles_radians    = euler_step(data.angles_radians,    pred["ang"],     t_curr, dt, pbc_aware=False, noise_scale=noise_scale)
-                data.transformation_matrix = euler_step(data.transformation_matrix, pred["M"], t_curr, dt, pbc_aware=False, noise_scale=noise_scale)
-                data.ads_pos = euler_step(data.ads_pos, pred["ads_pos"], t_curr, dt, pbc_aware=False, noise_scale=noise_scale)
+                g_slab      = self.langevin_gamma_slab
+                g_ads       = self.langevin_gamma_ads
+                cutoff      = self.langevin_cutoff
+                data.pos               = euler_step(data.pos,               pred["pos"],     t_curr, dt, noise_scale=noise_scale, langevin_gamma=g_slab, langevin_cutoff=cutoff)
+                data.lengths_scaled    = euler_step(data.lengths_scaled,    pred["len"],     t_curr, dt, noise_scale=noise_scale, langevin_gamma=g_slab, langevin_cutoff=cutoff)
+                data.angles_radians    = euler_step(data.angles_radians,    pred["ang"],     t_curr, dt, noise_scale=noise_scale, langevin_gamma=g_slab, langevin_cutoff=cutoff)
+                data.transformation_matrix = euler_step(data.transformation_matrix, pred["M"], t_curr, dt, noise_scale=0.0, langevin_gamma=0.0)
+                data.ads_pos = euler_step(data.ads_pos, pred["ads_pos"], t_curr, dt, noise_scale=noise_scale, langevin_gamma=g_ads, langevin_cutoff=cutoff)
 
                 # Update discrete atom types (CTMC)
                 data.atomic_numbers = ctmc_step(data.atomic_numbers, pred["z"], t_curr, dt)

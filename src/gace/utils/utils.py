@@ -138,7 +138,7 @@ def adsorbate_center_of_mass(
     return com
 
 
-def random_so3_rotation(ref_pos: Tensor, ads_batch: Tensor, B: int) -> Tensor:
+def center_and_random_so3_rotation(ref_pos: Tensor, ads_batch: Tensor, B: int) -> Tensor:
     """Center ref_pos by its per-graph centroid and apply a random SO(3) rotation.
 
     Rotation matrices are sampled uniformly (Haar measure) via QR decomposition

@@ -1,0 +1,39 @@
+# model configuration
+defaults:
+  - oracle_model_cfg: tft-energy
+  - _self_
+
+# Model mode
+mode: train
+
+# datasets
+oc20_train: "/datasets/factorized/train/dataset_processed.lmdb"
+oc20_val: "/datasets/factorized/val_id/dataset_processed.lmdb"
+
+# training hyperparameters/settings
+batch_size: 256
+num_workers: 8
+accumulate_grad_batches: 1
+
+optim_cfg:
+  weight_decay: 0.01
+  lr: 0.001
+  lr_scheduler: cosine_w_warmup
+  num_cycles: 0.50
+  warmup_proportion: 0.05
+  max_epochs: 200
+  ema_decay: 0.9999
+
+oracle_cfg: 
+  oracle_mode: train
+
+# checkpointing/logging
+logger: true
+project: gace
+run_name: oracle-small
+
+# restart run 
+ckpt_path: null
+resume_training: false
+run_id: null  # log id from wandb
+strategy: ddp

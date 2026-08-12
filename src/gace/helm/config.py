@@ -98,6 +98,9 @@ class OptimizerConfig:
     lambda_M: float = 1.0
     """Loss weight for supercell transformation matrix loss (M_loss)"""
 
+    lambda_energy: float = 1.0
+    """Loss weight for the joint energy-prediction loss (model_cfg predict_energy)"""
+
 
 @dataclass
 class SamplerConfig:
@@ -123,6 +126,34 @@ class SamplerConfig:
     Required to be > 0 when fk_steering=True so resampled clones diverge on
     continuous modalities. Recommended value with FK: 0.05.
     """
+
+    # ==================== Langevin (SDE) Euclidean Step ====================
+    # Score-guided stochastic sampling, per Algorithm 2's EUCLIDEAN STEP and
+    # zatom's SDEMetricInterpolant. Each modality adds:
+    #   s_t = g(t)·(t·v_t − x_t)/(1−t)          # score correction (guides to manifold)
+    #   dW  = sqrt(2·γ_g·g(t))·N(0, I)          # Langevin Wiener noise
+    # with g(t) = 1/(t + 1e-2) for t < langevin_cutoff, else 0.
+    # γ_g (langevin_gamma_*) is split by coordinate scale, matching zatom: the
+    # slab fractional/lattice quantities (fractional coords, normalised
+    # lengths/angles) share one small value; raw Cartesian needs a much larger
+    # one. The score ASSUMES a standard-Gaussian prior (informed_priors=False),
+    # asserted in sample(). The supercell matrix M is deliberately excluded: its
+    # prior is I+0.1·N(0,1), not N(0,I), so it stays fully deterministic.
+
+    langevin_gamma_slab: float = 0.0
+    """γ_g for the slab fractional/lattice modalities: catalyst fractional coords
+    (pos), normalised lengths (lengths_scaled), and angles (angles_radians).
+    These live in [0, 1) / normalised ranges, so they share one small value
+    (zatom uses ~0.01). 0.0 disables the score correction + Wiener noise. Does
+    NOT cover the transformation matrix M (kept deterministic; see above)."""
+
+    langevin_gamma_ads: float = 0.0
+    """γ_g for adsorbate Cartesian positions (ads_pos). Raw Ångström scale —
+    tolerates a large value (zatom uses ~50 for Cartesian pos)."""
+
+    langevin_cutoff: float = 0.9
+    """Time above which g(t) = 0, switching off the score correction and Wiener
+    noise so the endpoint commits deterministically. zatom uses 0.9–0.95."""
 
     # ==================== Structure Generation ====================
 
@@ -291,7 +322,13 @@ class OracleConfig:
                |oracle(x_hat_1) - ads_binding_energy| to the flow loss."""
 
     oracle_ckpt_path: Optional[str] = None
-    """Path to pretrained oracle weights, loaded in 'guide' mode."""
+    """Checkpoint loaded into the oracle. In 'guide' mode: a standalone oracle run
+    (keys 'oracle_model.'). In 'train' mode with oracle_pretrained_state=True: a
+    trained forge checkpoint (keys 'model.') used to seed the oracle trunk."""
+
+    oracle_gen_pretraining: bool = False
+    """If True (with oracle_mode='train'), seed the oracle trunk from the forge
+    checkpoint at oracle_ckpt_path instead of training from scratch (Stage A)."""
 
     oracle_lambda_energy: float = 1.0
     """Loss weight for the energy guidance term (oracle_mode == 'guide')."""

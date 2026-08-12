@@ -1,8 +1,9 @@
+#!/usr/bin/env python3
 """Evaluate forge-generated structure sets for uniqueness and binding energy.
 
 Usage:
-    python scripts/evaluate.py --gen_strucs ./gen_strucs
-    python scripts/evaluate.py --gen_strucs ./gen_strucs --relax --n_strucs 500
+    python scripts/eval_scripts/eval_process_strucs.py --traj_dirs ./gen_strucs
+    python scripts/eval_scripts/eval_process_strucs.py --traj_dirs ./run_a ./run_b --relax --n_strucs 500
 """
 
 import csv
@@ -26,15 +27,21 @@ log = logging.getLogger(__name__)
 # File collection
 # ---------------------------------------------------------------------------
 
-def collect_structure_files(directory: str) -> list[str]:
-    """Return sorted structure files from directory (.vasp preferred, .traj fallback)."""
-    traj = sorted(str(p) for p in pathlib.Path(directory).rglob("*.traj"))
-    log.info(f"Found {len(traj)} .traj files in {directory}")
-    
-    if not traj:
-        raise FileNotFoundError(f"No .traj files found in directory: {directory}")
-    
-    return traj
+def collect_structure_files(directories: str | list[str]) -> list[str]:
+    """Return sorted .traj files across one or more directories."""
+    if isinstance(directories, str):
+        directories = [directories]
+
+    files: list[str] = []
+    for d in directories:
+        found = sorted(str(p) for p in pathlib.Path(d).rglob("*.traj"))
+        if not found:
+            raise FileNotFoundError(f"No .traj files found in directory: {d}")
+        log.info(f"Found {len(found)} .traj files in {d}")
+        files.extend(found)
+
+    log.info(f"Found {len(files)} .traj files across {len(directories)} directories")
+    return files
 
 # ---------------------------------------------------------------------------
 # Uniqueness
@@ -211,7 +218,7 @@ def summarize_results(rows: list[dict]) -> dict:
 # ---------------------------------------------------------------------------
 
 def format_report(
-    directory: str,
+    directories: list[str],
     uniqueness: dict | None,
     sanitisation: dict | None,
     n_strucs: int | None,
@@ -224,7 +231,7 @@ def format_report(
         "=" * 50,
         "GACE Evaluation Report",
         f"Generated : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        f"Directory : {directory}",
+        f"Directories : {', '.join(directories)}",
         "=" * 50,
     ]
     if uniqueness is not None:
@@ -295,12 +302,11 @@ def write_report(report: str, output_path: str) -> None:
 def parse_args():
     import argparse
     p = argparse.ArgumentParser(description="Evaluate forge-generated structures.")
-    p.add_argument("--strucs_for_eval", help="Directory of generated structure files")
-    p.add_argument("--check_diversity", default=False, action="store_true", help="Run structural uniqueness check via StructureMatcher")
-    p.add_argument("--check_novelty_against", default=None, help="Directory of reference structures (e.g. OC20); reports fraction of generated slabs absent from it")
-    p.add_argument("--sanitize", default=False, action="store_true",
-                   help="Run validity checks (and optionally MLFF relaxation) on structures")
-    p.add_argument("--relax", default=False, action="store_true", help="Run MLFF relaxation step")
+    p.add_argument("--traj_dirs", nargs="+", help="One or more directories of generated structure files")
+    p.add_argument("--eval_uniqueness", default=False, action="store_true", help="Run structural uniqueness check")
+    p.add_argument("--eval_novelty_against", default=None, help="Directory of reference structures (e.g. OC20); reports fraction of generated slabs absent from it")
+    p.add_argument("--sanitize", default=False, action="store_true", help="Run sanitisation checks")
+    p.add_argument("--relax", default=False, action="store_true", help="Relax structures with the MLFF and report binding energies")
     p.add_argument("--n_strucs", type=int, default=None, help="Number of structures to process (default: all)")
     p.add_argument("--mlff_checkpoint", default="EquiformerV2-31M-S2EF-OC20-All+MD")
     p.add_argument("--energy_cutoff", type=float, default=10.0, help="Max binding energy (eV)")
@@ -312,7 +318,7 @@ def parse_args():
     p.add_argument("--num_workers", type=int, default=8, help="Parallel workers for structure loading")
     p.add_argument("--relaxed_strucs", default="./relaxed_strucs", help="Output directory for relaxed structures")
     p.add_argument("--sanitized_strucs", default="./sanitized_strucs", help="Output directory for sanitized structures")
-    p.add_argument("--output", default="./report.txt", help="Path for output report")
+    p.add_argument("--output", default="./eval_report.txt", help="Path for output report")
     return p.parse_args()
 
 
@@ -322,24 +328,24 @@ def main(**kwargs):
     for k, v in kwargs.items():
         setattr(args, k, v)
 
-    files = collect_structure_files(args.strucs_for_eval)
+    files = collect_structure_files(args.traj_dirs)
     preloaded = load_atoms_parallel(files, args.num_workers)
     gen_atoms = list(preloaded.values())
 
     # Uniqueness and novelty are pure post-processing passes over the loaded set.
-    uniqueness = compute_uniqueness(gen_atoms) if args.check_diversity else None
+    uniqueness = compute_uniqueness(gen_atoms) if args.eval_uniqueness else None
 
     novelty = None
     composition_novelty = None
-    if args.check_novelty_against:
-        ref_files = collect_structure_files(args.check_novelty_against)
+    if args.eval_novelty_against:
+        ref_files = collect_structure_files(args.eval_novelty_against)
         ref_atoms = list(load_atoms_parallel(ref_files, args.num_workers).values())
         novelty = compute_novelty(gen_atoms, ref_atoms, num_workers=args.num_workers)
         composition_novelty = compute_composition_novelty(gen_atoms, ref_atoms)
 
     sanitisation = None
     if args.sanitize or args.relax:
-        from gace.utils.catalyst_forge import CatalystForge
+        from gace.utils.forge import CatalystForge
 
         calculator = None
         if args.relax:
@@ -362,7 +368,7 @@ def main(**kwargs):
             energy_cutoff=args.energy_cutoff,
             fmax=args.fmax,
             steps=args.steps,
-            generated_strucs=args.strucs_for_eval,
+            generated_strucs=None,  # only read on the opt_graph (OTF) path
             relaxed_strucs=args.relaxed_strucs,
             sanitized_strucs=args.sanitized_strucs,
             preloaded_atoms=preloaded,
@@ -373,7 +379,7 @@ def main(**kwargs):
         sanitisation = summarize_results(rows)
 
     report = format_report(
-        directory=args.strucs_for_eval,
+        directories=args.traj_dirs,
         novelty=novelty,
         composition_novelty=composition_novelty,
         uniqueness=uniqueness,

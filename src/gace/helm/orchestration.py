@@ -22,7 +22,7 @@ from fairchem.core import OCPCalculator
 from gace.utils.tft.tft_wrapper import PyGToTensorDict
 from gace.utils.builder import sample_prim_atom_counts
 from gace.utils.oracle import Oracle
-from gace.utils.catalyst_forge import CatalystForge
+from gace.utils.forge import CatalystForge
 import ase.io
 
 from typing import Optional, Literal, Union, Tuple
@@ -102,6 +102,9 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
             cfg_w_continuous: float=1.0,
             cfg_w_discrete: float=1.0,
             sde_noise_scale: float=0.0,
+            langevin_gamma_slab: float=0.0,
+            langevin_gamma_ads: float=0.0,
+            langevin_cutoff: float=0.9,
             sanitize_otf: bool=True,
             dedupe_otf: bool=False,
             fk_steering: bool=False,
@@ -130,6 +133,12 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
             # pinned by the train() override, which Lightning triggers each epoch.
             for p in self.oracle_model.parameters():
                 p.requires_grad_(False)
+        elif self.oracle_model is not None and self.oracle_mode == "train" \
+                and getattr(self.hparams, "oracle_gen_pretraining", False):
+            # Stage A: forge trunk is frozen; train only the random energy head.
+            for name, p in self.oracle_model.named_parameters():
+                p.requires_grad_(name.startswith(
+                    ("energy_cross_attention.", "energy_proj.", "energy_transformer.", "out_energy.")))
         self.variant = variant  # "refine" or "forge"
         self.mode = mode
         self.loss_fn = nn.MSELoss()  # Base loss function (not directly used, see criterion)
@@ -185,6 +194,11 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
         self.cfg_w_continuous = cfg_w_continuous
         self.cfg_w_discrete = cfg_w_discrete
         self.sde_noise_scale = sde_noise_scale
+
+        # Langevin (SDE) score-guided Euclidean step; per-modality γ_g. See config.py.
+        self.langevin_gamma_slab = langevin_gamma_slab
+        self.langevin_gamma_ads  = langevin_gamma_ads
+        self.langevin_cutoff     = langevin_cutoff
 
         # Feynman-Kac steering
         self.fk_steering   = fk_steering
@@ -290,11 +304,10 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
 
         return pred_prim, pred_ads, x_prim, x_ads, prim_padding_mask, ads_padding_mask
 
-    @staticmethod
-    def _sparsify(pred_prim, pred_ads, x_prim, x_ads) -> dict:
+    def _sparsify(self, pred_prim, pred_ads, x_prim, x_ads) -> dict:
         """Unpack the dense flow outputs to the sparse prediction dict (second half
         of ``forward``)."""
-        return {
+        pred = {
             "pos":     x_prim.to_sparse(pred_prim[1]),   # (N_prim, 3)
             "z":       x_prim.to_sparse(pred_prim[0]),   # (N_prim, 100)
             "len":     pred_prim[2].squeeze(1),          # (B, 3)
@@ -302,6 +315,9 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
             "M":       pred_prim[4],                     # (B, 3, 3)
             "ads_pos": x_ads.to_sparse(pred_ads[0]),     # (N_ads, 3)
         }
+        if self.model.predict_energy:
+            pred["energy"] = pred_prim[5]                # (B,)
+        return pred
 
     def forward(self, data: Data, force_unconditional: bool = False) -> dict:
         """Run the forge model forward pass and return a flat prediction dict.
@@ -332,12 +348,18 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
           frozen-oracle energy guidance term to the flow loss.
         """
         # Mode 1: standalone oracle training — no flow loss.
-        if self.oracle_mode == "train":
-            energy_loss = self.energy_criterion(data=input_graph)
-            return {"total_loss": energy_loss, "energy_loss": energy_loss}
 
         # Flow path (off / guide). path() stores supervision targets on `data`.
-        data = self.build_path(input_graph=input_graph)
+        if self.oracle_mode == "train":
+            t_min = 1.0 if self.training else 1.0
+        else:
+            t_min = 0.0
+
+        data = self.build_path(input_graph=input_graph, t_min=t_min)
+
+        if self.oracle_mode == "train":
+            energy_loss = self.energy_criterion(data=data)
+            return {"total_loss": energy_loss, "energy_loss": energy_loss}
 
         if self.variant != "forge":
             raise RuntimeError(f"Unknown variant: {self.variant}")
@@ -438,10 +460,10 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
         B = int(data.batch.max().item()) + 1
         counts = sample_prim_atom_counts(B, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
         
-        if self.target_binding_energy:
+        if self.target_binding_energy is not None:
             data.ads_binding_energy = torch.ones(B, device=data.pos.device, dtype=data.pos.dtype) * self.target_binding_energy
-        else: 
-            data.ads_binding_energy = torch.normal(mean=_AVG_BINDING_ENERGY, std=_STD_BINDING_ENERGY, size=(B,), device=data.pos.device, dtype=data.pos.dtype)
+        #else: 
+        #data.ads_binding_energy = torch.normal(mean=_AVG_BINDING_ENERGY, std=_STD_BINDING_ENERGY, size=(B,), device=data.pos.device, dtype=data.pos.dtype)
 
         opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts,)
 
@@ -589,7 +611,8 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
         # the flow model (the oracle is frozen in "guide" mode and absent
         # when off, so self.model.parameters() is the right set in both cases).
         if self.oracle_mode == "train":
-            params = self.oracle_model.parameters()
+            # Only trainable params (Stage A freezes the forge trunk).
+            params = [p for p in self.oracle_model.parameters() if p.requires_grad]
         else:
             params = self.model.parameters()
 

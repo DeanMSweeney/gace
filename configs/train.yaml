@@ -3,30 +3,26 @@ defaults:
   - model_cfg: tft-large # direcotry in conf: file name
   - _self_
 
+# Model cfg 
+model_cfg: 
+  hidden_dim: 1024
+
 # Model mode
-mode: "train"
+mode: train
 
 # datasets
 oc20_train: "/datasets/factorized/train/dataset_processed.lmdb"
 oc20_val: "/datasets/factorized/val_id/dataset_processed.lmdb"
-oc20_test: "/datasets/factorized/val_id/dataset_processed.lmdb"
 
 # training hyperparameters/settings
 batch_size: 128
 num_workers: 8
 accumulate_grad_batches: 2
 
-# flow matching serttings 
-path_cfg: 
-  x_matching: "endpoint"
-  interpolant_schedule: "linear"
-  informed_priors: true
-  optimal_transport: true
-
 optim_cfg:
   weight_decay: 0
-  lr: 0.0005
-  lr_scheduler: "cosine_w_warmup"
+  lr: 0.00025
+  lr_scheduler: cosine_w_warmup
   num_cycles: 0.50
   warmup_proportion: 0.05
   max_epochs: 200
@@ -37,11 +33,12 @@ optim_cfg:
 
 # checkpointing/logging
 logger: true
-project: "gace"
-run_name: "OT+Z"
+project: gace
+run_name: GACE-LARGE
 
 # restart run 
-ckpt_path: "/datasets/checkpoints/zatom/zatom_1_l_joint_pretraining_paper_weights.ckpt"  
+ckpt_path: "/datasets/checkpoints/zatom/zatom_1_xl_joint_pretraining_paper_weights.ckpt"  
 resume_training: false
 run_id: null  # log id from wandb
+strategy: ddp_find_unused_parameters_true
 
