@@ -334,9 +334,9 @@ def main():
     natoms = [len(atoms) for atoms in atoms_list]
 
     if slab_only: 
-        out_path = Path(f"{args.traj_dir}/slab_embeddings.npz")
+        out_path = Path(f"slab_embeddings.npz")
     else: 
-        out_path = Path(f"{args.traj_dir}/all_embeddings.npz")
+        out_path = Path(f"all_embeddings.npz")
 
     np.savez(
         out_path,
