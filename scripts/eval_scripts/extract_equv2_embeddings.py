@@ -262,8 +262,6 @@ def main():
                         help="One or more directories of .traj files; all are embedded together")
     parser.add_argument("--adsorbate", type=str, default="",
                         help="Adsorbate name for this run, e.g. NO2; stored in the output")
-    parser.add_argument("--out_name", type=str, default="embeddings.npz",
-                        help="Output filename, written to the current directory with a matching .csv")
     parser.add_argument("--mlff_checkpoint", type=str, default="EquiformerV2-31M-S2EF-OC20-All+MD",
                         help="fairchem model name (default matches relax_by_ads.py)")
     parser.add_argument("--local_cache", type=str, default="./mlff_checkpoint_cache",
@@ -272,7 +270,7 @@ def main():
                         help="Submodule to hook: the final layer norm before the output heads")
     parser.add_argument("--print_model", action="store_true",
                         help="Print the module tree and exit, to confirm the extraction point")
-    parser.add_argument("--pool_atoms", choices=["all", "slab"], default="all",
+    parser.add_argument("--pool_atoms", choices=["all", "slab"], default="slab",
                         help="Pool over every atom (default) or only the slab (tags != 2). "
                              "The adsorbate is in the forward pass either way; 'slab' only "
                              "keeps it out of the pooled vector. Not comparable across modes.")
@@ -335,7 +333,11 @@ def main():
 
     natoms = [len(atoms) for atoms in atoms_list]
 
-    out_path = Path(args.out_name)
+    if slab_only: 
+        out_path = Path(f"{args.traj_dir}/slab_embeddings.npz")
+    else: 
+        out_path = Path(f"{args.traj_dir}/all_embeddings.npz")
+
     np.savez(
         out_path,
         emb_mean=emb_mean,
