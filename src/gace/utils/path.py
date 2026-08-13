@@ -8,11 +8,11 @@ from torchdiffeq import odeint
 from typing import Optional, Literal, Union, Tuple
 
 from gace.utils.invariance import pbc_aware_delta, batched_ot_align, global_ot_align
-from gace.utils.utils import adsorbate_neighborhood_mask, center_and_random_so3_rotation
+from gace.utils.utils import adsorbate_neighborhood_mask, center_and_random_so3_rotation, dump_flow_snapshot
 from gace.utils.builder import lattice_params_to_matrix
 from gace.utils.euler import euler_step, ctmc_step
 from gace.utils.relaxation import relax_w_mlff
-from gace.utils.catalyst_forge import CatalystForge
+from gace.utils.forge import CatalystForge
 
 class Flow():
     """
@@ -599,9 +599,18 @@ class Flow():
                 fk_log_w = torch.zeros(B, device=device)
                 fk_ell   = 0
 
+            # TEMPORARY: 5 intervals → frames at t ≈ 0, .2, .4, .6, .8 (+ 1.0 after the loop)
+            dump_every = max(1, round((len(t) - 1) / 5))
+
             for i in range(len(t) - 1):
                 t_curr = t[i].item()
                 dt     = (t[i + 1] - t[i]).item()
+
+                # DUMP: snapshot state at t before it is advanced (no-op unless DUMP_FLOW_TRAJ)
+                dump_flow_snapshot(
+                    data=data, step=i, every=dump_every, t_curr=t_curr,
+                    n_scale=n_scale, mask_token=self.model.atom_dim - 1,
+                )
 
                 # Rebuild derived lattice fields from current state
                 # lengths_scaled is in normalised space — denormalise before geometry construction
@@ -679,6 +688,12 @@ class Flow():
                         n_prim=n_prim, n_ads=n_ads,
                     )
                     fk_ell += 1
+
+            # DUMP: final frame at t = 1 (the loop's last t_curr is t[-2])
+            dump_flow_snapshot(
+                data=data, step=len(t) - 1, every=dump_every, t_curr=1.0,
+                n_scale=n_scale, mask_token=self.model.atom_dim - 1, force=True,
+            )
 
         # ── Store generated outputs ───────────────────────────────────────────
         data.pos_generated             = data.pos
