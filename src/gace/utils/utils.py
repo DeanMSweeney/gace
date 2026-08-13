@@ -154,7 +154,6 @@ def dump_flow_snapshot(
     every: int,
     t_curr: float,
     n_scale: Tensor,
-    mask_token: int,
     force: bool = False,
     out_dir: str = DUMP_FLOW_TRAJ_DIR,
     num_samples: int = DUMP_FLOW_TRAJ_SAMPLES,
@@ -176,7 +175,8 @@ def dump_flow_snapshot(
     extxyz rather than a multi-frame POSCAR because the lattice changes at every
     t and POSCAR/XDATCAR carries a single cell for the whole file.
 
-    Masked atom types (index `mask_token`) are written as the dummy species X.
+    Still-masked atom types show up as Fm (Z = 100): the CTMC mask token is
+    model.atom_dim - 1 = 99, which un-shifts one past the last real element.
 
     Args:
         data:        current PyG batch inside the Euler loop (pos = fractional,
@@ -185,7 +185,6 @@ def dump_flow_snapshot(
         every:       dump one frame every this many steps
         t_curr:      current flow time (frame label only)
         n_scale:     (B, 1) N^(1/3) length de-normalisation factor
-        mask_token:  0-indexed mask-token value (model.atom_dim - 1)
         force:       dump regardless of `step` (used for the final frame)
     """
     if not DUMP_FLOW_TRAJ:
@@ -219,9 +218,8 @@ def dump_flow_snapshot(
         cell = cells[b]
         pm, am = (prim_batch == b), (ads_batch == b)
 
-        numbers = (z_prim[pm] + 1).clone()          # 0-indexed → atomic number
-        numbers[z_prim[pm] == mask_token] = 0       # mask token → X
-        numbers = torch.cat([numbers, z_ads[am] + 1])
+        # 0-indexed → atomic number; the mask token un-shifts to Z = 100 (Fm)
+        numbers = torch.cat([z_prim[pm] + 1, z_ads[am] + 1])
 
         atoms = Atoms(
             numbers=numbers.numpy(),

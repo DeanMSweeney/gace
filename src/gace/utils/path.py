@@ -599,8 +599,8 @@ class Flow():
                 fk_log_w = torch.zeros(B, device=device)
                 fk_ell   = 0
 
-            # TEMPORARY: 5 intervals → frames at t ≈ 0, .2, .4, .6, .8 (+ 1.0 after the loop)
-            dump_every = max(1, round((len(t) - 1) / 5))
+            # TEMPORARY: 9 intervals → 9 frames spanning t = 0…0.89 (+ 1.0 after the loop) = 10
+            dump_every = max(1, round((len(t) - 1) / 9))
 
             for i in range(len(t) - 1):
                 t_curr = t[i].item()
@@ -608,8 +608,7 @@ class Flow():
 
                 # DUMP: snapshot state at t before it is advanced (no-op unless DUMP_FLOW_TRAJ)
                 dump_flow_snapshot(
-                    data=data, step=i, every=dump_every, t_curr=t_curr,
-                    n_scale=n_scale, mask_token=self.model.atom_dim - 1,
+                    data=data, step=i, every=dump_every, t_curr=t_curr, n_scale=n_scale,
                 )
 
                 # Rebuild derived lattice fields from current state
@@ -692,7 +691,7 @@ class Flow():
             # DUMP: final frame at t = 1 (the loop's last t_curr is t[-2])
             dump_flow_snapshot(
                 data=data, step=len(t) - 1, every=dump_every, t_curr=1.0,
-                n_scale=n_scale, mask_token=self.model.atom_dim - 1, force=True,
+                n_scale=n_scale, force=True,
             )
 
         # ── Store generated outputs ───────────────────────────────────────────
