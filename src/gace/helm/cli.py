@@ -240,7 +240,6 @@ def main(cfg: Config) -> None:
         mol_atoms = ase.io.read(cfg.sampler_cfg.inputted_adsorbate)
         initial_graph = build_graph_from_atoms(
             mol_atoms=mol_atoms,
-            binding_energy=cfg.sampler_cfg.target_binding_energy,
             num_prim_atoms=cfg.sampler_cfg.num_prim_atoms,
         )
         n_samples = cfg.sampler_cfg.num_generated_samples
