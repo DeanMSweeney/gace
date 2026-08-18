@@ -241,18 +241,17 @@ def sample_prim_atom_counts(
 
 def build_graph_from_atoms(
     mol_atoms: Atoms,
-    binding_energy: float,
     num_prim_atoms: int = 3,
 ) -> Data:
     """Build a minimal PyG Data object for forge generate mode.
 
     Adsorbate conditioning fields are populated from `mol_atoms`.
     Catalyst fields are zeroed placeholders — _sample_forge reinitialises
-    them from the prior distribution.
+    them from the prior distribution. ads_binding_energy is deliberately
+    absent: predict_step sets it from sampler_cfg.target_binding_energy.
 
     Args:
         mol_atoms: ASE Atoms object for the adsorbate molecule.
-        binding_energy: Target adsorption energy (eV) used as conditioning signal.
         num_prim_atoms: Number of primitive catalyst atoms to allocate (placeholder).
 
     Returns:
@@ -278,7 +277,6 @@ def build_graph_from_atoms(
         ads_atomic_numbers=torch.from_numpy(ads_z_np),
         ref_ads_pos=ads_pos_t,                     # (N_ads, 3) — centered on-the-fly in sample()
         ads_pairwise_dist=ads_pairwise_dist,       # (N_ads, 15) — used in validity check
-        ads_binding_energy=torch.tensor(binding_energy, dtype=torch.float32),
         lengths_scaled=torch.zeros(1, 3),
         angles_radians=torch.zeros(1, 3),
         transformation_matrix=torch.eye(3, dtype=torch.long).unsqueeze(0),  # (1, 3, 3)
