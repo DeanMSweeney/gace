@@ -27,6 +27,7 @@ tea_debug.log
 *pptx
 *svg
 *pdf
+.DS_Store 
 
 # Folders
 '$HOME'/
