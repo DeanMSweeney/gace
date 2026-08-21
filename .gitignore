@@ -24,7 +24,9 @@ selected_frames-old.parquet
 selected_frames.parquet
 .DS_Store
 tea_debug.log
-
+*pptx
+*svg
+*pdf
 
 # Folders
 '$HOME'/
@@ -57,9 +59,10 @@ equiformer_v3/
 ablation_studies/
 datasets/CatFlow/
 uncond/
-manuscript/
 volcano_plot_sampling/
 build/
+blender/
+data/
 
 # Data formats
 *.lmdb
@@ -67,8 +70,6 @@ build/
 *.parquet
 *.pt
 10k*/
-# Notebooks (strip outputs with nbstripout if you want to track structure)
-*.ipynb
 
 # Depth-independent folder matches (replace existing bare versions)
 **/scratch/
