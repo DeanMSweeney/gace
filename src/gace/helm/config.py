@@ -490,7 +490,15 @@ class Config:
     """Path to checkpoint file for resuming training or evaluation
     - None: train from scratch
     - "path/to/checkpoint.ckpt": resume from checkpoint
+    - In eval/generate mode, if left None, falls back to downloading
+      hf_ckpt_filename from hf_repo_id on Hugging Face Hub.
     """
+
+    hf_repo_id: str = "DeanMSweeney/gace"
+    """Hugging Face Hub repo id used as the ckpt_path fallback for eval/generate mode."""
+
+    hf_ckpt_filename: str = "model.ckpt"
+    """Filename within hf_repo_id to download when ckpt_path is unset in eval/generate mode."""
 
     resume_training: bool = False
     """Whether to resume training state (optimizer, scheduler, epoch) from checkpoint
