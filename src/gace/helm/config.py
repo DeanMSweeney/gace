@@ -10,7 +10,7 @@ Configurations can be loaded from YAML files and overridden via command line.
 
 from omegaconf import OmegaConf, DictConfig, MISSING
 from dataclasses import dataclass, asdict, field
-from typing import Optional, Literal, Union, Tuple
+from typing import Any, Optional, Literal, Union, Tuple
 
 
 @dataclass
@@ -163,9 +163,12 @@ class SamplerConfig:
     Output files are indexed as {batch_idx}_{sample_idx}_{b}.vasp.
     """
 
-    target_binding_energy: Optional[float] = None
+    target_binding_energy: Optional[Any] = None
     """Target adsorption binding energy (eV) for structure generation.
-    Passed to the model as a conditioning signal during forge sampling."""
+    Passed to the model as a conditioning signal during forge sampling.
+    Accepts either a scalar (every sample conditioned on the same energy) or a
+    two-element [lo, hi] list, in which case each graph in each batch draws its
+    own target from U(lo, hi)."""
 
     num_prim_atoms: Optional[int] = 4
     """Number of primitive atoms per graph to use during forge sampling.

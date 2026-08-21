@@ -312,7 +312,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--lmdb",
-        default="/datasets/oc20/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data_refined.lmdb",
+        default="/datasets/oc20/full/is2res_train_val_test_lmdbs/data/is2re/all/train/data.lmdb",
         help="Path to OC20 LMDB file",
     )
     parser.add_argument(

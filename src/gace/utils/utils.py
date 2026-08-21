@@ -138,6 +138,104 @@ def adsorbate_center_of_mass(
     return com
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TEMPORARY: flow-trajectory dumping (noise → generated structure).
+# Flip DUMP_FLOW_TRAJ to True to write snapshots from Flow.sample(). Off by default.
+# ─────────────────────────────────────────────────────────────────────────────
+DUMP_FLOW_TRAJ         = False
+DUMP_FLOW_TRAJ_DIR     = "flow_traj"
+DUMP_FLOW_TRAJ_SAMPLES = 10
+DUMP_FLOW_TRAJ_POSCAR  = False   # also write one POSCAR per (sample, t)
+
+
+def dump_flow_snapshot(
+    data: Data,
+    step: int,
+    every: int,
+    t_curr: float,
+    n_scale: Tensor,
+    force: bool = False,
+    out_dir: str = DUMP_FLOW_TRAJ_DIR,
+    num_samples: int = DUMP_FLOW_TRAJ_SAMPLES,
+    write_poscar: bool = DUMP_FLOW_TRAJ_POSCAR,
+) -> None:
+    """
+    Dump the current sampling state as viewable structures — debugging aid only.
+
+    Fires every `every` integration steps (and whenever `force` is set, for the
+    final t = 1 frame). Each snapshot writes the primitive cell (fractional pos →
+    Cartesian via the current lattice) plus the adsorbate at its absolute
+    Cartesian ads_pos, tagged 1 = slab, 2 = adsorbate.
+
+    Files (in out_dir), appended frame-by-frame as t advances:
+        traj_sample{b}.extxyz  — one file per sample, frames ordered by t
+        traj_all.extxyz        — every sample and time in one file
+        POSCAR_s{b}_t{t}       — optional, one static POSCAR per frame
+
+    extxyz rather than a multi-frame POSCAR because the lattice changes at every
+    t and POSCAR/XDATCAR carries a single cell for the whole file.
+
+    Still-masked atom types show up as Fm (Z = 100): the CTMC mask token is
+    model.atom_dim - 1 = 99, which un-shifts one past the last real element.
+
+    Args:
+        data:        current PyG batch inside the Euler loop (pos = fractional,
+                     atomic_numbers = 0-indexed w/ mask token, ads_pos = Å)
+        step:        current integration step index
+        every:       dump one frame every this many steps
+        t_curr:      current flow time (frame label only)
+        n_scale:     (B, 1) N^(1/3) length de-normalisation factor
+        force:       dump regardless of `step` (used for the final frame)
+    """
+    if not DUMP_FLOW_TRAJ:
+        return
+
+    if not force and step % every != 0:
+        return
+
+    from gace.utils.builder import lattice_params_to_matrix  # local: temporary code
+
+    os.makedirs(out_dir, exist_ok=True)
+
+    prim_batch = data.batch[data.tags == 1].cpu()
+    ads_batch  = data.batch[data.tags == 2].cpu()
+    B = int(data.batch.max().item()) + 1
+
+    cells = lattice_params_to_matrix(
+        lengths=(data.lengths_scaled * n_scale).float().cpu(),
+        angles=data.angles_radians.float().cpu(),
+    )  # (B, 3, 3)
+
+    frac    = data.pos.float().cpu()
+    z_prim  = data.atomic_numbers.long().cpu()
+    ads_xyz = data.ads_pos.float().cpu()
+    z_ads   = data.ads_atomic_numbers.long().cpu()
+
+    # The t = 0 frame truncates any files left over from a previous run
+    first = (step == 0)
+
+    for b in range(min(num_samples, B)):
+        cell = cells[b]
+        pm, am = (prim_batch == b), (ads_batch == b)
+
+        # 0-indexed → atomic number; the mask token un-shifts to Z = 100 (Fm)
+        numbers = torch.cat([z_prim[pm] + 1, z_ads[am] + 1])
+
+        atoms = Atoms(
+            numbers=numbers.numpy(),
+            positions=torch.cat([frac[pm] @ cell, ads_xyz[am]]).numpy(),
+            cell=cell.numpy(),
+            pbc=True,
+        )
+        atoms.set_tags([1] * int(pm.sum()) + [2] * int(am.sum()))
+        atoms.info["t"] = round(float(t_curr), 3)
+
+        write(os.path.join(out_dir, f"traj_sample{b:02d}.extxyz"), atoms, format="extxyz", append=not first)
+        write(os.path.join(out_dir, "traj_all.extxyz"), atoms, format="extxyz", append=not (first and b == 0))
+        if write_poscar:
+            write(os.path.join(out_dir, f"POSCAR_s{b:02d}_t{float(t_curr):.2f}"), atoms, format="vasp")
+
+
 def center_and_random_so3_rotation(ref_pos: Tensor, ads_batch: Tensor, B: int) -> Tensor:
     """Center ref_pos by its per-graph centroid and apply a random SO(3) rotation.
 

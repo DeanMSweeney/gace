@@ -25,7 +25,9 @@ from gace.utils.oracle import Oracle
 from gace.utils.forge import CatalystForge
 import ase.io
 
-from typing import Optional, Literal, Union, Tuple
+from omegaconf import ListConfig
+
+from typing import Any, Optional, Literal, Union, Tuple
 
 _AVG_BINDING_ENERGY = -1.54790583
 _STD_BINDING_ENERGY = 2.27278609
@@ -188,7 +190,20 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
                         seed=seed,
                     )
 
-        self.target_binding_energy = target_binding_energy
+        # None | scalar | [lo, hi]. A two-element range is normalised to a tuple
+        # here and resampled per batch in _draw_binding_energy().
+        if isinstance(target_binding_energy, (list, tuple, ListConfig)):
+            energy_bounds = [float(v) for v in target_binding_energy]
+            if len(energy_bounds) != 2 or energy_bounds[0] >= energy_bounds[1]:
+                raise ValueError(
+                    "target_binding_energy as a range must be "
+                    "[min_binding_energy, max_binding_energy] with min < max, "
+                    f"got {list(target_binding_energy)}"
+                )
+            self.target_binding_energy = tuple(energy_bounds)
+        else:
+            self.target_binding_energy = target_binding_energy
+            
         self.num_generated_samples = num_generated_samples
         self.cfg_dropout_prob = cfg_dropout_prob
         self.cfg_w_continuous = cfg_w_continuous
@@ -460,7 +475,12 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
         B = int(data.batch.max().item()) + 1
         counts = sample_prim_atom_counts(B, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
         
-        if self.target_binding_energy is not None:
+        if isinstance(self.target_binding_energy, tuple):
+            # Range given: every graph draws its own target, redrawn each batch
+            min_binding_energy, max_binding_energy = self.target_binding_energy
+            data.ads_binding_energy = torch.rand(B, device=data.pos.device, dtype=data.pos.dtype) \
+                * (max_binding_energy - min_binding_energy) + min_binding_energy
+        elif self.target_binding_energy is not None:
             data.ads_binding_energy = torch.ones(B, device=data.pos.device, dtype=data.pos.dtype) * self.target_binding_energy
         #else: 
         #data.ads_binding_energy = torch.normal(mean=_AVG_BINDING_ENERGY, std=_STD_BINDING_ENERGY, size=(B,), device=data.pos.device, dtype=data.pos.dtype)
@@ -512,9 +532,15 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
             raise ValueError("No target binding energy provided.")
 
         B = data.num_graphs
-        data.ads_binding_energy = torch.full(
-            (B,), self.target_binding_energy, device=data.pos.device, dtype=torch.float32,
-        )
+        if isinstance(self.target_binding_energy, tuple):
+            # Range given: every graph draws its own target, redrawn each batch
+            min_binding_energy, max_binding_energy = self.target_binding_energy
+            data.ads_binding_energy = torch.rand(B, device=data.pos.device, dtype=torch.float32) \
+                * (max_binding_energy - min_binding_energy) + min_binding_energy
+        else:
+            data.ads_binding_energy = torch.full(
+                (B,), self.target_binding_energy, device=data.pos.device, dtype=torch.float32,
+            )
 
         t = torch.linspace(0., 1., self.hparams.num_integration_steps, device=data.pos.device, dtype=torch.float32)
         counts = sample_prim_atom_counts(B, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)

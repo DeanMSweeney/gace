@@ -349,6 +349,7 @@ class CatalystForge:
             "binding_E_diff":     diff,
             **_threshold_flags(diff),
             **{k: float(atoms.info.get(k)) if atoms is not None else float(False) for k in validity_keys}, # if atoms DNE, it could not be built and mark as invalid
+             "is_unique": float(is_unique) if atoms is not None else float(False),
         }
 
     def fire(self) -> list[dict]:
