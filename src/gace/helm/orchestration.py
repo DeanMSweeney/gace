@@ -109,11 +109,6 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
             langevin_cutoff: float=0.9,
             sanitize_otf: bool=True,
             dedupe_otf: bool=False,
-            fk_steering: bool=False,
-            fk_mlff_checkpoint: Optional[str]="PaiNN-S2EF-OC20-All",
-            fk_K: int=10,
-            fk_tau: float=0.5,
-            fk_start_step: int=20,
             **kwargs,
         ):
 
@@ -122,7 +117,7 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
         self.save_hyperparameters(ignore=["model", "oracle_model", "oracle_mode", "variant", "mode", \
             "track_grad_norms", "generated_strucs", "relaxed_strucs", "sanitized_strucs", "config_vasp", \
             "write_eval_metrics", "relax_otf", "mlff_checkpoint", \
-            "fk_mlff_checkpoint", "accelerator", "seed", "num_prim_atoms"])
+            "accelerator", "seed", "num_prim_atoms"])
 
         # Model and training configuration
         self.model = model  # Neural network (e.g., Equiformer)
@@ -176,20 +171,6 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
                     seed=seed,
                 )
 
-        # Separate lighter calculator for FK intermediate reward evaluation.
-        # Falls back to the main calculator if fk_mlff_checkpoint is not set.
-        self._fk_mlff_calculator = None
-        if fk_steering:
-            _fk_ckpt = fk_mlff_checkpoint or mlff_checkpoint
-            if _fk_ckpt is not None:
-                with Silent():
-                    self._fk_mlff_calculator = OCPCalculator(
-                        model_name=_fk_ckpt,
-                        local_cache="./mlff_checkpoint_cache",
-                        cpu=(accelerator == "cpu"),
-                        seed=seed,
-                    )
-
         # None | scalar | [lo, hi]. A two-element range is normalised to a tuple
         # here and resampled per batch in _draw_binding_energy().
         if isinstance(target_binding_energy, (list, tuple, ListConfig)):
@@ -214,13 +195,6 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
         self.langevin_gamma_slab = langevin_gamma_slab
         self.langevin_gamma_ads  = langevin_gamma_ads
         self.langevin_cutoff     = langevin_cutoff
-
-        # Feynman-Kac steering
-        self.fk_steering   = fk_steering
-        self.fk_K          = fk_K
-        self.fk_tau        = fk_tau
-        self.fk_start_step      = fk_start_step
-        self.fk_mlff_checkpoint = fk_mlff_checkpoint
 
         # Mean and standard deviation of binding energy from trianing set 
         self.avg_binding_energy = -1.54790583

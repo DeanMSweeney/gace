@@ -123,8 +123,6 @@ class SamplerConfig:
     """Standard deviation of Brownian noise injected at each Euler step (Euler-Maruyama).
     Noise is tapered by (1 - t) so it vanishes as t → 1.
     0.0 gives the standard deterministic Euler step.
-    Required to be > 0 when fk_steering=True so resampled clones diverge on
-    continuous modalities. Recommended value with FK: 0.05.
     """
 
     # ==================== Langevin (SDE) Euclidean Step ====================
