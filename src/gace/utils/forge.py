@@ -201,13 +201,8 @@ class CatalystForge:
             ads_dist_ok = False
             cat_ads_dist_ok = False
 
-        atoms.info["vol_ok"]            = vol_ok
-        atoms.info["cat_dist_ok"]       = cat_dist_ok
-        atoms.info["cat_atom_types_ok"] = cat_atom_types_ok
-        atoms.info["cat_ads_dist_ok"]   = cat_ads_dist_ok
-        atoms.info["ads_dist_ok"]       = ads_dist_ok
-        atoms.info["is_valid"]          = vol_ok and cat_dist_ok and ads_dist_ok and cat_ads_dist_ok and cat_atom_types_ok
-        atoms.info["is_valid_naive"]    = cat_dist_ok_naive and ads_dist_ok and cat_ads_dist_ok and vol_ok
+        atoms.info["is_valid"]       = vol_ok and cat_dist_ok and ads_dist_ok and cat_ads_dist_ok and cat_atom_types_ok
+        atoms.info["is_valid_base"]  = cat_dist_ok_naive and ads_dist_ok and cat_ads_dist_ok and vol_ok
 
     def relax(self, atoms: Atoms | None) -> Atoms | None:
 
@@ -342,7 +337,7 @@ class CatalystForge:
         else:
             diff = None
 
-        validity_keys = ["vol_ok", "cat_dist_ok", "cat_atom_types_ok", "cat_ads_dist_ok", "ads_dist_ok", "is_valid", "is_valid_naive"]
+        validity_keys = ["is_valid", "is_valid_base"]
         return {
             **base_row,
             "computed_binding_E": atoms_rlxd.info.get("computed_binding_E") if atoms_rlxd is not None else None,

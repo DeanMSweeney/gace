@@ -237,34 +237,6 @@ class SamplerConfig:
     mlff_checkpoint: str = "EquiformerV2-31M-S2EF-OC20-All+MD"
     """MLFF checkpoint for post-generation relaxation and evaluation."""
 
-    # ==================== Feynman-Kac Steering ====================
-
-    fk_steering: bool = False
-    """Enable Feynman-Kac particle filtering during ODE sampling.
-    Runs num_generated_samples particles in parallel and periodically
-    resamples toward structures with adsorption energy close to target."""
-
-    fk_mlff_checkpoint: Optional[str] = "PaiNN-S2EF-OC20-All"
-    """MLFF checkpoint used for FK intermediate reward evaluation.
-    Can be a lighter/cheaper model than mlff_checkpoint since it only
-    needs a rough energy signal, not a tight relaxation. Defaults to
-    PaiNN-S2EF-OC20-All. If None, falls back to mlff_checkpoint."""
-
-    fk_K: int = 10
-    """Evaluate and resample every fk_K ODE steps."""
-
-    fk_tau: float = 0.5
-    """Resampling temperature for harmonic-sum log-weight accumulation.
-    Controls the effective beta = 1/fk_tau applied to accumulated path costs.
-    Lower = harder selection; higher = softer (near-uniform). Typical range: 0.1–2.0.
-    At 0.5, a 1.5 eV cost spread gives ~20x best-to-worst probability ratio."""
-
-    fk_start_step: int = 20
-    """Minimum number of ODE steps to complete before the first FK evaluation.
-    Allows global structure (lattice, rough positions) to form before steering."""
-
-
-
 
 @dataclass
 class PathConfig:
