@@ -11,8 +11,6 @@ from gace.utils.invariance import pbc_aware_delta, batched_ot_align, global_ot_a
 from gace.utils.utils import adsorbate_neighborhood_mask, center_and_random_so3_rotation, dump_flow_snapshot
 from gace.utils.builder import lattice_params_to_matrix
 from gace.utils.euler import euler_step, ctmc_step
-from gace.utils.relaxation import relax_w_mlff
-from gace.utils.forge import CatalystForge
 
 class Flow():
     """
@@ -480,6 +478,7 @@ class Flow():
 
         return data
 
+    @torch.no_grad()
     def sample(
             self,
             input_graph: Data,
@@ -632,7 +631,6 @@ class Flow():
 
                 # Update discrete atom types (CTMC)
                 data.atomic_numbers = ctmc_step(data.atomic_numbers, pred["z"], t_curr, dt)
-
 
             # DUMP: final frame at t = 1 (the loop's last t_curr is t[-2])
             dump_flow_snapshot(
