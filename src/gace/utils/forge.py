@@ -411,9 +411,15 @@ class CatalystForge:
 
         csv_path = None
         write_header = False
+        csv_dir, csv_name = None, None
         if self.relax_otf:
-            os.makedirs(self.relaxed_strucs, exist_ok=True)
-            csv_path = os.path.join(self.relaxed_strucs, "relaxed_strucs_data.csv")
+            csv_dir, csv_name = self.relaxed_strucs, "relaxed_strucs_data.csv"
+        elif self.sanitize_otf:
+            csv_dir, csv_name = self.sanitized_strucs, "sanitized_strucs_data.csv"
+
+        if csv_dir is not None:
+            os.makedirs(csv_dir, exist_ok=True)
+            csv_path = os.path.join(csv_dir, csv_name)
             if self.opt_graph is not None and self.batch_idx == 0 and os.path.isfile(csv_path):
                 os.remove(csv_path)
             write_header = not os.path.isfile(csv_path)
