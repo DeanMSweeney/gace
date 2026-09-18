@@ -21,6 +21,36 @@ _FMT = f".{_CSV_DECIMALS}f"
 _BINDING_E_THRESHOLD = 0.10  # eV
 _THRESHOLD_MULTIPLIERS = [1, 2, 3, 5, 10]
 
+# Per-stage check flags, each owned by exactly one stage:
+#   is_valid / is_valid_base  <- sanitize()
+#   is_unique                 <- purge_duplicates_otf()
+#   mlff_converged            <- relax()
+# A check that did not run records None (blank in the CSV, skipped by logging),
+# which keeps reported rates conditional on the check having run.
+_CHECK_KEYS = ("is_valid", "is_valid_base", "is_unique", "mlff_converged")
+
+# is_valid_base is a looser diagnostic variant of is_valid and is deliberately
+# excluded from the aggregate.
+_AGGREGATE_KEYS = ("is_valid", "is_unique", "mlff_converged")
+
+# The individual sanitisation criteria behind is_valid / is_valid_base. These are
+# recorded per structure in the CSV row only — sanitize() returns them and never
+# writes them to atoms.info, which carries just the summary flags above.
+_CRITERIA_KEYS = (
+    "vol_ok",
+    "cat_dist_ok",
+    "cat_dist_ok_naive",
+    "cat_atom_types_ok",
+    "ads_dist_ok",
+    "cat_ads_dist_ok",
+)
+
+
+def _passed_all_checks(checks: dict) -> bool:
+    """True when every check that actually ran passed. None = check not run."""
+    return all(checks[k] for k in _AGGREGATE_KEYS if checks.get(k) is not None)
+
+
 def _csv_fmt(v) -> str:
     if isinstance(v, float):
         return format(v, _FMT)
@@ -156,10 +186,16 @@ class CatalystForge:
             logging.warning(f"[build] graph {b}: {e}")
             return None
 
-    def sanitize(self, atoms: Atoms | None) -> None:
+    def sanitize(self, atoms: Atoms | None) -> dict:
+        """Run the geometry/composition checks on one structure.
 
+        Writes only the is_valid / is_valid_base summaries to atoms.info and
+        returns the individual criteria (_CRITERIA_KEYS) for the CSV row, so the
+        per-criterion breakdown lives in the CSV without bloating atoms.info.
+        """
         if atoms is None:
-            return
+            # Could not be built: it fails every criterion by construction.
+            return dict.fromkeys(_CRITERIA_KEYS, False)
 
         try:
             vol_ok = float(atoms.get_volume()) >= 0.1
@@ -204,8 +240,22 @@ class CatalystForge:
         atoms.info["is_valid"]       = vol_ok and cat_dist_ok and ads_dist_ok and cat_ads_dist_ok and cat_atom_types_ok
         atoms.info["is_valid_base"]  = cat_dist_ok_naive and ads_dist_ok and cat_ads_dist_ok and vol_ok
 
-    def relax(self, atoms: Atoms | None) -> Atoms | None:
+        return {
+            "vol_ok":            vol_ok,
+            "cat_dist_ok":       cat_dist_ok,
+            "cat_dist_ok_naive": cat_dist_ok_naive,
+            "cat_atom_types_ok": cat_atom_types_ok,
+            "ads_dist_ok":       ads_dist_ok,
+            "cat_ads_dist_ok":   cat_ads_dist_ok,
+        }
 
+    def relax(self, atoms: Atoms | None) -> Atoms | None:
+        """Relax with the MLFF and record mlff_converged on atoms.info.
+
+        mlff_converged covers the whole MLFF stage: the optimizer converged, the
+        energy could be extracted, and it is within energy_cutoff. Sole writer of
+        that flag; it never touches is_valid.
+        """
         atoms_rlxd, converged = relax_w_mlff(
             atoms=atoms,
             calculator=self.calculator,
@@ -214,23 +264,28 @@ class CatalystForge:
             optimizer="BFGS",
         )
 
-        if not converged: 
-            atoms_rlxd = None
+        if not converged or atoms_rlxd is None:
+            atoms.info["mlff_converged"] = False
+            return None
 
-        target_E = atoms.info.get("target_binding_E")
         try:
             computed_E = atoms_rlxd.get_potential_energy()
-            if computed_E <= self.energy_cutoff:
-                atoms_rlxd.info["computed_binding_E"] = computed_E
-                if target_E is not None:
-                    atoms_rlxd.info["binding_E_diff"] = abs(computed_E - target_E)
-                return atoms_rlxd
-            atoms.info["is_valid"] = False # binding energy greater than 10 eV, discard sample 
-            return None
         except Exception as e:
             logging.warning(f"Energy extraction failed for {atoms.info.get('fname')}: {e}")
-            atoms.info["is_valid"] = False # optimization or energy extraction failed, mark as invalid 
+            atoms.info["mlff_converged"] = False
             return None
+
+        if computed_E > self.energy_cutoff:
+            atoms.info["mlff_converged"] = False # binding energy above cutoff, discard sample
+            return None
+
+        atoms.info["mlff_converged"] = True
+        atoms_rlxd.info["mlff_converged"] = True
+        atoms_rlxd.info["computed_binding_E"] = computed_E
+        target_E = atoms.info.get("target_binding_E")
+        if target_E is not None:
+            atoms_rlxd.info["binding_E_diff"] = abs(computed_E - target_E)
+        return atoms_rlxd
     
     def purge_duplicates_otf(self, atoms) -> bool:
         """OTF duplicate check against the running record of seen slabs.
@@ -271,6 +326,11 @@ class CatalystForge:
         fname: str | None,
         target_E: float | None,
     ) -> dict:
+        """Run every enabled check on one structure, write it, and return its row.
+
+        The row carries the same keys in every mode (checks that did not run are
+        None), so the CSV schema frozen by fire() is stable.
+        """
         threshold_cols = {f"within_{m}T": None for m in _THRESHOLD_MULTIPLIERS}
         base_row = {
             "fname":              fname,
@@ -280,48 +340,37 @@ class CatalystForge:
             **threshold_cols,
         }
 
-        if not self.sanitize_otf:
-            if atoms is not None and self.opt_graph:
-                ase.io.write(os.path.join(self.generated_strucs, fname), atoms) # if opt_grpah present, we are generating strucs for the first time
-            opt_conditions = self.relax_otf and atoms
-            atoms_rlxd = self.relax(atoms=atoms) if opt_conditions else None
+        checks: dict = dict.fromkeys(_CHECK_KEYS, None)
+        criteria: dict = dict.fromkeys(_CRITERIA_KEYS, None)
+        atoms_rlxd = None
 
-            if atoms_rlxd is not None:
-                diff = atoms_rlxd.info.get("binding_E_diff")
-                subdir = _threshold_subdir(diff)
-                atoms_rlxd.info["threshold_subdir"] = subdir
-                out_path = os.path.join(self.relaxed_strucs, subdir, fname)
-                os.makedirs(os.path.dirname(out_path), exist_ok=True)
-                ase.io.write(out_path, atoms_rlxd)
-                return {
-                    **base_row,
-                    "computed_binding_E": atoms_rlxd.info.get("computed_binding_E"),
-                    "binding_E_diff":     diff,
-                    **_threshold_flags(diff),
-                }
-            return base_row
-
-        # sanitize the atoms objects to purge unstabele strucs
-        self.sanitize(atoms=atoms)
-
-        # Only dedup validly-built structures so poor builds never enter the
-        # uniqueness memory or its denominator.
-        if self.dedupe_otf and atoms is not None and atoms.info.get("is_valid"):
-            is_unique = self.purge_duplicates_otf(atoms=atoms)
-            if not is_unique: # set non-unique strucutres as invalid strucutres
-                atoms.info["is_valid"] = False
+        if atoms is None:
+            # Could not be built: it fails the geometry checks by construction.
+            checks["is_valid"] = checks["is_valid_base"] = False
+            criteria = self.sanitize(atoms=None)
         else:
-            is_unique = True
+            if self.sanitize_otf:
+                criteria = self.sanitize(atoms=atoms)
+                checks["is_valid"]      = bool(atoms.info.get("is_valid"))
+                checks["is_valid_base"] = bool(atoms.info.get("is_valid_base"))
+            elif self.opt_graph:
+                # No sanitisation: this is the first pass over freshly generated
+                # structures, so write them out unfiltered.
+                ase.io.write(os.path.join(self.generated_strucs, fname), atoms)
 
-        # write sanitized and relaxed structures to disk
-        if atoms is not None and atoms.info.get("is_valid"):
-            if self.relax_otf: 
-                atoms_rlxd = self.relax(atoms=atoms) 
-            else: 
-                atoms_rlxd = None
+            # Only dedup structures that passed sanitisation, so poor builds never
+            # enter the uniqueness memory or its denominator.
+            if self.dedupe_otf and checks["is_valid"] is not False:
+                checks["is_unique"] = self.purge_duplicates_otf(atoms=atoms)
+
+            # Relax only what has passed every check so far.
+            if self.relax_otf and _passed_all_checks(checks):
+                atoms_rlxd = self.relax(atoms=atoms)
+                checks["mlff_converged"] = atoms.info.get("mlff_converged")
+            elif self.sanitize_otf and _passed_all_checks(checks):
                 ase.io.write(os.path.join(self.sanitized_strucs, fname), atoms)
-        else:
-            atoms_rlxd = None # if atoms DNE, store atoms_rlxd as None
+
+        passed = atoms is not None and _passed_all_checks(checks)
 
         if atoms_rlxd is not None:
             diff = atoms_rlxd.info.get("binding_E_diff")
@@ -329,22 +378,19 @@ class CatalystForge:
             atoms_rlxd.info["threshold_subdir"] = subdir
             out_path = os.path.join(self.relaxed_strucs, subdir, fname)
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
-            if not self.dedupe_otf:
-                ase.io.write(out_path, atoms_rlxd) 
-            else: 
-                if is_unique: 
-                    ase.io.write(out_path, atoms_rlxd)
+            ase.io.write(out_path, atoms_rlxd)
         else:
             diff = None
 
-        validity_keys = ["is_valid", "is_valid_base"]
         return {
             **base_row,
             "computed_binding_E": atoms_rlxd.info.get("computed_binding_E") if atoms_rlxd is not None else None,
             "binding_E_diff":     diff,
             **_threshold_flags(diff),
-            **{k: float(atoms.info.get(k)) if atoms is not None else float(False) for k in validity_keys}, # if atoms DNE, it could not be built and mark as invalid
-             "is_unique": float(is_unique) if atoms is not None else float(False),
+            **{k: (float(checks[k]) if checks[k] is not None else None) for k in _CHECK_KEYS},
+            "passed_all_checks":  float(passed),
+            # Per-criterion breakdown behind is_valid / is_valid_base; CSV only.
+            **{k: (float(criteria[k]) if criteria[k] is not None else None) for k in _CRITERIA_KEYS},
         }
 
     def fire(self) -> list[dict]:

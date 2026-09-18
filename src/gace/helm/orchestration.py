@@ -481,6 +481,8 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
         )
         for metrics in cf.fire():
             for key, val in metrics.items():
+                # A check that did not run is None and is skipped here, so each
+                # check's logged rate is conditional on the check having run.
                 if isinstance(val, float):
                     reduce_fx = "sum" if key.startswith("within_") else "mean"
                     self.log(key, val, on_step=False, on_epoch=True, batch_size=1, reduce_fx=reduce_fx)
@@ -550,7 +552,9 @@ class LightFlowMatch(LightningModule, Flow, Oracle):
             print(f"\n[predict batch={batch_idx} | {len(all_metrics)} samples]")
             print(sep)
             for k, v in avgs.items():
-                print(f"{k:>{col_w}} | {v:.4f}")
+                # n is the number of structures the check actually ran on, which
+                # is below the batch size for checks gated behind an earlier one.
+                print(f"{k:>{col_w}} | {v:.4f}  (n={len(vals[k])})")
             print(sep)
 
         return all_atoms

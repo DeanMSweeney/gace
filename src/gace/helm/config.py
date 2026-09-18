@@ -211,7 +211,8 @@ class SamplerConfig:
 
     sanitize_otf: bool = True
     """Whether to apply validity checks on-the-fly during generation.
-    - True: filter structures by validity criteria before writing (default)
+    - True: filter structures by validity criteria before writing (default),
+      recording is_valid and is_valid_base per structure
     - False: write every successfully built structure without filtering
     """
 
@@ -223,7 +224,8 @@ class SamplerConfig:
     dedupe_otf: bool = False
     """Run on-the-fly structural diversity filtering during generation.
     When True, each newly generated slab is matched (StructureMatcher) against the
-    running record of unique slabs; duplicates are marked invalid and not written.
+    running record of unique slabs; duplicates are marked is_unique=False (which
+    fails passed_all_checks) and not written. is_valid is not modified.
     Enabled in both test_step and predict_step; uniqueness is reported at epoch end
     as (# unique slabs) / (# valid structures checked)."""
 

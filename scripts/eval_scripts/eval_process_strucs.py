@@ -173,22 +173,19 @@ def compute_composition_novelty(atoms: list, reference_atoms: list) -> dict:
 # Summarise sanitisation + relaxation results
 # ---------------------------------------------------------------------------
 
-def summarize_results(rows: list[dict]) -> dict:
-    validity_rows = [r for r in rows if "is_valid" in r]
+# Reported in this order; each is a per-stage flag written by CatalystForge.
+# A value of None means the check did not run for that structure (its stage was
+# disabled, or an earlier check already failed), so it is excluded from both the
+# numerator and the denominator — rates are conditional on the check running.
+_CHECK_KEYS = ["is_valid", "is_valid_base", "is_unique", "mlff_converged", "passed_all_checks"]
 
-    validity = {}
-    if validity_rows:
-        n = len(validity_rows)
-        validity = {
-            "n": n,
-            "is_valid":          sum(bool(r["is_valid"]) for r in validity_rows) / n,
-            "is_valid_naive":    sum(bool(r["is_valid_naive"]) for r in validity_rows) / n,
-            "vol_ok":            sum(bool(r["vol_ok"]) for r in validity_rows) / n,
-            "cat_dist_ok":       sum(bool(r["cat_dist_ok"]) for r in validity_rows) / n,
-            "cat_atom_types_ok": sum(bool(r["cat_atom_types_ok"]) for r in validity_rows) / n,
-            "cat_ads_dist_ok":   sum(bool(r["cat_ads_dist_ok"]) for r in validity_rows) / n,
-            "ads_dist_ok":       sum(bool(r["ads_dist_ok"]) for r in validity_rows) / n,
-        }
+
+def summarize_results(rows: list[dict]) -> dict:
+    checks = {}
+    for key in _CHECK_KEYS:
+        vals = [float(r[key]) for r in rows if r.get(key) is not None]
+        if vals:
+            checks[key] = {"n": len(vals), "rate": sum(bool(v) for v in vals) / len(vals)}
 
     diffs = [float(r["binding_E_diff"]) for r in rows if r.get("binding_E_diff")]
     energy_stats = {}
@@ -210,7 +207,7 @@ def summarize_results(rows: list[dict]) -> dict:
             **within_pct,
         }
 
-    return {"validity": validity, "energy_stats": energy_stats}
+    return {"checks": checks, "energy_stats": energy_stats}
 
 
 # ---------------------------------------------------------------------------
@@ -250,21 +247,14 @@ def format_report(
             lines.append(f"  {key} : {val:.4f}" if isinstance(val, float) else f"  {key} : {val}")
 
     if sanitisation is not None:
-        validity = sanitisation["validity"]
+        checks = sanitisation["checks"]
         energy_stats = sanitisation["energy_stats"]
 
-        lines += ["", f"Sanitisation  (n={n_strucs}, seed={seed})"]
-        if validity:
-            lines += [
-                f"  Structures checked : {validity['n']}",
-                f"  Valid (strict)     : {validity['is_valid']:.4f}",
-                f"  Valid (naive)      : {validity['is_valid_naive']:.4f}",
-                f"  vol_ok             : {validity['vol_ok']:.4f}",
-                f"  cat_dist_ok        : {validity['cat_dist_ok']:.4f}",
-                f"  cat_atom_types_ok  : {validity['cat_atom_types_ok']:.4f}",
-                f"  cat_ads_dist_ok    : {validity['cat_ads_dist_ok']:.4f}",
-                f"  ads_dist_ok        : {validity['ads_dist_ok']:.4f}",
-            ]
+        lines += ["", f"Structure checks  (n={n_strucs}, seed={seed})"]
+        if checks:
+            width = max(len(k) for k in checks)
+            for key, stat in checks.items():
+                lines.append(f"  {key:<{width}} : {stat['rate']:.4f}   (n={stat['n']})")
 
         if energy_stats:
             lines += [
@@ -306,6 +296,7 @@ def parse_args():
     p.add_argument("--eval_uniqueness", default=False, action="store_true", help="Run structural uniqueness check")
     p.add_argument("--eval_novelty_against", default=None, help="Directory of reference structures (e.g. OC20); reports fraction of generated slabs absent from it")
     p.add_argument("--sanitize", default=False, action="store_true", help="Run sanitisation checks")
+    p.add_argument("--dedupe", default=False, action="store_true", help="Mark duplicate slabs (records is_unique); requires --sanitize")
     p.add_argument("--relax", default=False, action="store_true", help="Relax structures with the MLFF and report binding energies")
     p.add_argument("--n_strucs", type=int, default=None, help="Number of structures to process (default: all)")
     p.add_argument("--mlff_checkpoint", default="EquiformerV2-31M-S2EF-OC20-All+MD")
@@ -344,7 +335,7 @@ def main(**kwargs):
         composition_novelty = compute_composition_novelty(gen_atoms, ref_atoms)
 
     sanitisation = None
-    if args.sanitize or args.relax:
+    if args.sanitize or args.relax or args.dedupe:
         from gace.utils.forge import CatalystForge
 
         calculator = None
@@ -364,6 +355,7 @@ def main(**kwargs):
             calculator=calculator,
             catalyst_dist_cutoff=args.catalyst_dist_cutoff,
             sanitize_otf=args.sanitize,
+            dedupe_otf=args.dedupe,
             relax_otf=args.relax,
             energy_cutoff=args.energy_cutoff,
             fmax=args.fmax,
@@ -384,8 +376,8 @@ def main(**kwargs):
         composition_novelty=composition_novelty,
         uniqueness=uniqueness,
         sanitisation=sanitisation,
-        n_strucs=args.n_strucs if (args.sanitize or args.relax) else None,
-        seed=args.seed if (args.sanitize or args.relax) else None,
+        n_strucs=args.n_strucs if (args.sanitize or args.relax or args.dedupe) else None,
+        seed=args.seed if (args.sanitize or args.relax or args.dedupe) else None,
     )
     write_report(report, args.output)
 
