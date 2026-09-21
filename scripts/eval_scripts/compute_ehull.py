@@ -69,6 +69,7 @@ def main():
     p.add_argument("--cache_dir", type=Path, default=Path(".ehull_cache"))
     p.add_argument("--fmax", type=float, default=0.05)
     p.add_argument("--steps", type=int, default=200)
+    p.add_argument("--seed", type=int, default=42)
     args = p.parse_args()
 
     # load structures
@@ -84,7 +85,7 @@ def main():
     from fairchem.core import OCPCalculator
     # local_cache is required by fairchem 1.10 when model_name is set, but for
     # Hugging Face models the checkpoint goes to the HF cache (HF_HOME) instead
-    calc = OCPCalculator(model_name=args.model_name, local_cache="./checkpoints", cpu=False)
+    calc = OCPCalculator(model_name=args.model_name, local_cache="./checkpoints", cpu=False, seed=args.seed)
 
     # per structure
     hulls, rows, unconverged = {}, [], []
