@@ -26,7 +26,7 @@ from ase.io import read
 from fairchem.core import OCPCalculator
 from tqdm import tqdm
 
-from gace.utils.relaxation import Silent, relax_w_mlff
+from gace.utils.relaxation import relax_w_mlff
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
@@ -63,13 +63,12 @@ def main():
             if ads_id in keep_ads_ids:
                 ads_id_by_file[row["filename"]] = ads_id
 
-    with Silent():
-        calculator = OCPCalculator(
-            model_name=args.mlff_checkpoint,
-            local_cache="./mlff_checkpoint_cache",
-            cpu=False,
-            seed=args.seed,
-        )
+    calculator = OCPCalculator(
+        model_name=args.mlff_checkpoint,
+        local_cache="./mlff_checkpoint_cache",
+        cpu=False,
+        seed=args.seed,
+    )
 
     energies_by_ads = {ads_id: [] for ads_id in sorted(keep_ads_ids)}
     targets_by_ads = {ads_id: [] for ads_id in sorted(keep_ads_ids)}
