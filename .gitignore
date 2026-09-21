@@ -64,6 +64,8 @@ volcano_plot_sampling/
 build/
 blender/
 data/
+datasets/scripts/oc20/ads_*
+datasets/scripts/oc20/eval_report.txt
 
 # Data formats
 *.lmdb
