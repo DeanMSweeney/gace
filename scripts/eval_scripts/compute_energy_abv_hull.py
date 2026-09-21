@@ -63,7 +63,7 @@ def build_entry(struct, energy, name):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--traj_dir", type=Path, nargs="+", required=True)
+    p.add_argument("--traj_dirs", type=Path, nargs="+", required=True)
     p.add_argument("--out", type=Path, default=Path("ehull.csv"))
     p.add_argument("--model_name", default="EquiformerV2-153M-OMAT24-MP-sAlex")
     p.add_argument("--cache_dir", type=Path, default=Path(".ehull_cache"))
