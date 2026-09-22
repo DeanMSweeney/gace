@@ -6,9 +6,10 @@ Surface energy for the primitive cells in .traj files.
 
 For each structure the primitive cell is taken from atoms.info (written by
 gace.utils.builder.build_slab_adsorbate) and relaxed with the cell held fixed to
-give the bulk reference. The bare surface is then rebuilt from that primitive
-cell and its supercell matrix M — same builder, empty adsorbate — and relaxed
-with the subsurface atoms (tag 0) fixed.
+give the bulk reference. The bare surface is then built from that *relaxed*
+primitive cell and its supercell matrix M — same builder, empty adsorbate — and
+relaxed with the subsurface atoms (tag 0) fixed, so the frozen interior sits at
+the same geometry the bulk reference was computed at.
 
     gamma = (E_slab - n * E_prim) / (2 * A)
 
@@ -142,10 +143,14 @@ def main():
                 continue
             e_bulk = prim_relaxed.get_potential_energy()
 
-            # bare surface, rebuilt from the unrelaxed primitive lattice so M still applies
-            slab = build_bare_slab(prim, M, args.vacuum)
-            if len(slab) != n * len(prim):
-                raise ValueError(f"slab has {len(slab)} atoms, expected {n} x {len(prim)}")
+            # Bare surface, built from the RELAXED primitive cell: the fixed tag-0
+            # interior then sits at exactly the geometry e_bulk was computed at.
+            # Building from the unrelaxed cell would lock strain into the interior
+            # that the reference does not carry, inflating gamma by n*dE/(2A).
+            # The prim relaxation holds the cell fixed, so M, n and A are unchanged.
+            slab = build_bare_slab(prim_relaxed, M, args.vacuum)
+            if len(slab) != n * len(prim_relaxed):
+                raise ValueError(f"slab has {len(slab)} atoms, expected {n} x {len(prim_relaxed)}")
 
             slab_relaxed, converged = relax_w_mlff(atoms=fix_subsurface(slab), calculator=calc,
                                                    fmax=args.fmax, steps=args.steps, optimizer="BFGS")
