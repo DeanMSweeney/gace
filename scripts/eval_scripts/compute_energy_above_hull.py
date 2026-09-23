@@ -57,7 +57,7 @@ def mp_parameters(struct):
 def build_entry(struct, energy, name):
     entry = ComputedStructureEntry(structure=struct, energy=energy,
                                    parameters=mp_parameters(struct), entry_id=name)
-    MaterialsProject2020Compatibility(check_potcar=False).process_entries([entry])
+    MaterialsProject2020Compatibility(check_potcar=False).process_entries([entry], on_error="raise")
     return entry
 
 
@@ -88,7 +88,7 @@ def main():
     calc = OCPCalculator(model_name=args.model_name, local_cache="./checkpoints", cpu=False, seed=args.seed)
 
     # per structure
-    hulls, rows, unconverged = {}, [], []
+    hulls, rows, unconverged, failed = {}, [], [], []
     for name, atoms in tqdm(structures.items(), desc="E_hull"):
         try:
             key = tuple(sorted(set(atoms.get_chemical_symbols())))
@@ -103,6 +103,7 @@ def main():
             ef = hulls[key].get_form_energy_per_atom(entry)
             decomp, e_hull = hulls[key].get_decomp_and_e_above_hull(entry, allow_negative=True)
         except Exception as exc:
+            failed.append((name, str(exc)))
             tqdm.write(f"  {name}: {exc}")
             continue
         rows.append({
@@ -123,6 +124,8 @@ def main():
     if unconverged:
         print(f"excluded {len(unconverged)} unconverged (fmax={args.fmax}, "
               f"steps={args.steps}): {unconverged[:10]}")
+    if failed:
+        print(f"excluded {len(failed)} failed: {[name for name, _ in failed[:10]]}")
 
 
 if __name__ == "__main__":
