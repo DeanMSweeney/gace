@@ -35,13 +35,11 @@ scratch/
 full/
 wandb/
 logs/
-sandbox/
 outputs/
 checkpoints/
 .place_checkpoints/
 strucs/
 strucs_1.0/
-conf/
 0/
 trajs/
 old/
