@@ -1,0 +1,21 @@
+# model configuration
+defaults:
+  - model_cfg: tft-large # direcotry in conf: file name
+  - _self_
+
+# Model mode
+mode: "generate"
+
+# training hyperparameters/settings
+batch_size: 1000
+num_workers: 8
+
+sampler_cfg:
+  inputted_adsorbate: ads.vasp
+  target_binding_energy: 4.14
+  num_prim_atoms: 4
+  num_integration_steps: 100
+  sanitize_otf: false
+  relax_otf: false
+  dedupe_otf: false
+  num_generated_samples: 100

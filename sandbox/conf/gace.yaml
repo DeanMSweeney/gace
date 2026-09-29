@@ -1,0 +1,46 @@
+# model configuration
+defaults:
+  - model_cfg: tft-large # direcotry in conf: file name
+  - _self_
+
+# Model mode
+mode: train
+
+# path config 
+path_cfg: 
+  informed_priors: false
+  cfg_dropout_prob: 0.10
+
+# datasets
+oc20_train: "/datasets/factorized/train/dataset_processed.lmdb"
+oc20_val: "/datasets/factorized/val_id/dataset_processed.lmdb"
+
+# training hyperparameters/settings
+batch_size: 128
+num_workers: 8
+accumulate_grad_batches: 2
+
+optim_cfg:
+  weight_decay: 0
+  lr: 0.0005
+  lr_scheduler: cosine_w_warmup
+  num_cycles: 0.50
+  warmup_proportion: 0.05
+  max_epochs: 200
+  ema_decay: 0.9999
+  lambda_x: 2.5
+  lambda_ads: 1.0
+  lambda_z: 0.10
+  lambda_energy: 1.0
+
+# checkpointing/logging
+logger: true
+project: gace
+run_name: GACE-CFG
+
+# restart run 
+ckpt_path: "checkpoints/GACE-CFG-epoch=126.ckpt"  
+resume_training: true
+run_id: 9zoj18kq  # log id from wandb
+strategy: ddp #_find_unused_parameters_true
+
