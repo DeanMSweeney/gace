@@ -44,6 +44,7 @@ from torch.utils.data import Subset
 # Hydra and OmegaConf for configuration management
 import hydra
 from omegaconf import OmegaConf, DictConfig, open_dict, MISSING
+from huggingface_hub import hf_hub_download
 from dataclasses import dataclass, asdict
 from typing import Optional, Literal, Union, Tuple
 
@@ -300,8 +301,15 @@ def main(cfg: Config) -> None:
         gradient_clip_val=1,  # Gradient clipping value
     )
 
-   # === Checkpoint Loading ===
-    ckpt_path_for_trainer = cfg.ckpt_path 
+   # === HF Checkpoint Fallback ===
+    # In eval/generate mode with no local ckpt_path override, pull the checkpoint
+    # from the configured HF Hub repo instead. Cached locally after first download.
+    if cfg.mode in ("eval", "generate") and not cfg.ckpt_path:
+        declare(f">>> No ckpt_path set — downloading {cfg.hf_ckpt_filename} from {cfg.hf_repo_id}")
+        cfg.ckpt_path = hf_hub_download(repo_id=cfg.hf_repo_id, filename=cfg.hf_ckpt_filename)
+
+    # === Checkpoint Loading ===
+    ckpt_path_for_trainer = cfg.ckpt_path
     # In your main training script:
     if cfg.ckpt_path and not cfg.resume_training:
         declare(f">>> Loading CLEAN preprocessed weights from: {cfg.ckpt_path}")

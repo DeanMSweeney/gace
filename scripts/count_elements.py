@@ -1,31 +1,4 @@
 #!/usr/bin/env python3
-"""
-Count chemical elements across a set of ASE .traj files, excluding adsorbate
-atoms (tag == 2).
-
-For each structure, an element is counted *once* if it is present at all,
-regardless of how many atoms of that element appear. The number reported for
-each element is therefore the number of structures in which that element
-occurs (i.e. its per-structure frequency across the dataset).
-
-Results are written to a CSV file with columns: Element, Count.
-
-Usage
------
-    python count_elements.py path/to/traj_dir
-    python count_elements.py file1.traj file2.traj -o out.csv
-    python count_elements.py traj_dir --index ':'   # count every frame
-    python count_elements.py                        # no input -> scan *_threshold dirs
-    python count_elements.py traj_dir -j 8           # 8 parallel workers
-
-By default only the last frame of each trajectory (the relaxed structure) is
-read, so each .traj file contributes exactly one structure. Pass --index ':'
-to treat every frame in every file as its own structure instead.
-
-If no input path is given, every directory matching the glob '*_threshold' in
-the current working directory is used as input.
-"""
-
 import argparse
 import csv
 import os
@@ -40,6 +13,9 @@ from tqdm import tqdm
 # Tag value used to mark adsorbate atoms (OC20 / common slab convention:
 # 0 = subsurface, 1 = surface, 2 = adsorbate).
 ADSORBATE_TAG = 2
+
+# atoms.info key holding the per-structure binding energy.
+BINDING_ENERGY_KEY = "computed_binding_E"
 
 # Glob used to discover input directories when none are given on the command line.
 DEFAULT_DIR_GLOB = "*_threshold"
@@ -75,24 +51,45 @@ def gather_traj_files(inputs):
 
 
 def process_file(tf, index):
-    """Read one .traj file and return (Counter, n_structures, error_or_None).
-    Runs in a worker process, so it must not touch shared state."""
+    """Read one .traj file and return (elem_counts, energy_sum, energy_n,
+    n_structures, error_or_None).
+
+    elem_counts: Counter of structures each element appears in.
+    energy_sum:  Counter of summed binding energy for structures each
+                 element appears in (only structures with a valid
+                 BINDING_ENERGY_KEY contribute).
+    energy_n:    Counter of how many of those structures had a valid
+                 binding energy (denominator for the average).
+
+    Runs in a worker process, so it must not touch shared state.
+    """
     try:
         result = read(str(tf), index=index)
     except Exception as exc:
-        return Counter(), 0, str(exc)
+        return Counter(), Counter(), Counter(), 0, str(exc)
 
     images = result if isinstance(result, list) else [result]
-    counts = Counter()
+    elem_counts = Counter()
+    energy_sum = Counter()
+    energy_n = Counter()
     for atoms in images:
-        counts.update(elements_in_structure(atoms))
-    return counts, len(images), None
+        elems = elements_in_structure(atoms)
+        elem_counts.update(elems)
+
+        energy = atoms.info.get(BINDING_ENERGY_KEY)
+        if energy is not None:
+            for el in elems:
+                energy_sum[el] += energy
+                energy_n[el] += 1
+
+    return elem_counts, energy_sum, energy_n, len(images), None
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Count elements across .traj files, excluding adsorbate "
-                    "atoms (tag == 2). Each element is counted once per structure.")
+                    "atoms (tag == 2), and report average binding energy "
+                    "per element. Each element is counted once per structure.")
     parser.add_argument(
         "input", nargs="*",
         help="One or more .traj files, or directories containing .traj files. "
@@ -125,6 +122,8 @@ def main():
         sys.exit("No .traj files found.")
 
     counts = Counter()
+    energy_sum = Counter()
+    energy_n = Counter()
     n_structures = 0
     n_failed = 0
 
@@ -132,12 +131,14 @@ def main():
         futures = {executor.submit(process_file, tf, args.index): tf for tf in traj_files}
         for fut in tqdm(as_completed(futures), total=len(futures), desc="Reading trajectories"):
             tf = futures[fut]
-            file_counts, n_images, error = fut.result()
+            file_counts, file_energy_sum, file_energy_n, n_images, error = fut.result()
             if error is not None:
                 print(f"Skipping {tf}: {error}", file=sys.stderr)
                 n_failed += 1
                 continue
             counts.update(file_counts)
+            energy_sum.update(file_energy_sum)
+            energy_n.update(file_energy_n)
             n_structures += n_images
 
     # Sort by count (descending), then alphabetically for ties.
@@ -145,13 +146,21 @@ def main():
 
     with open(args.output, "w", newline="") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["Element", "Count"])
-        writer.writerows(rows)
+        writer.writerow(["Element", "Count", "Avg_Binding_Energy_eV", "N_With_Energy"])
+        for elem, count in rows:
+            n = energy_n[elem]
+            avg = f"{energy_sum[elem] / n:.4f}" if n else "N/A"
+            writer.writerow([elem, count, avg, n])
+
+    n_missing_energy = sum(1 for elem, _ in rows if energy_n[elem] == 0)
 
     print(f"Processed {n_structures} structure(s) from "
           f"{len(traj_files) - n_failed} file(s)"
           + (f" ({n_failed} failed)" if n_failed else "") + ".")
     print(f"Wrote {len(rows)} element(s) to {args.output}")
+    if n_missing_energy:
+        print(f"Warning: {n_missing_energy} element(s) had no structures with "
+              f"'{BINDING_ENERGY_KEY}' set.", file=sys.stderr)
 
 
 if __name__ == "__main__":

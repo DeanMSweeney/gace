@@ -27,6 +27,7 @@ tea_debug.log
 *pptx
 *svg
 *pdf
+.DS_Store 
 
 # Folders
 '$HOME'/
@@ -34,13 +35,11 @@ scratch/
 full/
 wandb/
 logs/
-sandbox/
 outputs/
 checkpoints/
 .place_checkpoints/
 strucs/
 strucs_1.0/
-conf/
 0/
 trajs/
 old/
@@ -63,6 +62,8 @@ volcano_plot_sampling/
 build/
 blender/
 data/
+datasets/scripts/oc20/ads_*
+datasets/scripts/oc20/eval_report.txt
 
 # Data formats
 *.lmdb

@@ -123,8 +123,6 @@ class SamplerConfig:
     """Standard deviation of Brownian noise injected at each Euler step (Euler-Maruyama).
     Noise is tapered by (1 - t) so it vanishes as t → 1.
     0.0 gives the standard deterministic Euler step.
-    Required to be > 0 when fk_steering=True so resampled clones diverge on
-    continuous modalities. Recommended value with FK: 0.05.
     """
 
     # ==================== Langevin (SDE) Euclidean Step ====================
@@ -213,7 +211,8 @@ class SamplerConfig:
 
     sanitize_otf: bool = True
     """Whether to apply validity checks on-the-fly during generation.
-    - True: filter structures by validity criteria before writing (default)
+    - True: filter structures by validity criteria before writing (default),
+      recording is_valid and is_valid_base per structure
     - False: write every successfully built structure without filtering
     """
 
@@ -225,7 +224,8 @@ class SamplerConfig:
     dedupe_otf: bool = False
     """Run on-the-fly structural diversity filtering during generation.
     When True, each newly generated slab is matched (StructureMatcher) against the
-    running record of unique slabs; duplicates are marked invalid and not written.
+    running record of unique slabs; duplicates are marked is_unique=False (which
+    fails passed_all_checks) and not written. is_valid is not modified.
     Enabled in both test_step and predict_step; uniqueness is reported at epoch end
     as (# unique slabs) / (# valid structures checked)."""
 
@@ -236,34 +236,6 @@ class SamplerConfig:
 
     mlff_checkpoint: str = "EquiformerV2-31M-S2EF-OC20-All+MD"
     """MLFF checkpoint for post-generation relaxation and evaluation."""
-
-    # ==================== Feynman-Kac Steering ====================
-
-    fk_steering: bool = False
-    """Enable Feynman-Kac particle filtering during ODE sampling.
-    Runs num_generated_samples particles in parallel and periodically
-    resamples toward structures with adsorption energy close to target."""
-
-    fk_mlff_checkpoint: Optional[str] = "PaiNN-S2EF-OC20-All"
-    """MLFF checkpoint used for FK intermediate reward evaluation.
-    Can be a lighter/cheaper model than mlff_checkpoint since it only
-    needs a rough energy signal, not a tight relaxation. Defaults to
-    PaiNN-S2EF-OC20-All. If None, falls back to mlff_checkpoint."""
-
-    fk_K: int = 10
-    """Evaluate and resample every fk_K ODE steps."""
-
-    fk_tau: float = 0.5
-    """Resampling temperature for harmonic-sum log-weight accumulation.
-    Controls the effective beta = 1/fk_tau applied to accumulated path costs.
-    Lower = harder selection; higher = softer (near-uniform). Typical range: 0.1–2.0.
-    At 0.5, a 1.5 eV cost spread gives ~20x best-to-worst probability ratio."""
-
-    fk_start_step: int = 20
-    """Minimum number of ODE steps to complete before the first FK evaluation.
-    Allows global structure (lattice, rough positions) to form before steering."""
-
-
 
 
 @dataclass
@@ -295,7 +267,7 @@ class PathConfig:
     Not applied to atom types (corruption-mask scheme; alignment has no effect).
     """
 
-    informed_priors: bool = True
+    informed_priors: bool = False
     """Whether to use informed priors for the noise x0 (forge variant only)."""
 
     cfg_dropout_prob: float = 0.0
@@ -490,7 +462,15 @@ class Config:
     """Path to checkpoint file for resuming training or evaluation
     - None: train from scratch
     - "path/to/checkpoint.ckpt": resume from checkpoint
+    - In eval/generate mode, if left None, falls back to downloading
+      hf_ckpt_filename from hf_repo_id on Hugging Face Hub.
     """
+
+    hf_repo_id: str = "DeanMSweeney/gace"
+    """Hugging Face Hub repo id used as the ckpt_path fallback for eval/generate mode."""
+
+    hf_ckpt_filename: str = "gace.ckpt"
+    """Filename within hf_repo_id to download when ckpt_path is unset in eval/generate mode."""
 
     resume_training: bool = False
     """Whether to resume training state (optimizer, scheduler, epoch) from checkpoint
