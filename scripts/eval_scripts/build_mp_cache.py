@@ -14,6 +14,7 @@ Two steps, run on different machines if needed.
 Then copy .ehull_cache/ next to ehull_from_traj.py.
 """
 import argparse
+import json
 import pickle
 import threading
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
@@ -76,13 +77,35 @@ def _rester():
     return _local.mpr
 
 
+def to_records(entries):
+    """
+    Plain JSON records: composition, corrected energy, id. No pymatgen class
+    paths, so the cache loads under any pymatgen version.
+    """
+    return [{"composition": e.composition.as_dict(), "energy": e.energy,
+             "entry_id": str(e.entry_id)} for e in entries]
+
+
 def fetch(elements, cache_dir):
-    path = cache_dir / f"{'-'.join(sorted(elements))}.pkl"
-    # pin to the GGA/GGA+U hull: MP2020 corrections target that scale,
-    # not MP's newer joint GGA/GGA+U/r2SCAN default
-    entries = _rester().get_entries_in_chemsys(
-        sorted(elements), additional_criteria={"thermo_types": ["GGA_GGA+U"]})
-    path.write_bytes(pickle.dumps(entries))
+    stem = "-".join(sorted(elements))
+    old = cache_dir / f"{stem}.pkl"
+    entries = None
+    if old.exists():
+        # convert a pickle from an earlier run instead of refetching;
+        # a truncated pickle (interrupted write) falls through to a fetch
+        try:
+            entries = pickle.loads(old.read_bytes())
+        except Exception:
+            pass
+    if entries is None:
+        # pin to the GGA/GGA+U hull: MP2020 corrections target that scale,
+        # not MP's newer joint GGA/GGA+U/r2SCAN default
+        entries = _rester().get_entries_in_chemsys(
+            sorted(elements), additional_criteria={"thermo_types": ["GGA_GGA+U"]})
+    # write then rename, so an interrupted run never leaves a partial file
+    tmp = cache_dir / f"{stem}.json.tmp"
+    tmp.write_text(json.dumps(to_records(entries)))
+    tmp.replace(cache_dir / f"{stem}.json")
 
 
 def main():
@@ -91,7 +114,7 @@ def main():
                    help="scan these directories and write --chemsys_file")
     p.add_argument("--chemsys_file", type=Path, default=Path("chemsys.txt"))
     p.add_argument("--cache_dir", type=Path, default=Path(".ehull_cache"))
-    p.add_argument("--num_workers", type=int, default=8)
+    p.add_argument("--num_workers", type=int, default=4)
     args = p.parse_args()
 
     if args.traj_dir:
@@ -107,9 +130,10 @@ def main():
 
     args.cache_dir.mkdir(exist_ok=True)
     todo = [s for s in systems
-            if not (args.cache_dir / f"{'-'.join(sorted(s))}.pkl").exists()]
-    print(f"{len(systems)} systems, {len(systems) - len(todo)} already cached, "
-          f"{len(todo)} to fetch")
+            if not (args.cache_dir / f"{'-'.join(sorted(s))}.json").exists()]
+    n_convert = sum((args.cache_dir / f"{'-'.join(sorted(s))}.pkl").exists() for s in todo)
+    print(f"{len(systems)} systems: {len(systems) - len(todo)} already cached, "
+          f"{n_convert} to convert from .pkl, {len(todo) - n_convert} to fetch from MP")
 
     failed = []
     with ThreadPoolExecutor(args.num_workers) as ex:

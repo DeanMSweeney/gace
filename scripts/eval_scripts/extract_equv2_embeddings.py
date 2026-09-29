@@ -272,7 +272,7 @@ def main():
                         help="Submodule to hook: the final layer norm before the output heads")
     parser.add_argument("--print_model", action="store_true",
                         help="Print the module tree and exit, to confirm the extraction point")
-    parser.add_argument("--pool_atoms", choices=["all", "slab"], default="all",
+    parser.add_argument("--pool_atoms", choices=["all", "slab"], default="slab",
                         help="Pool over every atom (default) or only the slab (tags != 2). "
                              "The adsorbate is in the forward pass either way; 'slab' only "
                              "keeps it out of the pooled vector. Not comparable across modes.")
