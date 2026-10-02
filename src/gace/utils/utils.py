@@ -142,7 +142,7 @@ def adsorbate_center_of_mass(
 # TEMPORARY: flow-trajectory dumping (noise → generated structure).
 # Flip DUMP_FLOW_TRAJ to True to write snapshots from Flow.sample(). Off by default.
 # ─────────────────────────────────────────────────────────────────────────────
-DUMP_FLOW_TRAJ         = False
+DUMP_FLOW_TRAJ         = True
 DUMP_FLOW_TRAJ_DIR     = "flow_traj"
 DUMP_FLOW_TRAJ_SAMPLES = 10
 DUMP_FLOW_TRAJ_POSCAR  = False   # also write one POSCAR per (sample, t)
