@@ -21,4 +21,3 @@ cross_attention: true                   # modality-specific cross-attn output he
 add_sinusoid_posenc: true
 concat_combine_input: false             # sum (false) vs concat+project (true) input
 custom_weight_init: null
-predict_energy: false                   # joint energy prediction (drops energy conditioning)

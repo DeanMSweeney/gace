@@ -31,7 +31,6 @@ optim_cfg:
   lambda_x: 2.5
   lambda_ads: 1.0
   lambda_z: 0.10
-  lambda_energy: 1.0
 
 # checkpointing/logging
 logger: true
