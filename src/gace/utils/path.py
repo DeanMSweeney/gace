@@ -549,14 +549,17 @@ class Flow():
             N_prim = int(self.primitive_mask.sum().item())
             data.atomic_numbers = torch.full((N_prim,), self.model.atom_dim - 1, dtype=torch.long, device=device)
 
-            # Pin the first prim atom of each graph to target_element. It is never
-            # masked, so ctmc_step leaves it fixed and every step conditions on it.
+            # Pin the first prim atom of each graph to a target element drawn uniformly
+            # from target_element. It is never masked, so ctmc_step leaves it fixed
+            # and every step conditions on it.
             if self.target_element is not None:
-                if not 1 <= self.target_element <= self.model.atom_dim - 1:
+                targets = torch.tensor(self.target_element, dtype=torch.long, device=device)
+                if not ((targets >= 1) & (targets <= self.model.atom_dim - 1)).all():
                     raise ValueError(f"target_element must be in [1, {self.model.atom_dim - 1}], got {self.target_element}")
                 prim_batch = data.batch[self.primitive_mask]
                 first_idx = scatter(torch.arange(N_prim, device=device), prim_batch, dim=0, dim_size=B, reduce="min")  # (B,)
-                data.atomic_numbers[first_idx] = self.target_element - 1  # 1-indexed Z → 0-indexed
+                choice = torch.randint(len(targets), (B,), device=device)
+                data.atomic_numbers[first_idx] = targets[choice] - 1  # 1-indexed Z → 0-indexed
 
         # N^(1/3) scale factor for length denormalisation — lengths_scaled is in normalised space
         n_scale = (num_prim_atoms.float() ** (1 / 3)).unsqueeze(1)  # (B, 1)
