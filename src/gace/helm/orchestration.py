@@ -94,6 +94,7 @@ class LightFlowMatch(LightningModule, Flow):
             seed: int=42,
             num_prim_atoms: Optional[int]=None,
             target_binding_energy: Optional[float]=None,
+            target_element: Optional[int]=None,
             num_generated_samples: int=1,
             catalyst_dist_cutoff: float=0.75,
             ads_integrity_threshold: float=2.0,
@@ -167,6 +168,7 @@ class LightFlowMatch(LightningModule, Flow):
         else:
             self.target_binding_energy = target_binding_energy
             
+        self.target_element = target_element
         self.num_generated_samples = num_generated_samples
         self.cfg_dropout_prob = cfg_dropout_prob
         self.cfg_w_continuous = cfg_w_continuous

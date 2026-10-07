@@ -165,6 +165,11 @@ class SamplerConfig:
     two-element [lo, hi] list, in which case each graph in each batch draws its
     own target from U(lo, hi)."""
 
+    target_element: Optional[int] = None
+    """Atomic number (1–99) to pin on one primitive atom per graph during forge
+    sampling. The atom starts unmasked at t=0, so the CTMC never resamples it
+    and every step conditions on it. None disables pinning."""
+
     num_prim_atoms: Optional[int] = 4
     """Number of primitive atoms per graph to use during forge sampling.
     If None, uses the atom count from the data. Set to e.g. 4 to force smaller unit cells."""
