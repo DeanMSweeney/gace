@@ -66,7 +66,6 @@ class TransformerModule(nn.Module):
         add_sinusoid_posenc: bool = True,
         concat_combine_input: bool = False,
         disable_prenorm: bool = False,
-        predict_energy: bool = False,
         custom_weight_init: Optional[
             Literal["none", "xavier", "kaiming", "orthogonal", "uniform", "eye", "normal"]
         ] = None,
@@ -94,7 +93,6 @@ class TransformerModule(nn.Module):
         self.concat_combine_input = concat_combine_input
         self.custom_weight_init = custom_weight_init
         self.disable_prenorm = disable_prenorm
-        self.predict_energy = predict_energy
 
         # Embeddings for each the primitive cell
         self.atom_type_embed = nn.Embedding(atom_dim, hidden_dim)  # for mask token; shared with adsorbate
@@ -121,11 +119,8 @@ class TransformerModule(nn.Module):
             self.combine_input_ads = nn.Linear(self.ads_cond_dim * hidden_dim, hidden_dim)
 
         self.time_encoding = TimeFourierEncoding(posenc_dim=hidden_dim, max_len=200)
-        # predict_energy: energy is a prediction target, not conditioning — the
-        # embedding/null modules are skipped entirely (also keeps DDP happy).
-        if not self.predict_energy:
-            self.ads_binding_energy_embed = nn.Linear(1, hidden_dim)
-            self.null_binding_energy = nn.Parameter(torch.zeros(hidden_dim))
+        self.ads_binding_energy_embed = nn.Linear(1, hidden_dim)
+        self.null_binding_energy = nn.Parameter(torch.zeros(hidden_dim))
 
         if activation == "SiLU":
             activation = nn.SiLU(inplace=False)
@@ -223,15 +218,6 @@ class TransformerModule(nn.Module):
 
             # Ads cross-attention (atom types are conditioning — no cross-attn head)
             self.pos_cross_attention = decoder_layer()
-
-            if self.predict_energy:
-                self.energy_cross_attention = decoder_layer()
-
-        if self.predict_energy:
-            self.out_energy = nn.Sequential(
-                nn.LayerNorm(hidden_dim),
-                nn.Linear(hidden_dim, 1, bias=False),
-            )
 
         # Initialize weights
         if self.custom_weight_init is not None:
@@ -403,24 +389,20 @@ class TransformerModule(nn.Module):
             .mean(-2)
         )  # (B, C)
 
-        if self.predict_energy:
-            # Energy is a prediction target, not conditioning — time-only conditions.
-            embed_conditions = embed_time.unsqueeze(-2)  # (B, 1, C)
-        else:
-            embed_binding_energy = self.ads_binding_energy_embed(
-                feats["ads_binding_energy"].unsqueeze(-1)
-            )  # (B, C)
+        embed_binding_energy = self.ads_binding_energy_embed(
+            feats["ads_binding_energy"].unsqueeze(-1)
+        )  # (B, C)
 
-            # CFG training dropout: replace dropped samples with the learnable null embedding.
-            # cfg_drop_mask is a (B,) bool tensor; True = this sample's condition is dropped.
-            # Only present during training steps (injected by LightFlowMatch.forward).
-            drop_mask = feats.get("cfg_drop_mask")
-            if drop_mask is not None:
-                embed_binding_energy = torch.where(
-                    drop_mask.unsqueeze(-1), self.null_binding_energy, embed_binding_energy
-                )
+        # CFG training dropout: replace dropped samples with the learnable null embedding.
+        # cfg_drop_mask is a (B,) bool tensor; True = this sample's condition is dropped.
+        # Only present during training steps (injected by LightFlowMatch.forward).
+        drop_mask = feats.get("cfg_drop_mask")
+        if drop_mask is not None:
+            embed_binding_energy = torch.where(
+                drop_mask.unsqueeze(-1), self.null_binding_energy, embed_binding_energy
+            )
 
-            embed_conditions = (embed_time + embed_binding_energy).unsqueeze(-2)  # (B, 1, C)
+        embed_conditions = (embed_time + embed_binding_energy).unsqueeze(-2)  # (B, 1, C)
         # ── Build h_in for prim sequence ─────────────────────────────────────
         if self.concat_combine_input:
             # Broadcast graph-level embeddings to match prim seq length
@@ -586,23 +568,6 @@ class TransformerModule(nn.Module):
 
             out_pos = self.out_pos(h_out_ads)  # (B, N,  3)
 
-        # ── Energy head: cross-attn re-read → masked-mean pool → norm+linear ──
-        if self.predict_energy:
-            h_energy = (
-                self.energy_cross_attention(
-                    h_out,
-                    h_in,
-                    tgt_key_padding_mask=padding_mask,
-                    memory_key_padding_mask=padding_mask,
-                    **attention_kwargs,
-                )
-                if self.cross_attention
-                else h_out
-            )  # (B, M+N, C)
-            mask_f = combined_real_mask.unsqueeze(-1).float()  # (B, M+N, 1)
-            h_energy_pooled = (h_energy * mask_f).sum(-2) / mask_f.sum(-2).clamp(min=1)  # (B, C)
-            out_energy = self.out_energy(h_energy_pooled).squeeze(-1)  # (B,)
-
         # ── Assemble outputs ─────────────────────────────────────────────────
         pred_prim = (
             out_atom_types * prim_real_mask.unsqueeze(-1),    # (B, M, V)
@@ -611,8 +576,6 @@ class TransformerModule(nn.Module):
             out_angles_radians * global_mask,                 # (B, 1, 3)
             out_transformation_matrix * global_mask,          # (B, 1, 3)
         )
-        if self.predict_energy:
-            pred_prim = pred_prim + (out_energy,)             # (B,)
         pred_ads = (
             out_pos * ads_real_mask.unsqueeze(-1),   # (B, N,  3)
         )

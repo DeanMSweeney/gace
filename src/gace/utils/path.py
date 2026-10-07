@@ -99,15 +99,6 @@ class Flow():
             "M_loss":       M_loss,
         }
 
-        # ── Energy loss (predict_energy: joint generation + energy regression) ──
-        if self.model.predict_energy:
-            target_energy = (
-                data.ads_binding_energy.float() - self.avg_binding_energy
-            ) / self.std_binding_energy  # standardized (B,)
-            energy_loss = ((pred["energy"].float() - target_energy).abs() * self.time_weight).mean()
-            losses["energy_loss"] = energy_loss
-            losses["total_loss"] = total_loss + float(self.hparams.lambda_energy) * energy_loss
-
         return losses
 
     def build_path(
@@ -115,17 +106,11 @@ class Flow():
         input_graph: Data,
         time_dist: Literal["uniform", "beta"] = "beta",
         beta_t: float = 1.8,
-        t_min: float = 0.0,
     ) -> Data:
         """
         Generate interpolated training data along a path from initial to relaxed positions.
 
         For "forge" variant: interpolates from noise/initial positions to relaxed positions
-
-        Args:
-            t_min: Floor for the sampled time, t = max(t, t_min). Oracle training
-                uses ~0.98 (zatom finetuning recipe: near-clean views, fresh
-                small corruption each visit).
 
         Returns:
             data: Modified data object with interpolated inputs/targets at time t
@@ -140,8 +125,6 @@ class Flow():
             elif time_dist == "beta":
                 beta = torch.distributions.Beta(beta_t, 1.0)
                 t = beta.sample((len(torch.unique(data.batch)), 1)).to(data.pos.device) # B , 1
-            if t_min > 0.0:
-                t = t.clamp(min=t_min)
             data.t = t
 
             # ── Lattice and supercell (CatFlow data only) ────────────────────
@@ -468,7 +451,7 @@ class Flow():
         # Per-atom independent masking against the scheduled threshold
         mask_flag = torch.rand(z1.size(0), device=device) < (1 - alpha_t_z.squeeze(1))  # (N_prim,)
         zt = z1.clone()
-        zt[mask_flag] = (self.oracle_model.atom_dim - 1) if self.oracle_mode == "train" else (self.model.atom_dim - 1) # masked atoms get index 99
+        zt[mask_flag] = self.model.atom_dim - 1 # masked atoms get index 99
 
         data.atomic_numbers        = zt          # (N_prim,) long — model input
         data.atomic_numbers_target = z1          # (N_prim,) long — loss target
@@ -565,6 +548,19 @@ class Flow():
             # Discrete: all atoms start as mask token
             N_prim = int(self.primitive_mask.sum().item())
             data.atomic_numbers = torch.full((N_prim,), self.model.atom_dim - 1, dtype=torch.long, device=device)
+
+            # With probability target_element_prob, pin the first prim atom of a graph
+            # to a target element drawn uniformly from target_element. It is never
+            # masked, so ctmc_step leaves it fixed and every step conditions on it.
+            if self.target_element is not None:
+                targets = torch.tensor(self.target_element, dtype=torch.long, device=device)
+                if not ((targets >= 1) & (targets <= self.model.atom_dim - 1)).all():
+                    raise ValueError(f"target_element must be in [1, {self.model.atom_dim - 1}], got {self.target_element}")
+                prim_batch = data.batch[self.primitive_mask]
+                first_idx = scatter(torch.arange(N_prim, device=device), prim_batch, dim=0, dim_size=B, reduce="min")  # (B,)
+                pin = torch.rand(B, device=device) < self.target_element_prob  # (B,)
+                choice = torch.randint(len(targets), (B,), device=device)
+                data.atomic_numbers[first_idx[pin]] = targets[choice[pin]] - 1  # 1-indexed Z → 0-indexed
 
         # N^(1/3) scale factor for length denormalisation — lengths_scaled is in normalised space
         n_scale = (num_prim_atoms.float() ** (1 / 3)).unsqueeze(1)  # (B, 1)

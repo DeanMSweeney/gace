@@ -7,15 +7,16 @@ defaults:
 mode: "generate"
 
 # training hyperparameters/settings
-batch_size: 1000
+batch_size: 100
 num_workers: 8
 
 sampler_cfg:
   inputted_adsorbate: ads.vasp
   target_binding_energy: 4.14
+  target_element: [29, 45]
   num_prim_atoms: 4
   num_integration_steps: 100
-  sanitize_otf: false
+  sanitize_otf: true
   relax_otf: false
-  dedupe_otf: false
+  dedupe_otf: true
   num_generated_samples: 100

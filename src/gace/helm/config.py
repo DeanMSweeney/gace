@@ -98,9 +98,6 @@ class OptimizerConfig:
     lambda_M: float = 1.0
     """Loss weight for supercell transformation matrix loss (M_loss)"""
 
-    lambda_energy: float = 1.0
-    """Loss weight for the joint energy-prediction loss (model_cfg predict_energy)"""
-
 
 @dataclass
 class SamplerConfig:
@@ -167,6 +164,17 @@ class SamplerConfig:
     Accepts either a scalar (every sample conditioned on the same energy) or a
     two-element [lo, hi] list, in which case each graph in each batch draws its
     own target from U(lo, hi)."""
+
+    target_element: Optional[Any] = None
+    """Atomic number (1–99) to pin on one primitive atom per graph during forge
+    sampling. The atom starts unmasked at t=0, so the CTMC never resamples it
+    and every step conditions on it. Accepts a scalar or a list [Z1, Z2, ...],
+    in which case each graph draws its target uniformly from the list.
+    None disables pinning."""
+
+    target_element_prob: float = 0.5
+    """Per-graph probability of pinning a target_element. Unpinned graphs start
+    fully masked and are generated freely. Ignored when target_element is None."""
 
     num_prim_atoms: Optional[int] = 4
     """Number of primitive atoms per graph to use during forge sampling.
@@ -279,46 +287,6 @@ class PathConfig:
 
 
 @dataclass
-class OracleConfig:
-    """Energy-regression oracle configuration.
-
-    The oracle (``TransformerModuleEnergy``) regresses ads_binding_energy
-    from a structure. Its architecture is a separate top-level Hydra-instantiable
-    spec (``Config.oracle_model_cfg``, parallel to ``model_cfg``); this holds the
-    behaviour knobs only.
-    """
-
-    oracle_mode: Literal["off", "train", "guide"] = "off"
-    """How the oracle participates in training:
-    - "off":   not instantiated / not used; flow training is unchanged.
-    - "train": train the oracle standalone on ground-truth structures
-               (regress ads_binding_energy); the flow model is not trained.
-    - "guide": load frozen pretrained weights and add an energy guidance loss
-               |oracle(x_hat_1) - ads_binding_energy| to the flow loss."""
-
-    oracle_ckpt_path: Optional[str] = None
-    """Checkpoint loaded into the oracle. In 'guide' mode: a standalone oracle run
-    (keys 'oracle_model.'). In 'train' mode with oracle_pretrained_state=True: a
-    trained forge checkpoint (keys 'model.') used to seed the oracle trunk."""
-
-    oracle_gen_pretraining: bool = False
-    """If True (with oracle_mode='train'), seed the oracle trunk from the forge
-    checkpoint at oracle_ckpt_path instead of training from scratch (Stage A)."""
-
-    oracle_lambda_energy: float = 1.0
-    """Loss weight for the energy guidance term (oracle_mode == 'guide')."""
-
-    oracle_softmax_temperature: float = 1.0
-    """Temperature for the guidance atom-type simplex fed to the oracle.
-    Lower -> sharper (closer to argmax / one-hot), narrowing the train/guidance gap."""
-
-    oracle_guidance_min_t: float = 0.0
-    """Only apply the energy guidance loss for samples with flow time t >= this
-    threshold (where the endpoint estimate x_hat_1 is a better clean-structure
-    estimate). 0.0 applies it at all times."""
-
-
-@dataclass
 class Config:
     """
     Main configuration for GACE training pipeline.
@@ -345,17 +313,8 @@ class Config:
     - GemNet-OC: embedding dimensions, interaction blocks, etc.
     """
 
-    oracle_model_cfg: Optional[DictConfig] = None
-    """Hydra-instantiable architecture spec for the oracle
-    (TransformerModuleEnergy), parallel to model_cfg. None => oracle off."""
-
     optim_cfg: OptimizerConfig = field(default_factory=OptimizerConfig)
     """Optimizer and learning rate scheduler configuration"""
-
-    # ==================== Energy oracle ====================
-
-    oracle_cfg: OracleConfig = field(default_factory=OracleConfig)
-    """Oracle behaviour config (mode, ckpt_path, loss weights)."""
 
     # ==================== Dataset Paths ====================
 

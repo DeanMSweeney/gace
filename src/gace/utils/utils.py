@@ -146,6 +146,7 @@ DUMP_FLOW_TRAJ         = False
 DUMP_FLOW_TRAJ_DIR     = "flow_traj"
 DUMP_FLOW_TRAJ_SAMPLES = 10
 DUMP_FLOW_TRAJ_POSCAR  = False   # also write one POSCAR per (sample, t)
+DUMP_FLOW_TRAJ_BUILD   = False   # also write the built supercell slab + adsorbate per (sample, t)
 
 
 def dump_flow_snapshot(
@@ -158,6 +159,7 @@ def dump_flow_snapshot(
     out_dir: str = DUMP_FLOW_TRAJ_DIR,
     num_samples: int = DUMP_FLOW_TRAJ_SAMPLES,
     write_poscar: bool = DUMP_FLOW_TRAJ_POSCAR,
+    build: bool = DUMP_FLOW_TRAJ_BUILD,
 ) -> None:
     """
     Dump the current sampling state as viewable structures — debugging aid only.
@@ -171,6 +173,10 @@ def dump_flow_snapshot(
         traj_sample{b}.extxyz  — one file per sample, frames ordered by t
         traj_all.extxyz        — every sample and time in one file
         POSCAR_s{b}_t{t}       — optional, one static POSCAR per frame
+        built_sample{b}.extxyz — optional, supercell slab + adsorbate via
+                                 build_slab_adsorbate (M rounded, 15 Å vacuum).
+                                 Frames that fail to build (e.g. singular M at
+                                 small t) are skipped silently.
 
     extxyz rather than a multi-frame POSCAR because the lattice changes at every
     t and POSCAR/XDATCAR carries a single cell for the whole file.
@@ -193,7 +199,7 @@ def dump_flow_snapshot(
     if not force and step % every != 0:
         return
 
-    from gace.utils.builder import lattice_params_to_matrix  # local: temporary code
+    from gace.utils.builder import lattice_params_to_matrix, build_slab_adsorbate  # local: temporary code
 
     os.makedirs(out_dir, exist_ok=True)
 
@@ -201,11 +207,10 @@ def dump_flow_snapshot(
     ads_batch  = data.batch[data.tags == 2].cpu()
     B = int(data.batch.max().item()) + 1
 
-    cells = lattice_params_to_matrix(
-        lengths=(data.lengths_scaled * n_scale).float().cpu(),
-        angles=data.angles_radians.float().cpu(),
-    )  # (B, 3, 3)
-
+    lengths = (data.lengths_scaled * n_scale).float().cpu()
+    angles  = data.angles_radians.float().cpu()
+    cells   = lattice_params_to_matrix(lengths=lengths, angles=angles)  # (B, 3, 3)
+    M_all   = data.transformation_matrix.float().cpu()
     frac    = data.pos.float().cpu()
     z_prim  = data.atomic_numbers.long().cpu()
     ads_xyz = data.ads_pos.float().cpu()
@@ -213,6 +218,12 @@ def dump_flow_snapshot(
 
     # The t = 0 frame truncates any files left over from a previous run
     first = (step == 0)
+
+    # Built frames can fail, so append= can't be used to truncate them; clear up front
+    if build and first:
+        for f in os.listdir(out_dir):
+            if f.startswith("built_") and f.endswith(".extxyz"):
+                os.remove(os.path.join(out_dir, f))
 
     for b in range(min(num_samples, B)):
         cell = cells[b]
@@ -234,6 +245,24 @@ def dump_flow_snapshot(
         write(os.path.join(out_dir, "traj_all.extxyz"), atoms, format="extxyz", append=not (first and b == 0))
         if write_poscar:
             write(os.path.join(out_dir, f"POSCAR_s{b:02d}_t{float(t_curr):.2f}"), atoms, format="vasp")
+
+        if build:
+            try:
+                built = build_slab_adsorbate(
+                    prim_pos=frac[pm] @ cell,
+                    prim_atomic_numbers=z_prim[pm] + 1,
+                    lattice_params=torch.cat([lengths[b], angles[b]]),
+                    transformation_matrix=M_all[b],
+                    ads_pos=ads_xyz[am],
+                    ads_atomic_numbers=z_ads[am] + 1,
+                    vacuum=15.0,
+                )
+                built.info.pop("primitive_cell")  # Atoms object; extxyz can't serialise it
+                built.info["t"] = round(float(t_curr), 3)
+                write(os.path.join(out_dir, f"built_sample{b:02d}.extxyz"), built, format="extxyz", append=True)
+                write(os.path.join(out_dir, "built_all.extxyz"), built, format="extxyz", append=True)
+            except Exception:
+                pass  # early-t states (e.g. singular rounded M) often can't be built
 
 
 def center_and_random_so3_rotation(ref_pos: Tensor, ads_batch: Tensor, B: int) -> Tensor:
