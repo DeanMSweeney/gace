@@ -64,7 +64,9 @@ blender/
 data/
 datasets/scripts/oc20/ads_*
 datasets/scripts/oc20/eval_report.txt
-
+model_application_analysis/
+sandbox/element_counts.csv 
+DFT_VAL/
 # Data formats
 *.lmdb
 *.pkl
