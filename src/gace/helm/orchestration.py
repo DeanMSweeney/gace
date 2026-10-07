@@ -95,6 +95,7 @@ class LightFlowMatch(LightningModule, Flow):
             num_prim_atoms: Optional[int]=None,
             target_binding_energy: Optional[float]=None,
             target_element: Optional[Any]=None,
+            target_element_prob: float=0.5,
             num_generated_samples: int=1,
             catalyst_dist_cutoff: float=0.75,
             ads_integrity_threshold: float=2.0,
@@ -177,6 +178,10 @@ class LightFlowMatch(LightningModule, Flow):
             self.target_element = tuple(int(z) for z in target_element)
         else:
             self.target_element = (int(target_element),)
+
+        if not 0.0 <= target_element_prob <= 1.0:
+            raise ValueError(f"target_element_prob must be in [0, 1], got {target_element_prob}")
+        self.target_element_prob = target_element_prob
 
         self.num_generated_samples = num_generated_samples
         self.cfg_dropout_prob = cfg_dropout_prob

@@ -172,6 +172,10 @@ class SamplerConfig:
     in which case each graph draws its target uniformly from the list.
     None disables pinning."""
 
+    target_element_prob: float = 0.5
+    """Per-graph probability of pinning a target_element. Unpinned graphs start
+    fully masked and are generated freely. Ignored when target_element is None."""
+
     num_prim_atoms: Optional[int] = 4
     """Number of primitive atoms per graph to use during forge sampling.
     If None, uses the atom count from the data. Set to e.g. 4 to force smaller unit cells."""
