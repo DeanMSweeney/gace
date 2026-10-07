@@ -7,6 +7,8 @@
 ![Config](https://img.shields.io/badge/Config-gray?style=flat)
 ![Hydra](https://img.shields.io/badge/Hydra-89CFF0?style=flat)
 
+![alt text](gace_logo.png)
+
 ## Overview
 
 GACE uses conditional flow matching (CFM) to model the joint distribution over catalyst primitive-cell geometry (fractional coordinates, atom types, lattice parameters, supercell matrix) and adsorbate geometry (center-of-mass, relative positions). It learns a velocity field that transports from Gaussian noise to real DFT-relaxed structures, conditioned on binding energy and spacegroup. Hungarian-alignment-based optimal transport is applied at training time to handle permutation invariance.
