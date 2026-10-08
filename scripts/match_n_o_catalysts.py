@@ -8,8 +8,8 @@ matching several O files produces several rows.
 
 Usage:
     python scripts/eval_scripts/match_n_o_catalysts.py \
-        --n_dir ./n_relaxed/1_threshold \
-        --o_dir ./o_relaxed/1_threshold \
+        --n_dir ./n_relaxed/1_threshold ./n_relaxed/2_threshold \
+        --o_dir ./o_relaxed/1_threshold ./o_relaxed/2_threshold \
         --out ./n_o_matches.csv
 """
 
@@ -52,24 +52,23 @@ def collect(root: Path) -> list[Path]:
 
 
 # Set once per worker process by _init_load_worker.
-_LOAD_ROOT: Path | None = None
 _LOAD_ENERGY_KEY: str | None = None
 
 
-def _init_load_worker(root: Path, energy_key: str) -> None:
-    global _LOAD_ROOT, _LOAD_ENERGY_KEY
-    _LOAD_ROOT = root
+def _init_load_worker(energy_key: str) -> None:
+    global _LOAD_ENERGY_KEY
     _LOAD_ENERGY_KEY = energy_key
 
 
-def _load_record(path: Path) -> "Record | str":
+def _load_record(root_and_path: tuple[Path, Path]) -> "Record | str":
     """Worker: build a Record, or return a string describing why the file is unusable.
 
     The slab is reduced to its primitive cell here so the match pass compares
     already-reduced cells (see _matches_for_n). The vacuum padding keeps the facet
     and termination intact through the reduction.
     """
-    name = str(path.relative_to(_LOAD_ROOT))
+    root, path = root_and_path
+    name = str(path.relative_to(root))
     try:
         atoms = ase.io.read(path)
     except Exception as e:
@@ -93,13 +92,14 @@ def _load_record(path: Path) -> "Record | str":
     )
 
 
-def load_records(root: Path, energy_key: str, num_workers: int, label: str) -> list[Record]:
-    """Load every .traj under root. Raises if any file is unusable."""
-    files = collect(root)
+def load_records(roots: list[Path], energy_key: str, num_workers: int,
+                 label: str) -> list[Record]:
+    """Load every .traj under each root. Raises if any file is unusable."""
+    files = [(root, path) for root in roots for path in collect(root)]
     with Pool(
         processes=num_workers,
         initializer=_init_load_worker,
-        initargs=(root, energy_key),
+        initargs=(energy_key,),
     ) as pool:
         results = list(tqdm(pool.imap(_load_record, files),
                             total=len(files), desc=f"Loading {label} set"))
@@ -110,7 +110,7 @@ def load_records(root: Path, energy_key: str, num_workers: int, label: str) -> l
         more = f"\n  ... and {len(failures) - MAX_REPORTED_FAILURES} more" \
             if len(failures) > MAX_REPORTED_FAILURES else ""
         raise RuntimeError(
-            f"{len(failures)}/{len(files)} files under {root} are unusable:\n  {shown}{more}"
+            f"{len(failures)}/{len(files)} {label} files are unusable:\n  {shown}{more}"
         )
     return results
 
@@ -191,10 +191,10 @@ def write_csv(pairs: list[tuple[Record, Record]], out_path: Path) -> None:
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--n_dir", type=Path, required=True,
-                        help="Root directory of N-binding .traj files (searched recursively)")
-    parser.add_argument("--o_dir", type=Path, required=True,
-                        help="Root directory of O-binding .traj files (searched recursively)")
+    parser.add_argument("--n_dir", type=Path, nargs="+", required=True,
+                        help="Root directories of N-binding .traj files (searched recursively)")
+    parser.add_argument("--o_dir", type=Path, nargs="+", required=True,
+                        help="Root directories of O-binding .traj files (searched recursively)")
     parser.add_argument("--out", type=Path, default=Path("n_o_matches.csv"),
                         help="Output CSV path")
     parser.add_argument("--energy_key", default="computed_binding_E",
@@ -202,17 +202,17 @@ def main():
     parser.add_argument("--num_workers", type=int, default=8, help="Parallel workers")
     args = parser.parse_args()
 
-    n_records = load_records(root=args.n_dir, energy_key=args.energy_key,
+    n_records = load_records(roots=args.n_dir, energy_key=args.energy_key,
                              num_workers=args.num_workers, label="N")
-    o_records = load_records(root=args.o_dir, energy_key=args.energy_key,
+    o_records = load_records(roots=args.o_dir, energy_key=args.energy_key,
                              num_workers=args.num_workers, label="O")
 
     pairs = find_matches(n_records=n_records, o_records=o_records,
                          num_workers=args.num_workers)
     write_csv(pairs=pairs, out_path=args.out)
 
-    print(f"N set: {len(n_records)} structures from {args.n_dir}")
-    print(f"O set: {len(o_records)} structures from {args.o_dir}")
+    print(f"N set: {len(n_records)} structures from {', '.join(map(str, args.n_dir))}")
+    print(f"O set: {len(o_records)} structures from {', '.join(map(str, args.o_dir))}")
     print(f"Wrote {args.out}: {len(pairs)} matching pairs "
           f"({len({n.name for n, _ in pairs})} distinct N files, "
           f"{len({o.name for _, o in pairs})} distinct O files)")
