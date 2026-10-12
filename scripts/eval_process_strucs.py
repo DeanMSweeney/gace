@@ -96,6 +96,15 @@ def _rebuild_slab_from_prim(atoms: Atoms) -> Atoms:
     )
 
 
+def rebuild_slabs_parallel(atoms: list, num_workers: int) -> list:
+    """Rebuild bare slabs from primitive cell + M in parallel; skips None entries."""
+    atoms = [a for a in atoms if a is not None]
+    log.info(f"Rebuilding {len(atoms)} slabs from primitive cell ({num_workers} workers)...")
+    with Pool(processes=num_workers) as pool:
+        return list(tqdm(pool.imap(_rebuild_slab_from_prim, atoms, chunksize=8),
+                         total=len(atoms), desc="Rebuilding slabs"))
+
+
 def _atoms_to_slab_structures(atoms_iter) -> list:
     """Convert an iterable of full Atoms to slab-only pymatgen Structures.
 
@@ -355,7 +364,7 @@ def main(**kwargs):
     gen_atoms = list(preloaded.values())
     # Only the generated set is rebuilt; reference structures and sanitize/relax use stored positions.
     if args.rebuild_from_prim:
-        gen_atoms = [_rebuild_slab_from_prim(a) for a in gen_atoms if a is not None]
+        gen_atoms = rebuild_slabs_parallel(gen_atoms, args.num_workers)
 
     # Uniqueness and novelty are pure post-processing passes over the loaded set.
     uniqueness = compute_uniqueness(gen_atoms) if args.eval_uniqueness else None
