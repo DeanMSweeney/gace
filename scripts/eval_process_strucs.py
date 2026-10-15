@@ -137,6 +137,19 @@ def compute_uniqueness(atoms: list) -> dict:
     return {f"uniqueness ({len(structures)})": uniqueness}
 
 
+def compute_composition_uniqueness(atoms: list) -> dict:
+    """Fraction of distinct slab reduced formulas among generated slabs.
+
+    Composition-only counterpart to compute_uniqueness; adsorbate (tags == 2) stripped.
+    Returns e.g. {'composition_uniqueness (500)': 0.07}.
+    """
+    structures = _atoms_to_slab_structures(atoms)
+    if not structures:
+        return {"composition_uniqueness (0)": 0.0}
+    formulas = {s.composition.reduced_formula for s in structures}
+    return {f"composition_uniqueness ({len(structures)})": len(formulas) / len(structures)}
+
+
 # Per-worker globals, populated once per process by _init_novelty_worker so the
 # (large) reference set is shipped to each worker once rather than per task.
 _NOVELTY_REF_STRUCTURES: list | None = None
@@ -261,6 +274,7 @@ def format_report(
     seed: int | None,
     novelty: dict | None = None,
     composition_novelty: dict | None = None,
+    composition_uniqueness: dict | None = None,
 ) -> str:
     from datetime import datetime
     lines = [
@@ -273,6 +287,11 @@ def format_report(
     if uniqueness is not None:
         lines += ["", "Uniqueness"]
         for key, val in uniqueness.items():
+            lines.append(f"  {key} : {val:.4f}")
+
+    if composition_uniqueness is not None:
+        lines += ["", "Composition uniqueness"]
+        for key, val in composition_uniqueness.items():
             lines.append(f"  {key} : {val:.4f}")
 
     if novelty is not None:
@@ -368,6 +387,7 @@ def main(**kwargs):
 
     # Uniqueness and novelty are pure post-processing passes over the loaded set.
     uniqueness = compute_uniqueness(gen_atoms) if args.eval_uniqueness else None
+    composition_uniqueness = compute_composition_uniqueness(gen_atoms) if args.eval_uniqueness else None
 
     novelty = None
     composition_novelty = None
@@ -418,6 +438,7 @@ def main(**kwargs):
         novelty=novelty,
         composition_novelty=composition_novelty,
         uniqueness=uniqueness,
+        composition_uniqueness=composition_uniqueness,
         sanitisation=sanitisation,
         n_strucs=args.n_strucs if (args.sanitize or args.relax or args.dedupe) else None,
         seed=args.seed if (args.sanitize or args.relax or args.dedupe) else None,
