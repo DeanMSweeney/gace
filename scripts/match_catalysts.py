@@ -7,12 +7,10 @@ eval_process_strucs.py uses. Writes one CSV row per matching (A, B) pair; an A f
 matching several B files produces several rows. Every distinct matched A file is also
 copied into --unique_A_dir.
 
-Usage:
+Usage (writes n_o_matches_metadata.csv and unique_n/ by default):
     python scripts/match_catalysts.py \
         --A_dir ./n_relaxed/1_threshold ./n_relaxed/2_threshold --A_label N \
-        --B_dir ./o_relaxed/1_threshold ./o_relaxed/2_threshold --B_label O \
-        --out ./n_o_matches.csv \
-        --unique_A_dir ./unique_n
+        --B_dir ./o_relaxed/1_threshold ./o_relaxed/2_threshold --B_label O
 """
 
 import argparse
@@ -220,13 +218,20 @@ def main():
                         help="Name of set A's adsorbate, e.g. N; used in CSV columns and logs")
     parser.add_argument("--B_label", required=True,
                         help="Name of set B's adsorbate, e.g. O; used in CSV columns and logs")
-    parser.add_argument("--out", type=Path, required=True, help="Output CSV path")
-    parser.add_argument("--unique_A_dir", type=Path, required=True,
-                        help="Directory to copy every distinct matched A .traj into")
+    parser.add_argument("--out", type=Path, default=None,
+                        help="Output CSV path (default: <a>_<b>_matches_metadata.csv)")
+    parser.add_argument("--unique_A_dir", type=Path, default=None,
+                        help="Directory to copy every distinct matched A .traj into "
+                             "(default: unique_<a>)")
     parser.add_argument("--energy_key", default="computed_binding_E",
                         help="atoms.info key holding the binding energy")
     parser.add_argument("--num_workers", type=int, default=8, help="Parallel workers")
     args = parser.parse_args()
+    a, b = args.A_label.lower(), args.B_label.lower()
+    if args.out is None:
+        args.out = Path(f"{a}_{b}_matches_metadata.csv")
+    if args.unique_A_dir is None:
+        args.unique_A_dir = Path(f"unique_{a}")
 
     a_records = load_records(roots=args.A_dir, energy_key=args.energy_key,
                              num_workers=args.num_workers, label=args.A_label)
