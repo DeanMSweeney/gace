@@ -7,7 +7,7 @@ eval_process_strucs.py uses. Writes one CSV row per matching (A, B) pair; an A f
 matching several B files produces several rows. Every distinct matched A file is also
 copied into --unique_A_dir.
 
-Usage (writes n_o_matches_metadata.csv and unique_n/ by default):
+Usage (writes n_o_matches_metadata.csv and matching_catalyst_by_n/ by default):
     python scripts/match_catalysts.py \
         --A_dir ./n_relaxed/1_threshold ./n_relaxed/2_threshold --A_label N \
         --B_dir ./o_relaxed/1_threshold ./o_relaxed/2_threshold --B_label O
@@ -16,6 +16,7 @@ Usage (writes n_o_matches_metadata.csv and unique_n/ by default):
 import argparse
 import csv
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from multiprocessing import Pool
 from pathlib import Path
@@ -193,17 +194,24 @@ def write_csv(pairs: list[tuple[Record, Record]], out_path: Path,
             ])
 
 
-def copy_unique_a(pairs: list[tuple[Record, Record]], out_dir: Path) -> int:
-    """Copy each distinct matched A file into out_dir, keeping its relative name."""
+def copy_unique_a(pairs: list[tuple[Record, Record]], out_dir: Path,
+                  num_workers: int) -> int:
+    """Copy each distinct matched A file into out_dir, keeping its relative name.
+
+    Threads, not processes: the copy is I/O-bound.
+    """
     unique = {a_rec.path: a_rec for a_rec, _ in pairs}
     names = [rec.name for rec in unique.values()]
     if len(set(names)) != len(names):
         raise RuntimeError("Distinct A files share a relative name across --A_dir roots; "
                            "copying them flat into one directory would overwrite files")
-    for rec in unique.values():
-        dst = out_dir / rec.name
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(rec.path, dst)
+    jobs = [(rec.path, out_dir / rec.name) for rec in unique.values()]
+    for parent in {dst.parent for _, dst in jobs}:
+        parent.mkdir(parents=True, exist_ok=True)
+    with ThreadPoolExecutor(max_workers=num_workers) as pool:
+        # list() so any copy error is raised here
+        list(tqdm(pool.map(lambda job: shutil.copy2(*job), jobs),
+                  total=len(jobs), desc="Copying matched A files"))
     return len(unique)
 
 
@@ -222,7 +230,7 @@ def main():
                         help="Output CSV path (default: <a>_<b>_matches_metadata.csv)")
     parser.add_argument("--unique_A_dir", type=Path, default=None,
                         help="Directory to copy every distinct matched A .traj into "
-                             "(default: unique_<a>)")
+                             "(default: matching_catalyst_by_<a>)")
     parser.add_argument("--energy_key", default="computed_binding_E",
                         help="atoms.info key holding the binding energy")
     parser.add_argument("--num_workers", type=int, default=8, help="Parallel workers")
@@ -231,7 +239,7 @@ def main():
     if args.out is None:
         args.out = Path(f"{a}_{b}_matches_metadata.csv")
     if args.unique_A_dir is None:
-        args.unique_A_dir = Path(f"unique_{a}")
+        args.unique_A_dir = Path(f"matching_catalyst_by_{a}")
 
     a_records = load_records(roots=args.A_dir, energy_key=args.energy_key,
                              num_workers=args.num_workers, label=args.A_label)
@@ -242,7 +250,8 @@ def main():
                          num_workers=args.num_workers,
                          a_label=args.A_label, b_label=args.B_label)
     write_csv(pairs=pairs, out_path=args.out, a_label=args.A_label, b_label=args.B_label)
-    n_copied = copy_unique_a(pairs=pairs, out_dir=args.unique_A_dir)
+    n_copied = copy_unique_a(pairs=pairs, out_dir=args.unique_A_dir,
+                             num_workers=args.num_workers)
 
     print(f"{args.A_label} set: {len(a_records)} structures from "
           f"{', '.join(map(str, args.A_dir))}")
