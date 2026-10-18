@@ -125,8 +125,10 @@ def build_atoms(data, idx: int, sid: int, ads_id: int, formula: str,
         tags    = _to_np(data.tags).astype(int).flatten()
         numbers = _to_np(data.atomic_numbers).astype(int).flatten()
         cell    = _to_np(data.cell).reshape(3, 3)
-        pos     = _to_np(data.pos_relaxed if positions == "relaxed" else data.pos)
-    except AttributeError:
+        # Read from __dict__: these are PyG 1.x pickles, and PyG 2.x's Data.pos
+        # property looks in a _store that old objects don't have.
+        pos     = _to_np(data.__dict__["pos_relaxed" if positions == "relaxed" else "pos"])
+    except (AttributeError, KeyError):
         return None
 
     if not (tags == 2).any():

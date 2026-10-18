@@ -1,104 +1,93 @@
-"""Collect convergence info for every slab/adslab run and compute OC20-referenced *H adsorption energies.
+"""Set up and submit OC20-style VASP slab + adslab relaxations for each .traj file.
 
-    python collect_convergence.py --runs_dir HER_DFT --out_prefix her_dft
-Writes <prefix>_runs.csv (one row per run) and <prefix>_ads.csv (one row per system).
+Run from a directory containing INCAR and VASP.sh:
+    python optimize_structures.py --traj_dir path/to/trajs --out_dir path/to/runs
 """
 import argparse
-import csv
-import re
-from collections import Counter
-from concurrent.futures import ProcessPoolExecutor, as_completed
+import shutil
+import subprocess
+import time
 from pathlib import Path
 
 import numpy as np
-from ase.io import read
+from ase.constraints import FixAtoms
+from ase.io import read, write
 from tqdm import tqdm
 
-E_H = -3.477  # OC20 H reference (eV)
-
-E0_RE = re.compile(r"energy\(sigma->0\) =\s+(-?[\d.]+)")
-F_RE = re.compile(r"free  energy   TOTEN  =\s+(-?[\d.]+)")
-LOOP_RE = re.compile(r"LOOP\+:")
-ELAPSED_RE = re.compile(r"Elapsed time \(sec\):\s+([\d.]+)")
+POTCAR_SCRIPT = "/home/dsweeney3/scripts/potcar.sh"
 
 
-def max_free_force(run_dir, text):
-    # Max force norm on unconstrained atoms from the last TOTAL-FORCE block
-    try:
-        ref = read(run_dir / "POSCAR")
-        idx = text.rindex("TOTAL-FORCE")
-        lines = text[idx:].splitlines()[2:2 + len(ref)]
-        forces = np.array([line.split()[3:6] for line in lines], dtype=float)
-    except Exception:
-        return None
-    free = np.ones(len(ref), dtype=bool)
-    for c in ref.constraints:
-        free[c.get_indices()] = False
-    forces = forces[free]
-    return round(float(np.linalg.norm(forces, axis=1).max()), 4) if len(forces) else None
+def oc20_kpoints(atoms):
+    # Matches fairchem calculate_surface_k_points (infinity norm, multiplier 40)
+    cell = atoms.get_cell()
+    kx = max(1, int(round(40 / np.linalg.norm(cell[0], ord=np.inf))))
+    ky = max(1, int(round(40 / np.linalg.norm(cell[1], ord=np.inf))))
+    return kx, ky
 
 
-def parse_run(run_dir):
-    row = {"system": run_dir.parent.name, "run": run_dir.name, "status": "not_started",
-           "n_ionic_steps": 0, "e0": None, "free_energy": None, "fmax": None, "elapsed_s": None}
-    outcar = run_dir / "OUTCAR"
-    if not outcar.exists():
-        return row
-    text = outcar.read_text(errors="ignore")
-    e0 = E0_RE.findall(text)
-    f = F_RE.findall(text)
-    elapsed = ELAPSED_RE.search(text)
-    row["n_ionic_steps"] = len(LOOP_RE.findall(text))
-    row["e0"] = float(e0[-1]) if e0 else None
-    row["free_energy"] = float(f[-1]) if f else None
-    row["elapsed_s"] = float(elapsed.group(1)) if elapsed else None
-    row["fmax"] = max_free_force(run_dir, text)
-    if "reached required accuracy" in text:
-        row["status"] = "converged"
-    elif elapsed:
-        row["status"] = "hit_nsw"  # finished normally without meeting EDIFFG
-    else:
-        row["status"] = "incomplete"  # running, walltime, or crashed
-    return row
+def prep_atoms(atoms):
+    # Enforce right-handed cell, as fairchem does before writing inputs
+    if np.dot(np.cross(atoms.cell[0], atoms.cell[1]), atoms.cell[2]) < 0:
+        atoms.set_cell(atoms.cell[[1, 0, 2], :])
+    # Fix subsurface atoms (tag 0) if no constraints came with the traj
+    if not atoms.constraints:
+        atoms.set_constraint(FixAtoms(mask=atoms.get_tags() == 0))
+    return atoms
 
 
-def process_system(system_dir):
-    slab = parse_run(system_dir / "slab")
-    adslab = parse_run(system_dir / "adslab")
-    e_ads = None
-    if slab["status"] == adslab["status"] == "converged":
-        e_ads = round(adslab["e0"] - slab["e0"] - E_H, 4)
-    ads = {"system": system_dir.name, "e_slab": slab["e0"], "e_adslab": adslab["e0"], "e_ads": e_ads}
-    return [slab, adslab], ads
+def sbatch_with_retry(run_dir, job_name, retries=5, wait=10):
+    for _ in range(retries):
+        result = subprocess.run(["sbatch", f"--job-name={job_name}", "VASP.sh"], cwd=run_dir,
+                                stdout=subprocess.DEVNULL)
+        if result.returncode == 0:
+            (run_dir / ".submitted").touch()
+            return
+        time.sleep(wait)
+    raise RuntimeError(f"sbatch failed {retries} times for {run_dir}")
+
+
+def queued_dirs():
+    out = subprocess.run(["squeue", "--me", "-h", "-o", "%Z"], capture_output=True, text=True, check=True)
+    return {Path(p).resolve() for p in out.stdout.split()}
+
+
+def already_handled(run_dir, queued):
+    return ((run_dir / ".submitted").exists() or (run_dir / "OUTCAR").exists()
+            or run_dir.resolve() in queued)
+
+
+def setup_and_submit(atoms, run_dir, launch_dir, submit, job_name, queued):
+    if already_handled(run_dir, queued):
+        return
+    run_dir.mkdir(parents=True, exist_ok=True)
+    write(run_dir / "POSCAR", atoms, format="vasp", direct=True, sort=True)
+    for name in ("INCAR", "VASP.sh"):
+        shutil.copy(launch_dir / name, run_dir / name)
+    kx, ky = oc20_kpoints(atoms)
+    (run_dir / "KPOINTS").write_text(f"Automatic mesh\n0\nMonkhorst-Pack\n{kx} {ky} 1\n0 0 0\n")
+    subprocess.run(["bash", POTCAR_SCRIPT], cwd=run_dir, check=True, stdout=subprocess.DEVNULL)
+    if submit:
+        sbatch_with_retry(run_dir, job_name)
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--runs_dir", required=True)
-    parser.add_argument("--out_prefix", default="convergence")
-    parser.add_argument("--n_workers", type=int, default=8)
+    parser.add_argument("--traj_dir", required=True)
+    parser.add_argument("--out_dir", default=".")
+    parser.add_argument("--frame", type=int, default=-1, help="traj frame to use")
+    parser.add_argument("--no_submit", action="store_true", help="write inputs only")
     args = parser.parse_args()
 
-    system_dirs = sorted(d for d in Path(args.runs_dir).iterdir() if (d / "adslab").is_dir())
-    run_rows, ads_rows = [], []
-    with ProcessPoolExecutor(max_workers=args.n_workers) as pool:
-        futures = [pool.submit(process_system, d) for d in system_dirs]
-        for fut in tqdm(as_completed(futures), total=len(futures), unit="system"):
-            runs, ads = fut.result()
-            run_rows += runs
-            ads_rows.append(ads)
-    run_rows.sort(key=lambda r: (r["system"], r["run"]))
-    ads_rows.sort(key=lambda r: r["system"])
+    launch_dir = Path.cwd()
+    out_dir = Path(args.out_dir)
+    queued = queued_dirs()
 
-    for suffix, rows in (("runs", run_rows), ("ads", ads_rows)):
-        with open(f"{args.out_prefix}_{suffix}.csv", "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=rows[0].keys())
-            writer.writeheader()
-            writer.writerows(rows)
-
-    counts = Counter(r["status"] for r in run_rows)
-    print("Run status:", dict(counts))
-    print(f"Systems with E_ads: {sum(r['e_ads'] is not None for r in ads_rows)}/{len(ads_rows)}")
+    for traj in tqdm(sorted(Path(args.traj_dir).glob("*.traj")), unit="system"):
+        adslab = prep_atoms(read(traj, index=args.frame))
+        slab = adslab[adslab.get_tags() != 2]
+        system_dir = out_dir / traj.stem
+        setup_and_submit(slab, system_dir / "slab", launch_dir, not args.no_submit, traj.stem, queued)
+        setup_and_submit(adslab, system_dir / "adslab", launch_dir, not args.no_submit, traj.stem, queued)
 
 
 if __name__ == "__main__":

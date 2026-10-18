@@ -16,10 +16,13 @@ from multiprocessing import Pool
 import pathlib 
 
 import ase.io
+import numpy as np
 from ase import Atoms
 from pymatgen.analysis.structure_matcher import StructureMatcher
 from pymatgen.io.ase import AseAtomsAdaptor
 from tqdm import tqdm
+
+from gace.utils.builder import build_slab_adsorbate
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +69,42 @@ def load_atoms_parallel(files: list[str], num_workers: int) -> dict[str, "Atoms 
     return dict(pairs)
 
 
+def _rebuild_slab_from_prim(atoms: Atoms) -> Atoms:
+    """Rebuild the bare slab from atoms.info's primitive cell and supercell matrix M.
+
+    A .traj round-trip may return the primitive cell as Atoms or as an Atoms.todict() dict.
+    """
+    prim = atoms.info["primitive_cell"]
+    if isinstance(prim, dict):
+        prim = Atoms(numbers=np.asarray(prim["numbers"]),
+                     positions=np.asarray(prim["positions"]),
+                     cell=np.asarray(prim["cell"]),
+                     pbc=prim.get("pbc", True))
+    elif not isinstance(prim, Atoms):
+        raise TypeError(f"primitive_cell is a {type(prim).__name__}, expected Atoms or dict")
+
+    M = np.asarray(atoms.info["transformation_matrix"], dtype=float)
+    a, b, c, alpha, beta, gamma = prim.cell.cellpar()
+    return build_slab_adsorbate(
+        prim_pos=prim.get_positions(),
+        prim_atomic_numbers=prim.get_atomic_numbers(),
+        lattice_params=np.array([a, b, c, np.radians(alpha), np.radians(beta), np.radians(gamma)]),
+        transformation_matrix=M,
+        ads_pos=np.empty((0, 3)),
+        ads_atomic_numbers=np.empty((0,), dtype=int),
+        vacuum=20.0,
+    )
+
+
+def rebuild_slabs_parallel(atoms: list, num_workers: int) -> list:
+    """Rebuild bare slabs from primitive cell + M in parallel; skips None entries."""
+    atoms = [a for a in atoms if a is not None]
+    log.info(f"Rebuilding {len(atoms)} slabs from primitive cell ({num_workers} workers)...")
+    with Pool(processes=num_workers) as pool:
+        return list(tqdm(pool.imap(_rebuild_slab_from_prim, atoms, chunksize=8),
+                         total=len(atoms), desc="Rebuilding slabs"))
+
+
 def _atoms_to_slab_structures(atoms_iter) -> list:
     """Convert an iterable of full Atoms to slab-only pymatgen Structures.
 
@@ -96,6 +135,19 @@ def compute_uniqueness(atoms: list) -> dict:
     groups = StructureMatcher().group_structures(structures)
     uniqueness = len(groups) / len(structures) if structures else 0.0
     return {f"uniqueness ({len(structures)})": uniqueness}
+
+
+def compute_composition_uniqueness(atoms: list) -> dict:
+    """Fraction of distinct slab reduced formulas among generated slabs.
+
+    Composition-only counterpart to compute_uniqueness; adsorbate (tags == 2) stripped.
+    Returns e.g. {'composition_uniqueness (500)': 0.07}.
+    """
+    structures = _atoms_to_slab_structures(atoms)
+    if not structures:
+        return {"composition_uniqueness (0)": 0.0}
+    formulas = {s.composition.reduced_formula for s in structures}
+    return {f"composition_uniqueness ({len(structures)})": len(formulas) / len(structures)}
 
 
 # Per-worker globals, populated once per process by _init_novelty_worker so the
@@ -222,6 +274,7 @@ def format_report(
     seed: int | None,
     novelty: dict | None = None,
     composition_novelty: dict | None = None,
+    composition_uniqueness: dict | None = None,
 ) -> str:
     from datetime import datetime
     lines = [
@@ -234,6 +287,11 @@ def format_report(
     if uniqueness is not None:
         lines += ["", "Uniqueness"]
         for key, val in uniqueness.items():
+            lines.append(f"  {key} : {val:.4f}")
+
+    if composition_uniqueness is not None:
+        lines += ["", "Composition uniqueness"]
+        for key, val in composition_uniqueness.items():
             lines.append(f"  {key} : {val:.4f}")
 
     if novelty is not None:
@@ -295,6 +353,7 @@ def parse_args():
     p.add_argument("--traj_dirs", nargs="+", help="One or more directories of generated structure files")
     p.add_argument("--eval_uniqueness", default=False, action="store_true", help="Run structural uniqueness check")
     p.add_argument("--eval_novelty_against", default=None, help="Directory of reference structures (e.g. OC20); reports fraction of generated slabs absent from it")
+    p.add_argument("--rebuild_from_prim", default=False, action="store_true", help="For uniqueness/novelty, rebuild generated slabs from atoms.info's primitive cell and M instead of using stored positions")
     p.add_argument("--sanitize", default=False, action="store_true", help="Run sanitisation checks")
     p.add_argument("--dedupe", default=False, action="store_true", help="Mark duplicate slabs (records is_unique); requires --sanitize")
     p.add_argument("--relax", default=False, action="store_true", help="Relax structures with the MLFF and report binding energies")
@@ -322,9 +381,13 @@ def main(**kwargs):
     files = collect_structure_files(args.traj_dirs)
     preloaded = load_atoms_parallel(files, args.num_workers)
     gen_atoms = list(preloaded.values())
+    # Only the generated set is rebuilt; reference structures and sanitize/relax use stored positions.
+    if args.rebuild_from_prim:
+        gen_atoms = rebuild_slabs_parallel(gen_atoms, args.num_workers)
 
     # Uniqueness and novelty are pure post-processing passes over the loaded set.
     uniqueness = compute_uniqueness(gen_atoms) if args.eval_uniqueness else None
+    composition_uniqueness = compute_composition_uniqueness(gen_atoms) if args.eval_uniqueness else None
 
     novelty = None
     composition_novelty = None
@@ -375,6 +438,7 @@ def main(**kwargs):
         novelty=novelty,
         composition_novelty=composition_novelty,
         uniqueness=uniqueness,
+        composition_uniqueness=composition_uniqueness,
         sanitisation=sanitisation,
         n_strucs=args.n_strucs if (args.sanitize or args.relax or args.dedupe) else None,
         seed=args.seed if (args.sanitize or args.relax or args.dedupe) else None,

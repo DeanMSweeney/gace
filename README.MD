@@ -7,7 +7,7 @@
 ![Config](https://img.shields.io/badge/Config-gray?style=flat)
 ![Hydra](https://img.shields.io/badge/Hydra-89CFF0?style=flat)
 
-![alt text](concept_art.png)
+![alt text](gace_logo.png)
 
 ## Overview
 
