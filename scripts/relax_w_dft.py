@@ -76,6 +76,7 @@ def main():
     parser.add_argument("--out_dir", default=".")
     parser.add_argument("--frame", type=int, default=-1, help="traj frame to use")
     parser.add_argument("--no_submit", action="store_true", help="write inputs only")
+    parser.add_argument("--adslab_only", action="store_true", help="skip the clean slab relaxation")
     args = parser.parse_args()
 
     launch_dir = Path.cwd()
@@ -84,9 +85,10 @@ def main():
 
     for traj in tqdm(sorted(Path(args.traj_dir).glob("*.traj")), unit="system"):
         adslab = prep_atoms(read(traj, index=args.frame))
-        slab = adslab[adslab.get_tags() != 2]
         system_dir = out_dir / traj.stem
-        setup_and_submit(slab, system_dir / "slab", launch_dir, not args.no_submit, traj.stem, queued)
+        if not args.adslab_only:
+            slab = adslab[adslab.get_tags() != 2]
+            setup_and_submit(slab, system_dir / "slab", launch_dir, not args.no_submit, traj.stem, queued)
         setup_and_submit(adslab, system_dir / "adslab", launch_dir, not args.no_submit, traj.stem, queued)
 
 
