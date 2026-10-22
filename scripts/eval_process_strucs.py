@@ -105,24 +105,27 @@ def rebuild_slabs_parallel(atoms: list, num_workers: int) -> list:
                          total=len(atoms), desc="Rebuilding slabs"))
 
 
+def _atoms_to_slab_structure(a: "Atoms | None"):
+    """Convert full Atoms to a slab-only pymatgen Structure; None if None / empty / unconvertible."""
+    if a is None:
+        return None
+    try:
+        slab = a[a.get_tags() != 2]
+        slab.center(vacuum=20, axis=2)
+        if len(slab) == 0:
+            return None
+        return AseAtomsAdaptor().get_structure(slab)
+    except Exception:
+        return None
+
+
 def _atoms_to_slab_structures(atoms_iter) -> list:
     """Convert an iterable of full Atoms to slab-only pymatgen Structures.
 
     Strips adsorbate atoms (tags == 2); skips None / empty / unconvertible slabs.
     """
-    structures = []
-    for a in atoms_iter:
-        if a is None:
-            continue
-        try:
-            slab = a[a.get_tags() != 2]
-            slab.center(vacuum=20, axis=2)
-            if len(slab) == 0:
-                continue
-            structures.append(AseAtomsAdaptor().get_structure(slab))
-        except Exception:
-            continue
-    return structures
+    structures = (_atoms_to_slab_structure(a) for a in atoms_iter)
+    return [s for s in structures if s is not None]
 
 
 def compute_uniqueness(atoms: list) -> dict:
@@ -167,29 +170,51 @@ def _is_novel(struc) -> bool:
     return not any(_NOVELTY_MATCHER.fit(ref, struc) for ref in _NOVELTY_REF_STRUCTURES)
 
 
-def compute_novelty(atoms: list, reference_atoms: list, num_workers: int = 8) -> dict:
+def compute_novelty(atoms: list, paths: list[str], reference_atoms: list,
+                    num_workers: int = 8) -> tuple[dict, list[dict]]:
     """Fraction of generated slabs absent from a reference set (e.g. OC20).
 
     A generated slab is novel if it matches no reference slab under
     StructureMatcher. Each slab is compared independently against the fixed
     reference, so this measures pure novelty (no inter-generated dedup).
     Generated slabs are checked in parallel across num_workers processes.
-    Returns e.g. {'novelty (100)': 0.42}.
+    paths must align with atoms; unconvertible slabs are dropped from both outputs.
+    Returns ({'novelty (100)': 0.42}, per-file rows of path / formula / novel / composition_novel).
     """
-    gen_structures = _atoms_to_slab_structures(atoms)
+    if len(atoms) != len(paths):
+        raise ValueError(f"atoms ({len(atoms)}) and paths ({len(paths)}) are misaligned")
+    pairs = [(p, _atoms_to_slab_structure(a)) for p, a in zip(paths, atoms)]
+    pairs = [(p, s) for p, s in pairs if s is not None]
+    gen_structures = [s for _, s in pairs]
     ref_structures = _atoms_to_slab_structures(reference_atoms)
     log.info(f"Novelty: {len(gen_structures)} generated vs {len(ref_structures)} reference slabs "
              f"({num_workers} workers)")
 
     if not gen_structures:
-        return {"novelty (0)": 0.0}
+        return {"novelty (0)": 0.0}, []
 
     workers = max(1, min(num_workers, len(gen_structures)))
     with Pool(workers, initializer=_init_novelty_worker, initargs=(ref_structures,)) as pool:
         flags = list(tqdm(pool.imap(_is_novel, gen_structures, chunksize=8),
                           total=len(gen_structures), desc="Novelty check"))
+
+    ref_formulas = {s.composition.reduced_formula for s in ref_structures}
+    rows = []
+    for (path, s), novel in zip(pairs, flags):
+        formula = s.composition.reduced_formula
+        rows.append({"path": path, "formula": formula, "novel": novel,
+                     "composition_novel": formula not in ref_formulas})
+
     n_novel = sum(flags)
-    return {f"novelty ({len(gen_structures)})": n_novel / len(gen_structures)}
+    return {f"novelty ({len(gen_structures)})": n_novel / len(gen_structures)}, rows
+
+
+def write_novelty_csv(rows: list[dict], output_path: str) -> None:
+    with open(output_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["path", "formula", "novel", "composition_novel"])
+        writer.writeheader()
+        writer.writerows(rows)
+    log.info(f"Per-file novelty written to {output_path}")
 
 
 def compute_composition_novelty(atoms: list, reference_atoms: list) -> dict:
@@ -369,6 +394,7 @@ def parse_args():
     p.add_argument("--relaxed_strucs", default="./relaxed_strucs", help="Output directory for relaxed structures")
     p.add_argument("--sanitized_strucs", default="./sanitized_strucs", help="Output directory for sanitized structures")
     p.add_argument("--output", default="./eval_report.txt", help="Path for output report")
+    p.add_argument("--novelty_csv", default="./novelty.csv", help="Per-file novelty CSV (written with --eval_novelty_against)")
     return p.parse_args()
 
 
@@ -380,7 +406,9 @@ def main(**kwargs):
 
     files = collect_structure_files(args.traj_dirs)
     preloaded = load_atoms_parallel(files, args.num_workers)
-    gen_atoms = list(preloaded.values())
+    # Drop failed loads here so gen_paths stays aligned with gen_atoms through the rebuild.
+    gen_paths = [p for p, a in preloaded.items() if a is not None]
+    gen_atoms = [preloaded[p] for p in gen_paths]
     # Only the generated set is rebuilt; reference structures and sanitize/relax use stored positions.
     if args.rebuild_from_prim:
         gen_atoms = rebuild_slabs_parallel(gen_atoms, args.num_workers)
@@ -394,7 +422,9 @@ def main(**kwargs):
     if args.eval_novelty_against:
         ref_files = collect_structure_files(args.eval_novelty_against)
         ref_atoms = list(load_atoms_parallel(ref_files, args.num_workers).values())
-        novelty = compute_novelty(gen_atoms, ref_atoms, num_workers=args.num_workers)
+        novelty, novelty_rows = compute_novelty(gen_atoms, paths=gen_paths, reference_atoms=ref_atoms,
+                                                num_workers=args.num_workers)
+        write_novelty_csv(rows=novelty_rows, output_path=args.novelty_csv)
         composition_novelty = compute_composition_novelty(gen_atoms, ref_atoms)
 
     sanitisation = None
