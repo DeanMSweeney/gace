@@ -377,7 +377,7 @@ def parse_args():
     p = argparse.ArgumentParser(description="Evaluate forge-generated structures.")
     p.add_argument("--traj_dirs", nargs="+", help="One or more directories of generated structure files")
     p.add_argument("--eval_uniqueness", default=False, action="store_true", help="Run structural uniqueness check")
-    p.add_argument("--eval_novelty_against", default=None, help="Directory of reference structures (e.g. OC20); reports fraction of generated slabs absent from it")
+    p.add_argument("--eval_novelty_against", nargs="+", default=None, help="One or more directories of reference structures (e.g. OC20); reports fraction of generated slabs absent from them")
     p.add_argument("--rebuild_from_prim", default=False, action="store_true", help="For uniqueness/novelty, rebuild generated slabs from atoms.info's primitive cell and M instead of using stored positions")
     p.add_argument("--sanitize", default=False, action="store_true", help="Run sanitisation checks")
     p.add_argument("--dedupe", default=False, action="store_true", help="Mark duplicate slabs (records is_unique); requires --sanitize")
