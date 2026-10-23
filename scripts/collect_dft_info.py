@@ -62,7 +62,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--runs_dir", required=True)
     parser.add_argument("--out_prefix", default="convergence")
-    parser.add_argument("--e_ref", type=float, required=True,
+    parser.add_argument("--e_ref", type=float,
                         help="Gas-phase reference energy of the adsorbate (eV)")
     parser.add_argument("--adslab_only", action="store_true",
                         help="Only collect adslab runs; skip slabs and E_ads")
