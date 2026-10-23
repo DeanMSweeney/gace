@@ -132,7 +132,8 @@ _MATCHER: "StructureMatcher | None" = None
 def _init_match_worker(b_structures: list) -> None:
     global _B_STRUCTURES, _MATCHER
     _B_STRUCTURES = b_structures
-    _MATCHER = StructureMatcher()
+    _MATCHER = StructureMatcher(primitive_cell=False, scale=False, attempt_supercell=False,
+                                ltol=0.1, stol=0.1, angle_tol=2) #StructureMatcher()
 
 
 def _matches_for_a(a_structure) -> list[int]:
