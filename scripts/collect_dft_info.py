@@ -2,6 +2,7 @@
 
     python collect_convergence.py --runs_dir HER_DFT --out_prefix her_dft
 Writes <prefix>_runs.csv (one row per run) and <prefix>_ads.csv (one row per system).
+With --adslab_only, only adslab runs are parsed and only <prefix>_runs.csv is written.
 """
 import argparse
 import csv
@@ -12,8 +13,6 @@ from pathlib import Path
 import numpy as np
 from ase.io import read
 from tqdm import tqdm
-
-E_H = -3.477  # OC20 H reference (eV)
 
 E0_RE = re.compile(r"energy\(sigma->0\) =\s+(-?[\d.]+)")
 F_RE = re.compile(r"free  energy   TOTEN  =\s+(-?[\d.]+)")
@@ -63,22 +62,30 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--runs_dir", required=True)
     parser.add_argument("--out_prefix", default="convergence")
+    parser.add_argument("--e_ref", type=float, required=True,
+                        help="Gas-phase reference energy of the adsorbate (eV)")
+    parser.add_argument("--adslab_only", action="store_true",
+                        help="Only collect adslab runs; skip slabs and E_ads")
     args = parser.parse_args()
 
     system_dirs = sorted(d for d in Path(args.runs_dir).iterdir() if (d / "adslab").is_dir())
     run_rows, ads_rows = [], []
     for system_dir in tqdm(system_dirs, unit="system"):
-        slab = parse_run(system_dir / "slab")
         adslab = parse_run(system_dir / "adslab")
+        if args.adslab_only:
+            run_rows.append(adslab)
+            continue
+        slab = parse_run(system_dir / "slab")
         run_rows += [slab, adslab]
 
         e_ads = None
         if slab["status"] == adslab["status"] == "converged":
-            e_ads = round(adslab["e0"] - slab["e0"] - E_H, 4)
+            e_ads = round(adslab["e0"] - slab["e0"] - args.e_ref, 4)
         ads_rows.append({"system": system_dir.name,
                          "e_slab": slab["e0"], "e_adslab": adslab["e0"], "e_ads": e_ads})
 
-    for suffix, rows in (("runs", run_rows), ("ads", ads_rows)):
+    outputs = [("runs", run_rows)] if args.adslab_only else [("runs", run_rows), ("ads", ads_rows)]
+    for suffix, rows in outputs:
         with open(f"{args.out_prefix}_{suffix}.csv", "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=rows[0].keys())
             writer.writeheader()
@@ -86,7 +93,8 @@ def main():
 
     counts = Counter(r["status"] for r in run_rows)
     print("Run status:", dict(counts))
-    print(f"Systems with E_ads: {sum(r['e_ads'] is not None for r in ads_rows)}/{len(ads_rows)}")
+    if not args.adslab_only:
+        print(f"Systems with E_ads: {sum(r['e_ads'] is not None for r in ads_rows)}/{len(ads_rows)}")
 
 
 if __name__ == "__main__":
