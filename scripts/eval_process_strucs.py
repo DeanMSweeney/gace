@@ -111,7 +111,7 @@ def _atoms_to_slab_structure(a: "Atoms | None"):
         return None
     try:
         slab = a[a.get_tags() != 2]
-        slab.center(vacuum=20, axis=2)
+        slab.center(vacuum=10, axis=2)
         if len(slab) == 0:
             return None
         return AseAtomsAdaptor().get_structure(slab)
