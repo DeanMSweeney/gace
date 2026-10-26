@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Find catalyst slabs present in two structure sets with different adsorbates.
 
-Strips the adsorbate (tags == 2) from every structure in each set and compares the
-remaining slabs with pymatgen's StructureMatcher — the same rule the novelty check in
-eval_process_strucs.py uses. Writes one CSV row per matching (A, B) pair; an A file
+Strips the adsorbate (tags == 2) from every structure in each set, rotates each slab so
+its surface normal is +z, and compares the remaining slabs with NoFlipMatcher (imported
+from eval_process_strucs.py, so both scripts canonicalize the same way). Writes one CSV row per matching (A, B) pair; an A file
 matching several B files produces several rows. Every distinct matched A file is also
 copied into --unique_A_dir.
 
@@ -23,8 +23,9 @@ from pathlib import Path
 
 import ase.io
 from pymatgen.analysis.structure_matcher import StructureMatcher
-from pymatgen.io.ase import AseAtomsAdaptor
 from tqdm import tqdm
+
+from eval_process_strucs import NoFlipMatcher, _canonical_structure
 
 ADSORBATE_TAG = 2
 VACUUM = 20.0  # Å; must match between the two sets or the fits are meaningless
@@ -84,7 +85,10 @@ def _load_record(root_and_path: tuple[Path, Path]) -> "Record | str":
         return f"{name}: missing atoms.info['{_LOAD_ENERGY_KEY}']"
 
     slab.center(vacuum=VACUUM, axis=2)
-    structure = AseAtomsAdaptor().get_structure(slab)
+    try:
+        structure = _canonical_structure(slab)
+    except ValueError as e:
+        return f"{name}: {e}"
     matcher = StructureMatcher()
     reduced = matcher._get_reduced_structure(structure, matcher._primitive_cell, niggli=True)
     return Record(
@@ -126,13 +130,13 @@ def load_records(roots: list[Path], energy_key: str, num_workers: int,
 # Set once per worker process by _init_match_worker so the B set is shipped to each
 # worker once rather than once per task.
 _B_STRUCTURES: list | None = None
-_MATCHER: "StructureMatcher | None" = None
+_MATCHER: "NoFlipMatcher | None" = None
 
 
 def _init_match_worker(b_structures: list) -> None:
     global _B_STRUCTURES, _MATCHER
     _B_STRUCTURES = b_structures
-    _MATCHER = StructureMatcher(primitive_cell=False, scale=False, attempt_supercell=False,
+    _MATCHER = NoFlipMatcher(primitive_cell=False, scale=False, attempt_supercell=False,
                                 ltol=0.1, stol=0.1, angle_tol=2) #StructureMatcher()
 
 
