@@ -2,8 +2,8 @@
 """Find catalyst slabs present in two structure sets with different adsorbates.
 
 Strips the adsorbate (tags == 2) from every structure in each set, rotates each slab so
-its surface normal is +z, and compares the remaining slabs with NoFlipMatcher (imported
-from eval_process_strucs.py, so both scripts canonicalize the same way). Writes one CSV row per matching (A, B) pair; an A file
+its surface normal is +z, and compares the remaining slabs with SurfaceMatcher (from
+gace.utils.invar_surface_matching, shared with eval_process_strucs.py). Writes one CSV row per matching (A, B) pair; an A file
 matching several B files produces several rows. Every distinct matched A file is also
 copied into --unique_A_dir.
 
@@ -22,10 +22,9 @@ from multiprocessing import Pool
 from pathlib import Path
 
 import ase.io
-from pymatgen.analysis.structure_matcher import StructureMatcher
 from tqdm import tqdm
 
-from eval_process_strucs import NoFlipMatcher, _canonical_structure
+from gace.utils.invar_surface_matcher import SurfaceMatcher, canonical_repr
 
 ADSORBATE_TAG = 2
 VACUUM = 20.0  # Å; must match between the two sets or the fits are meaningless
@@ -86,11 +85,10 @@ def _load_record(root_and_path: tuple[Path, Path]) -> "Record | str":
 
     slab.center(vacuum=VACUUM, axis=2)
     try:
-        structure = _canonical_structure(slab)
+        structure = canonical_repr(slab)
     except ValueError as e:
         return f"{name}: {e}"
-    matcher = StructureMatcher()
-    reduced = matcher._get_reduced_structure(structure, matcher._primitive_cell, niggli=True)
+    reduced = SurfaceMatcher._get_reduced_structure(structure, primitive_cell=True, niggli=True)
     return Record(
         name=name,
         path=path,
@@ -130,14 +128,13 @@ def load_records(roots: list[Path], energy_key: str, num_workers: int,
 # Set once per worker process by _init_match_worker so the B set is shipped to each
 # worker once rather than once per task.
 _B_STRUCTURES: list | None = None
-_MATCHER: "NoFlipMatcher | None" = None
+_MATCHER: "SurfaceMatcher | None" = None
 
 
 def _init_match_worker(b_structures: list) -> None:
     global _B_STRUCTURES, _MATCHER
     _B_STRUCTURES = b_structures
-    _MATCHER = NoFlipMatcher(primitive_cell=False, scale=False, attempt_supercell=False,
-                                ltol=0.1, stol=0.1, angle_tol=2) #StructureMatcher()
+    _MATCHER = SurfaceMatcher()
 
 
 def _matches_for_a(a_structure) -> list[int]:
@@ -154,7 +151,7 @@ def _matches_for_a(a_structure) -> list[int]:
 
 def find_matches(a_records: list[Record], b_records: list[Record], num_workers: int,
                  a_label: str, b_label: str) -> list[tuple[Record, Record]]:
-    """All (A, B) pairs whose slabs match under StructureMatcher."""
+    """All (A, B) pairs whose slabs match under SurfaceMatcher."""
     b_structures = [r.structure for r in b_records]
     a_structures = [r.structure for r in a_records]
 
@@ -183,7 +180,7 @@ def write_csv(pairs: list[tuple[Record, Record]], out_path: Path,
             "reduced_formula",
         ])
         for a_rec, b_rec in pairs:
-            # A fit under StructureMatcher defaults (primitive_cell, scale) implies equal
+            # A fit under SurfaceMatcher defaults (primitive_cell, scale) implies equal
             # reduced formulas; a mismatch means that assumption broke.
             if a_rec.formula != b_rec.formula:
                 raise RuntimeError(

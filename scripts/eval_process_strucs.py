@@ -18,11 +18,11 @@ import pathlib
 import ase.io
 import numpy as np
 from ase import Atoms
-from pymatgen.analysis.structure_matcher import StructureMatcher
-from pymatgen.core import Lattice, Structure
 from tqdm import tqdm
 
 from gace.utils.builder import build_slab_adsorbate
+from gace.utils.invar_surface_matcher import SurfaceMatcher, canonical_repr
+from pymatgen.analysis.structure_matcher import StructureMatcher
 
 log = logging.getLogger(__name__)
 
@@ -105,45 +105,6 @@ def rebuild_slabs_parallel(atoms: list, num_workers: int) -> list:
                          total=len(atoms), desc="Rebuilding slabs"))
 
 
-class NoFlipMatcher(StructureMatcher):
-    """Rejects lattice mappings that reverse the surface normal (+z after canonicalization)."""
-    def _get_lattices(self, target_lattice, s, supercell_size=1):
-        for latt, sc_m in super()._get_lattices(target_lattice, s, supercell_size):
-            R = np.linalg.solve(target_lattice.matrix, latt.matrix)
-            if R[2, 2] > 0:
-                yield latt, sc_m
-
-
-def _up_normal(slab: Atoms, surface_mask: np.ndarray) -> np.ndarray:
-    """Unit normal to cell[0] x cell[1], pointing toward the surface atoms."""
-    n = np.cross(slab.cell[0], slab.cell[1])
-    n /= np.linalg.norm(n)
-    h = slab.positions @ n
-    if h[surface_mask].mean() < h.mean():
-        n = -n
-    return n
-
-
-def _rotation_to_z(n: np.ndarray) -> np.ndarray:
-    """Rotation matrix taking unit vector n onto +z (Rodrigues)."""
-    z = np.array([0.0, 0.0, 1.0])
-    v, c = np.cross(n, z), np.dot(n, z)
-    if np.isclose(c, -1.0):
-        return np.diag([1.0, -1.0, -1.0])
-    vx = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
-    return np.eye(3) + vx + vx @ vx / (1 + c)
-
-
-def _canonical_structure(slab: Atoms) -> Structure:
-    """Rotate the slab so its surface normal (toward tag-1 atoms) is +z; return a pymatgen Structure."""
-    surface_mask = slab.get_tags() == 1
-    if not surface_mask.any():
-        raise ValueError(f"Slab {slab.get_chemical_formula()} has no surface atoms (tag 1)")
-    R = _rotation_to_z(_up_normal(slab, surface_mask=surface_mask))
-    return Structure(Lattice(slab.cell[:] @ R.T), slab.get_chemical_symbols(),
-                     slab.positions @ R.T, coords_are_cartesian=True)
-
-
 def _atoms_to_slab_structure(a: "Atoms | None"):
     """Convert full Atoms to a canonicalized slab-only Structure; None if None / empty / unconvertible."""
     if a is None:
@@ -155,7 +116,7 @@ def _atoms_to_slab_structure(a: "Atoms | None"):
         return None
     if len(slab) == 0:
         return None
-    return _canonical_structure(slab)
+    return canonical_repr(slab)
 
 
 def _atoms_to_slab_structures(atoms_iter) -> list:
@@ -174,7 +135,7 @@ def compute_uniqueness(atoms: list) -> dict:
     a uniqueness ratio dict e.g. {'uniqueness (100)': 0.85}.
     """
     structures = _atoms_to_slab_structures(atoms)
-    groups = NoFlipMatcher().group_structures(structures)
+    groups = StructureMatcher().group_structures(structures)
     uniqueness = len(groups) / len(structures) if structures else 0.0
     return {f"uniqueness ({len(structures)})": uniqueness}
 
@@ -195,13 +156,13 @@ def compute_composition_uniqueness(atoms: list) -> dict:
 # Per-worker globals, populated once per process by _init_novelty_worker so the
 # (large) reference set is shipped to each worker once rather than per task.
 _NOVELTY_REF_STRUCTURES: list | None = None
-_NOVELTY_MATCHER: "NoFlipMatcher | None" = None
+_NOVELTY_MATCHER: "SurfaceMatcher | None" = None
 
 
 def _init_novelty_worker(ref_structures: list) -> None:
     global _NOVELTY_REF_STRUCTURES, _NOVELTY_MATCHER
     _NOVELTY_REF_STRUCTURES = ref_structures
-    _NOVELTY_MATCHER = NoFlipMatcher()
+    _NOVELTY_MATCHER = SurfaceMatcher()
 
 
 def _is_novel(struc) -> bool:
