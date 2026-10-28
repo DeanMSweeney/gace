@@ -414,7 +414,7 @@ class Config:
 
     # ==================== Model Checkpointing ====================
 
-    ckpt_dir: str = "checkpoints"
+    ckpt_dir: str = "./.checkpoints"
     """Directory for saving model checkpoints during training"""
 
     ckpt_path: Optional[str] = None
