@@ -135,7 +135,7 @@ def compute_uniqueness(atoms: list) -> dict:
     a uniqueness ratio dict e.g. {'uniqueness (100)': 0.85}.
     """
     structures = _atoms_to_slab_structures(atoms)
-    groups = StructureMatcher().group_structures(structures)
+    groups = SurfaceMatcher().group_structures(structures)
     uniqueness = len(groups) / len(structures) if structures else 0.0
     return {f"uniqueness ({len(structures)})": uniqueness}
 

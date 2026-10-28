@@ -12,11 +12,11 @@ num_workers: 8
 
 sampler_cfg:
   inputted_adsorbate: ads.vasp
-  target_binding_energy: 4.14
-  target_element: [29, 45]
+  target_binding_energy: -1.0
+  target_element: 29
   num_prim_atoms: 4
   num_integration_steps: 100
-  sanitize_otf: true
+  sanitize_otf: false
   relax_otf: false
-  dedupe_otf: true
-  num_generated_samples: 100
+  dedupe_otf: false
+  num_generated_samples: 10
