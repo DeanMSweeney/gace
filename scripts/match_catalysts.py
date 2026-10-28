@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Find catalyst slabs present in two structure sets with different adsorbates.
 
-Strips the adsorbate (tags == 2) from every structure in each set and compares the
-remaining slabs with pymatgen's StructureMatcher — the same rule the novelty check in
-eval_process_strucs.py uses. Writes one CSV row per matching (A, B) pair; an A file
+Strips the adsorbate (tags == 2) from every structure in each set, rotates each slab so
+its surface normal is +z, and compares the remaining slabs with SurfaceMatcher (from
+gace.utils.invar_surface_matching, shared with eval_process_strucs.py). Writes one CSV row per matching (A, B) pair; an A file
 matching several B files produces several rows. Every distinct matched A file is also
-copied into --unique_A_dir.
+copied into --unique_A_dir. With --rebuild_from_prim, the chosen sets' slabs are instead
+rebuilt from atoms.info's primitive cell and supercell matrix M before comparison.
 
 Usage (writes n_o_matches_metadata.csv and matching_catalyst_by_n/ by default):
     python scripts/match_catalysts.py \
@@ -22,9 +23,12 @@ from multiprocessing import Pool
 from pathlib import Path
 
 import ase.io
-from pymatgen.analysis.structure_matcher import StructureMatcher
-from pymatgen.io.ase import AseAtomsAdaptor
+import numpy as np
+from ase import Atoms
 from tqdm import tqdm
+
+from gace.utils.builder import build_slab_adsorbate
+from gace.utils.invar_surface_matcher import SurfaceMatcher, canonical_repr
 
 ADSORBATE_TAG = 2
 VACUUM = 20.0  # Å; must match between the two sets or the fits are meaningless
@@ -38,7 +42,7 @@ class Record:
     name: str          # path relative to the set root
     path: Path         # full path to the .traj file
     structure: object  # pymatgen Structure, already primitive-reduced
-    energy: float
+    energy: float | None  # None when atoms.info lacks the energy key
     formula: str
 
 
@@ -54,13 +58,43 @@ def collect(root: Path) -> list[Path]:
     return files
 
 
+def _rebuild_slab_from_prim(atoms: Atoms) -> Atoms:
+    """Rebuild the bare slab from atoms.info's primitive cell and supercell matrix M.
+
+    Same as eval_process_strucs.py. A .traj round-trip may return the primitive cell
+    as Atoms or as an Atoms.todict() dict.
+    """
+    prim = atoms.info["primitive_cell"]
+    if isinstance(prim, dict):
+        prim = Atoms(numbers=np.asarray(prim["numbers"]),
+                     positions=np.asarray(prim["positions"]),
+                     cell=np.asarray(prim["cell"]),
+                     pbc=prim.get("pbc", True))
+    elif not isinstance(prim, Atoms):
+        raise TypeError(f"primitive_cell is a {type(prim).__name__}, expected Atoms or dict")
+
+    M = np.asarray(atoms.info["transformation_matrix"], dtype=float)
+    a, b, c, alpha, beta, gamma = prim.cell.cellpar()
+    return build_slab_adsorbate(
+        prim_pos=prim.get_positions(),
+        prim_atomic_numbers=prim.get_atomic_numbers(),
+        lattice_params=np.array([a, b, c, np.radians(alpha), np.radians(beta), np.radians(gamma)]),
+        transformation_matrix=M,
+        ads_pos=np.empty((0, 3)),
+        ads_atomic_numbers=np.empty((0,), dtype=int),
+        vacuum=VACUUM,
+    )
+
+
 # Set once per worker process by _init_load_worker.
 _LOAD_ENERGY_KEY: str | None = None
+_REBUILD_FROM_PRIM: bool = False
 
 
-def _init_load_worker(energy_key: str) -> None:
-    global _LOAD_ENERGY_KEY
+def _init_load_worker(energy_key: str, rebuild_from_prim: bool) -> None:
+    global _LOAD_ENERGY_KEY, _REBUILD_FROM_PRIM
     _LOAD_ENERGY_KEY = energy_key
+    _REBUILD_FROM_PRIM = rebuild_from_prim
 
 
 def _load_record(root_and_path: tuple[Path, Path]) -> "Record | str":
@@ -77,33 +111,40 @@ def _load_record(root_and_path: tuple[Path, Path]) -> "Record | str":
     except Exception as e:
         return f"{name}: unreadable ({e})"
 
-    slab = atoms[atoms.get_tags() != ADSORBATE_TAG]
+    if _REBUILD_FROM_PRIM:
+        missing = [k for k in ("primitive_cell", "transformation_matrix") if k not in atoms.info]
+        if missing:
+            return f"{name}: --rebuild_from_prim needs atoms.info keys {missing}"
+        slab = _rebuild_slab_from_prim(atoms)
+    else:
+        slab = atoms[atoms.get_tags() != ADSORBATE_TAG]
     if len(slab) == 0:
         return f"{name}: no slab atoms (every atom tagged as adsorbate)"
-    if _LOAD_ENERGY_KEY not in atoms.info:
-        return f"{name}: missing atoms.info['{_LOAD_ENERGY_KEY}']"
+    energy = atoms.info.get(_LOAD_ENERGY_KEY)
 
     slab.center(vacuum=VACUUM, axis=2)
-    structure = AseAtomsAdaptor().get_structure(slab)
-    matcher = StructureMatcher()
-    reduced = matcher._get_reduced_structure(structure, matcher._primitive_cell, niggli=True)
+    try:
+        structure = canonical_repr(slab)
+    except ValueError as e:
+        return f"{name}: {e}"
+    reduced = SurfaceMatcher._get_reduced_structure(structure, primitive_cell=True, niggli=True)
     return Record(
         name=name,
         path=path,
         structure=reduced,
-        energy=float(atoms.info[_LOAD_ENERGY_KEY]),
+        energy=None if energy is None else float(energy),
         formula=reduced.composition.reduced_formula,
     )
 
 
-def load_records(roots: list[Path], energy_key: str, num_workers: int,
-                 label: str) -> list[Record]:
+def load_records(roots: list[Path], energy_key: str, rebuild_from_prim: bool,
+                 num_workers: int, label: str) -> list[Record]:
     """Load every .traj under each root. Raises if any file is unusable."""
     files = [(root, path) for root in roots for path in collect(root)]
     with Pool(
         processes=num_workers,
         initializer=_init_load_worker,
-        initargs=(energy_key,),
+        initargs=(energy_key, rebuild_from_prim),
     ) as pool:
         results = list(tqdm(pool.imap(_load_record, files),
                             total=len(files), desc=f"Loading {label} set"))
@@ -126,13 +167,13 @@ def load_records(roots: list[Path], energy_key: str, num_workers: int,
 # Set once per worker process by _init_match_worker so the B set is shipped to each
 # worker once rather than once per task.
 _B_STRUCTURES: list | None = None
-_MATCHER: "StructureMatcher | None" = None
+_MATCHER: "SurfaceMatcher | None" = None
 
 
 def _init_match_worker(b_structures: list) -> None:
     global _B_STRUCTURES, _MATCHER
     _B_STRUCTURES = b_structures
-    _MATCHER = StructureMatcher()
+    _MATCHER = SurfaceMatcher()
 
 
 def _matches_for_a(a_structure) -> list[int]:
@@ -149,7 +190,7 @@ def _matches_for_a(a_structure) -> list[int]:
 
 def find_matches(a_records: list[Record], b_records: list[Record], num_workers: int,
                  a_label: str, b_label: str) -> list[tuple[Record, Record]]:
-    """All (A, B) pairs whose slabs match under StructureMatcher."""
+    """All (A, B) pairs whose slabs match under SurfaceMatcher."""
     b_structures = [r.structure for r in b_records]
     a_structures = [r.structure for r in a_records]
 
@@ -167,6 +208,11 @@ def find_matches(a_records: list[Record], b_records: list[Record], num_workers: 
 # Output
 # ---------------------------------------------------------------------------
 
+def _format_energy(energy: float | None) -> str:
+    """Empty cell when the structure had no energy."""
+    return "" if energy is None else format(energy, f".{CSV_DECIMALS}f")
+
+
 def write_csv(pairs: list[tuple[Record, Record]], out_path: Path,
               a_label: str, b_label: str) -> None:
     a, b = a_label.lower(), b_label.lower()
@@ -178,7 +224,7 @@ def write_csv(pairs: list[tuple[Record, Record]], out_path: Path,
             "reduced_formula",
         ])
         for a_rec, b_rec in pairs:
-            # A fit under StructureMatcher defaults (primitive_cell, scale) implies equal
+            # A fit under SurfaceMatcher defaults (primitive_cell, scale) implies equal
             # reduced formulas; a mismatch means that assumption broke.
             if a_rec.formula != b_rec.formula:
                 raise RuntimeError(
@@ -188,8 +234,8 @@ def write_csv(pairs: list[tuple[Record, Record]], out_path: Path,
             writer.writerow([
                 a_rec.name,
                 b_rec.name,
-                format(a_rec.energy, f".{CSV_DECIMALS}f"),
-                format(b_rec.energy, f".{CSV_DECIMALS}f"),
+                _format_energy(a_rec.energy),
+                _format_energy(b_rec.energy),
                 a_rec.formula,
             ])
 
@@ -233,6 +279,9 @@ def main():
                              "(default: matching_catalyst_by_<a>)")
     parser.add_argument("--energy_key", default="computed_binding_E",
                         help="atoms.info key holding the binding energy")
+    parser.add_argument("--rebuild_from_prim", nargs="+", choices=["A", "B"], default=[],
+                        help="Sets whose slabs are rebuilt from atoms.info's primitive cell "
+                             "and M instead of using stored positions, e.g. --rebuild_from_prim A")
     parser.add_argument("--num_workers", type=int, default=8, help="Parallel workers")
     args = parser.parse_args()
     a, b = args.A_label.lower(), args.B_label.lower()
@@ -242,8 +291,10 @@ def main():
         args.unique_A_dir = Path(f"matching_catalyst_by_{a}")
 
     a_records = load_records(roots=args.A_dir, energy_key=args.energy_key,
+                             rebuild_from_prim="A" in args.rebuild_from_prim,
                              num_workers=args.num_workers, label=args.A_label)
     b_records = load_records(roots=args.B_dir, energy_key=args.energy_key,
+                             rebuild_from_prim="B" in args.rebuild_from_prim,
                              num_workers=args.num_workers, label=args.B_label)
 
     pairs = find_matches(a_records=a_records, b_records=b_records,
