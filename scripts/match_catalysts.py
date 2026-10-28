@@ -38,7 +38,7 @@ class Record:
     name: str          # path relative to the set root
     path: Path         # full path to the .traj file
     structure: object  # pymatgen Structure, already primitive-reduced
-    energy: float
+    energy: float | None  # None when atoms.info lacks the energy key
     formula: str
 
 
@@ -80,8 +80,7 @@ def _load_record(root_and_path: tuple[Path, Path]) -> "Record | str":
     slab = atoms[atoms.get_tags() != ADSORBATE_TAG]
     if len(slab) == 0:
         return f"{name}: no slab atoms (every atom tagged as adsorbate)"
-    if _LOAD_ENERGY_KEY not in atoms.info:
-        return f"{name}: missing atoms.info['{_LOAD_ENERGY_KEY}']"
+    energy = atoms.info.get(_LOAD_ENERGY_KEY)
 
     slab.center(vacuum=VACUUM, axis=2)
     try:
@@ -93,7 +92,7 @@ def _load_record(root_and_path: tuple[Path, Path]) -> "Record | str":
         name=name,
         path=path,
         structure=reduced,
-        energy=float(atoms.info[_LOAD_ENERGY_KEY]),
+        energy=None if energy is None else float(energy),
         formula=reduced.composition.reduced_formula,
     )
 
@@ -169,6 +168,11 @@ def find_matches(a_records: list[Record], b_records: list[Record], num_workers: 
 # Output
 # ---------------------------------------------------------------------------
 
+def _format_energy(energy: float | None) -> str:
+    """Empty cell when the structure had no energy."""
+    return "" if energy is None else format(energy, f".{CSV_DECIMALS}f")
+
+
 def write_csv(pairs: list[tuple[Record, Record]], out_path: Path,
               a_label: str, b_label: str) -> None:
     a, b = a_label.lower(), b_label.lower()
@@ -190,8 +194,8 @@ def write_csv(pairs: list[tuple[Record, Record]], out_path: Path,
             writer.writerow([
                 a_rec.name,
                 b_rec.name,
-                format(a_rec.energy, f".{CSV_DECIMALS}f"),
-                format(b_rec.energy, f".{CSV_DECIMALS}f"),
+                _format_energy(a_rec.energy),
+                _format_energy(b_rec.energy),
                 a_rec.formula,
             ])
 
