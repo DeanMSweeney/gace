@@ -113,13 +113,9 @@ def _init_build_worker(energy_key: str, rebuild_from_prim: bool,
     _INVAR_SURFACE_MATCHER = invar_surface_matcher
 
 
-def _build_record(job: "tuple[str, Path, Atoms]") -> "Record | str":
-    """Worker: build a Record, or return a string describing why the structure is unusable.
-
-    The slab is reduced to its primitive cell here so the match pass compares
-    already-reduced cells (see _matches_for_a). The vacuum padding keeps the facet
-    and termination intact through the reduction.
-    """
+def _build_slab(job: "tuple[str, Path, Atoms]") -> "tuple[str, Path, Atoms, float | None] | str":
+    """Worker: bare, vacuum-padded slab (rebuilt from prim + M if set) and its energy,
+    or a string describing why the structure is unusable."""
     name, path, atoms = job
     if _REBUILD_FROM_PRIM:
         missing = [k for k in ("primitive_cell", "transformation_matrix") if k not in atoms.info]
@@ -131,8 +127,18 @@ def _build_record(job: "tuple[str, Path, Atoms]") -> "Record | str":
     if len(slab) == 0:
         return f"{name}: no slab atoms (every atom tagged as adsorbate)"
     energy = atoms.info.get(_LOAD_ENERGY_KEY)
-
     slab.center(vacuum=VACUUM, axis=2)
+    return name, path, slab, None if energy is None else float(energy)
+
+
+def _build_record(job: "tuple[str, Path, Atoms, float | None]") -> "Record | str":
+    """Worker: canonicalize (if set) and reduce a built slab into a Record.
+
+    The slab is reduced to its primitive cell here so the match pass compares
+    already-reduced cells (see _matches_for_a). The vacuum padding keeps the facet
+    and termination intact through the reduction.
+    """
+    name, path, slab, energy = job
     if _INVAR_SURFACE_MATCHER:
         try:
             structure = canonical_repr(slab)
@@ -145,7 +151,7 @@ def _build_record(job: "tuple[str, Path, Atoms]") -> "Record | str":
         name=name,
         path=path,
         structure=reduced,
-        energy=None if energy is None else float(energy),
+        energy=energy,
         formula=reduced.composition.reduced_formula,
     )
 
@@ -165,18 +171,22 @@ def load_records(roots: list[Path], energy_key: str, rebuild_from_prim: bool,
     files = [(root, path) for root in roots for path in collect(root)]
     with Pool(processes=num_workers) as pool:
         loaded = list(tqdm(pool.imap(_load_atoms, files),
-                           total=len(files), desc=f"Loading {label} set"))
+                           total=len(files), desc=f"Loading {label}"))
     _raise_failures(failures=[a for _, _, a in loaded if isinstance(a, str)],
                     total=len(files), label=label)
 
-    desc = f"Rebuilding {label} slabs" if rebuild_from_prim else f"Building {label} slabs"
     with Pool(
         processes=num_workers,
         initializer=_init_build_worker,
         initargs=(energy_key, rebuild_from_prim, invar_surface_matcher),
     ) as pool:
-        results = list(tqdm(pool.imap(_build_record, loaded, chunksize=8),
-                            total=len(loaded), desc=desc))
+        # Bars shown only for the optional stages: Building (rebuild) and Canonicalizing.
+        slabs = list(tqdm(pool.imap(_build_slab, loaded, chunksize=8), total=len(loaded),
+                          desc=f"Building {label}", disable=not rebuild_from_prim))
+        _raise_failures(failures=[s for s in slabs if isinstance(s, str)],
+                        total=len(files), label=label)
+        results = list(tqdm(pool.imap(_build_record, slabs, chunksize=8), total=len(slabs),
+                            desc=f"Canonicalizing {label}", disable=not invar_surface_matcher))
     _raise_failures(failures=[r for r in results if isinstance(r, str)],
                     total=len(files), label=label)
     return results
