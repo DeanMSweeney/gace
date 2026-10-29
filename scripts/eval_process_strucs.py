@@ -17,11 +17,10 @@ from multiprocessing import Pool
 import pathlib
 
 import ase.io
-import numpy as np
 from ase import Atoms
 from tqdm import tqdm
 
-from gace.utils.builder import build_slab_adsorbate
+from gace.utils.builder import rebuild_slab_from_prim
 from gace.utils.invar_surface_matcher import SurfaceMatcher, canonical_repr
 from pymatgen.analysis.structure_matcher import StructureMatcher
 from pymatgen.io.ase import AseAtomsAdaptor
@@ -71,39 +70,13 @@ def load_atoms_parallel(files: list[str], num_workers: int) -> dict[str, "Atoms 
     return dict(pairs)
 
 
-def _rebuild_slab_from_prim(atoms: Atoms) -> Atoms:
-    """Rebuild the bare slab from atoms.info's primitive cell and supercell matrix M.
-
-    A .traj round-trip may return the primitive cell as Atoms or as an Atoms.todict() dict.
-    """
-    prim = atoms.info["primitive_cell"]
-    if isinstance(prim, dict):
-        prim = Atoms(numbers=np.asarray(prim["numbers"]),
-                     positions=np.asarray(prim["positions"]),
-                     cell=np.asarray(prim["cell"]),
-                     pbc=prim.get("pbc", True))
-    elif not isinstance(prim, Atoms):
-        raise TypeError(f"primitive_cell is a {type(prim).__name__}, expected Atoms or dict")
-
-    M = np.asarray(atoms.info["transformation_matrix"], dtype=float)
-    a, b, c, alpha, beta, gamma = prim.cell.cellpar()
-    return build_slab_adsorbate(
-        prim_pos=prim.get_positions(),
-        prim_atomic_numbers=prim.get_atomic_numbers(),
-        lattice_params=np.array([a, b, c, np.radians(alpha), np.radians(beta), np.radians(gamma)]),
-        transformation_matrix=M,
-        ads_pos=np.empty((0, 3)),
-        ads_atomic_numbers=np.empty((0,), dtype=int),
-        vacuum=20.0,
-    )
-
-
 def rebuild_slabs_parallel(atoms: list, num_workers: int) -> list:
     """Rebuild bare slabs from primitive cell + M in parallel; skips None entries."""
     atoms = [a for a in atoms if a is not None]
     log.info(f"Rebuilding {len(atoms)} slabs from primitive cell ({num_workers} workers)...")
+    rebuild = partial(rebuild_slab_from_prim, vacuum=20.0)
     with Pool(processes=num_workers) as pool:
-        return list(tqdm(pool.imap(_rebuild_slab_from_prim, atoms, chunksize=8),
+        return list(tqdm(pool.imap(rebuild, atoms, chunksize=8),
                          total=len(atoms), desc="Building"))
 
 

@@ -24,13 +24,12 @@ from multiprocessing import Pool
 from pathlib import Path
 
 import ase.io
-import numpy as np
 from ase import Atoms
 from pymatgen.analysis.structure_matcher import StructureMatcher
 from pymatgen.io.ase import AseAtomsAdaptor
 from tqdm import tqdm
 
-from gace.utils.builder import build_slab_adsorbate
+from gace.utils.builder import rebuild_slab_from_prim
 from gace.utils.invar_surface_matcher import SurfaceMatcher, canonical_repr
 
 ADSORBATE_TAG = 2
@@ -59,34 +58,6 @@ def collect(root: Path) -> list[Path]:
     if not files:
         raise FileNotFoundError(f"No .traj files found under {root}")
     return files
-
-
-def _rebuild_slab_from_prim(atoms: Atoms) -> Atoms:
-    """Rebuild the bare slab from atoms.info's primitive cell and supercell matrix M.
-
-    Same as eval_process_strucs.py. A .traj round-trip may return the primitive cell
-    as Atoms or as an Atoms.todict() dict.
-    """
-    prim = atoms.info["primitive_cell"]
-    if isinstance(prim, dict):
-        prim = Atoms(numbers=np.asarray(prim["numbers"]),
-                     positions=np.asarray(prim["positions"]),
-                     cell=np.asarray(prim["cell"]),
-                     pbc=prim.get("pbc", True))
-    elif not isinstance(prim, Atoms):
-        raise TypeError(f"primitive_cell is a {type(prim).__name__}, expected Atoms or dict")
-
-    M = np.asarray(atoms.info["transformation_matrix"], dtype=float)
-    a, b, c, alpha, beta, gamma = prim.cell.cellpar()
-    return build_slab_adsorbate(
-        prim_pos=prim.get_positions(),
-        prim_atomic_numbers=prim.get_atomic_numbers(),
-        lattice_params=np.array([a, b, c, np.radians(alpha), np.radians(beta), np.radians(gamma)]),
-        transformation_matrix=M,
-        ads_pos=np.empty((0, 3)),
-        ads_atomic_numbers=np.empty((0,), dtype=int),
-        vacuum=VACUUM,
-    )
 
 
 def _load_atoms(root_and_path: tuple[Path, Path]) -> "tuple[str, Path, Atoms | str]":
@@ -121,7 +92,7 @@ def _build_slab(job: "tuple[str, Path, Atoms]") -> "tuple[str, Path, Atoms, floa
         missing = [k for k in ("primitive_cell", "transformation_matrix") if k not in atoms.info]
         if missing:
             return f"{name}: --rebuild_from_prim needs atoms.info keys {missing}"
-        slab = _rebuild_slab_from_prim(atoms)
+        slab = rebuild_slab_from_prim(atoms, vacuum=VACUUM)
     else:
         slab = atoms[atoms.get_tags() != ADSORBATE_TAG]
     if len(slab) == 0:
