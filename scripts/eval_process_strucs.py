@@ -23,6 +23,7 @@ from tqdm import tqdm
 from gace.utils.builder import build_slab_adsorbate
 from gace.utils.invar_surface_matcher import SurfaceMatcher, canonical_repr
 from pymatgen.analysis.structure_matcher import StructureMatcher
+from pymatgen.io.ase import AseAtomsAdaptor
 
 log = logging.getLogger(__name__)
 
@@ -105,37 +106,49 @@ def rebuild_slabs_parallel(atoms: list, num_workers: int) -> list:
                          total=len(atoms), desc="Rebuilding slabs"))
 
 
-def _atoms_to_slab_structure(a: "Atoms | None"):
-    """Convert full Atoms to a canonicalized slab-only Structure; None if None / empty / unconvertible."""
+def _make_matcher(invar_surface_matcher: bool) -> StructureMatcher:
+    """SurfaceMatcher for canonicalized slabs, else plain StructureMatcher."""
+    return SurfaceMatcher() if invar_surface_matcher else StructureMatcher()
+
+
+def _atoms_to_slab_structure(a: "Atoms | None", invar_surface_matcher: bool = False):
+    """Convert full Atoms to a slab-only Structure; None if None / empty / unconvertible.
+
+    With invar_surface_matcher, the slab is canonicalized (surface normal along +z).
+    """
     if a is None:
         return None
     try:
         slab = a[a.get_tags() != 2]
         slab.center(vacuum=20, axis=2)
+        if len(slab) == 0:
+            return None
+        if not invar_surface_matcher:
+            return AseAtomsAdaptor().get_structure(slab)
     except Exception:
-        return None
-    if len(slab) == 0:
         return None
     return canonical_repr(slab)
 
 
-def _atoms_to_slab_structures(atoms_iter) -> list:
+def _atoms_to_slab_structures(atoms_iter, invar_surface_matcher: bool = False) -> list:
     """Convert an iterable of full Atoms to slab-only pymatgen Structures.
 
     Strips adsorbate atoms (tags == 2); skips None / empty / unconvertible slabs.
     """
-    structures = (_atoms_to_slab_structure(a) for a in atoms_iter)
+    structures = (_atoms_to_slab_structure(a, invar_surface_matcher=invar_surface_matcher)
+                  for a in atoms_iter)
     return [s for s in structures if s is not None]
 
 
-def compute_uniqueness(atoms: list) -> dict:
+def compute_uniqueness(atoms: list, invar_surface_matcher: bool = False) -> dict:
     """Batch structural uniqueness over a list of Atoms.
 
-    Strips adsorbate (tags == 2), groups slabs via StructureMatcher, and returns
-    a uniqueness ratio dict e.g. {'uniqueness (100)': 0.85}.
+    Strips adsorbate (tags == 2), groups slabs via StructureMatcher (SurfaceMatcher on
+    canonicalized slabs with invar_surface_matcher), and returns a uniqueness ratio dict
+    e.g. {'uniqueness (100)': 0.85}.
     """
-    structures = _atoms_to_slab_structures(atoms)
-    groups = SurfaceMatcher().group_structures(structures)
+    structures = _atoms_to_slab_structures(atoms, invar_surface_matcher=invar_surface_matcher)
+    groups = _make_matcher(invar_surface_matcher=invar_surface_matcher).group_structures(structures)
     uniqueness = len(groups) / len(structures) if structures else 0.0
     return {f"uniqueness ({len(structures)})": uniqueness}
 
@@ -156,13 +169,13 @@ def compute_composition_uniqueness(atoms: list) -> dict:
 # Per-worker globals, populated once per process by _init_novelty_worker so the
 # (large) reference set is shipped to each worker once rather than per task.
 _NOVELTY_REF_STRUCTURES: list | None = None
-_NOVELTY_MATCHER: "SurfaceMatcher | None" = None
+_NOVELTY_MATCHER: "StructureMatcher | None" = None
 
 
-def _init_novelty_worker(ref_structures: list) -> None:
+def _init_novelty_worker(ref_structures: list, invar_surface_matcher: bool) -> None:
     global _NOVELTY_REF_STRUCTURES, _NOVELTY_MATCHER
     _NOVELTY_REF_STRUCTURES = ref_structures
-    _NOVELTY_MATCHER = SurfaceMatcher()
+    _NOVELTY_MATCHER = _make_matcher(invar_surface_matcher=invar_surface_matcher)
 
 
 def _is_novel(struc) -> bool:
@@ -171,11 +184,12 @@ def _is_novel(struc) -> bool:
 
 
 def compute_novelty(atoms: list, paths: list[str], reference_atoms: list,
-                    num_workers: int = 8) -> tuple[dict, list[dict]]:
+                    num_workers: int = 8,
+                    invar_surface_matcher: bool = False) -> tuple[dict, list[dict]]:
     """Fraction of generated slabs absent from a reference set (e.g. OC20).
 
     A generated slab is novel if it matches no reference slab under
-    StructureMatcher. Each slab is compared independently against the fixed
+    StructureMatcher (SurfaceMatcher with invar_surface_matcher). Each slab is compared independently against the fixed
     reference, so this measures pure novelty (no inter-generated dedup).
     Generated slabs are checked in parallel across num_workers processes.
     paths must align with atoms; unconvertible slabs are dropped from both outputs.
@@ -183,10 +197,12 @@ def compute_novelty(atoms: list, paths: list[str], reference_atoms: list,
     """
     if len(atoms) != len(paths):
         raise ValueError(f"atoms ({len(atoms)}) and paths ({len(paths)}) are misaligned")
-    pairs = [(p, _atoms_to_slab_structure(a)) for p, a in zip(paths, atoms)]
+    pairs = [(p, _atoms_to_slab_structure(a, invar_surface_matcher=invar_surface_matcher))
+             for p, a in zip(paths, atoms)]
     pairs = [(p, s) for p, s in pairs if s is not None]
     gen_structures = [s for _, s in pairs]
-    ref_structures = _atoms_to_slab_structures(reference_atoms)
+    ref_structures = _atoms_to_slab_structures(reference_atoms,
+                                               invar_surface_matcher=invar_surface_matcher)
     log.info(f"Novelty: {len(gen_structures)} generated vs {len(ref_structures)} reference slabs "
              f"({num_workers} workers)")
 
@@ -194,7 +210,8 @@ def compute_novelty(atoms: list, paths: list[str], reference_atoms: list,
         return {"novelty (0)": 0.0}, []
 
     workers = max(1, min(num_workers, len(gen_structures)))
-    with Pool(workers, initializer=_init_novelty_worker, initargs=(ref_structures,)) as pool:
+    with Pool(workers, initializer=_init_novelty_worker,
+              initargs=(ref_structures, invar_surface_matcher)) as pool:
         flags = list(tqdm(pool.imap(_is_novel, gen_structures, chunksize=8),
                           total=len(gen_structures), desc="Novelty check"))
 
@@ -379,6 +396,7 @@ def parse_args():
     p.add_argument("--eval_uniqueness", default=False, action="store_true", help="Run structural uniqueness check")
     p.add_argument("--eval_novelty_against", nargs="+", default=None, help="One or more directories of reference structures (e.g. OC20); reports fraction of generated slabs absent from them")
     p.add_argument("--rebuild_from_prim", default=False, action="store_true", help="For uniqueness/novelty, rebuild generated slabs from atoms.info's primitive cell and M instead of using stored positions")
+    p.add_argument("--invar_surface_matcher", default=False, action="store_true", help="For uniqueness/novelty, canonicalize slabs (surface normal along +z) and match with SurfaceMatcher instead of StructureMatcher")
     p.add_argument("--sanitize", default=False, action="store_true", help="Run sanitisation checks")
     p.add_argument("--dedupe", default=False, action="store_true", help="Mark duplicate slabs (records is_unique); requires --sanitize")
     p.add_argument("--relax", default=False, action="store_true", help="Relax structures with the MLFF and report binding energies")
@@ -414,7 +432,8 @@ def main(**kwargs):
         gen_atoms = rebuild_slabs_parallel(gen_atoms, args.num_workers)
 
     # Uniqueness and novelty are pure post-processing passes over the loaded set.
-    uniqueness = compute_uniqueness(gen_atoms) if args.eval_uniqueness else None
+    uniqueness = compute_uniqueness(gen_atoms, invar_surface_matcher=args.invar_surface_matcher) \
+        if args.eval_uniqueness else None
     composition_uniqueness = compute_composition_uniqueness(gen_atoms) if args.eval_uniqueness else None
 
     novelty = None
@@ -423,7 +442,8 @@ def main(**kwargs):
         ref_files = collect_structure_files(args.eval_novelty_against)
         ref_atoms = list(load_atoms_parallel(ref_files, args.num_workers).values())
         novelty, novelty_rows = compute_novelty(gen_atoms, paths=gen_paths, reference_atoms=ref_atoms,
-                                                num_workers=args.num_workers)
+                                                num_workers=args.num_workers,
+                                                invar_surface_matcher=args.invar_surface_matcher)
         write_novelty_csv(rows=novelty_rows, output_path=args.novelty_csv)
         composition_novelty = compute_composition_novelty(gen_atoms, ref_atoms)
 
