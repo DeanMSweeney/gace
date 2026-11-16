@@ -80,5 +80,6 @@ DFT_VAL/
 **/logs/
 **/checkpoints/
 **/outputs/
+results/
 
 pretrained_models.json

@@ -223,6 +223,32 @@ def build_slab_adsorbate(
     return atoms
 
 
+def rebuild_slab_from_prim(atoms: Atoms, vacuum: float) -> Atoms:
+    """Rebuild the bare slab from atoms.info's primitive cell and supercell matrix M.
+
+    A .traj round-trip may return the primitive cell as Atoms or as an Atoms.todict() dict.
+    """
+    prim = atoms.info["primitive_cell"]
+    if isinstance(prim, dict):
+        prim = Atoms(numbers=np.asarray(prim["numbers"]),
+                     positions=np.asarray(prim["positions"]),
+                     cell=np.asarray(prim["cell"]),
+                     pbc=prim.get("pbc", True))
+    elif not isinstance(prim, Atoms):
+        raise TypeError(f"primitive_cell is a {type(prim).__name__}, expected Atoms or dict")
+
+    M = np.asarray(atoms.info["transformation_matrix"], dtype=float)
+    a, b, c, alpha, beta, gamma = prim.cell.cellpar()
+    return build_slab_adsorbate(
+        prim_pos=prim.get_positions(),
+        prim_atomic_numbers=prim.get_atomic_numbers(),
+        lattice_params=np.array([a, b, c, np.radians(alpha), np.radians(beta), np.radians(gamma)]),
+        transformation_matrix=M,
+        ads_pos=np.empty((0, 3)),
+        ads_atomic_numbers=np.empty((0,), dtype=int),
+        vacuum=vacuum,
+    )
+
 
 def sample_prim_atom_counts(
     B: int,
