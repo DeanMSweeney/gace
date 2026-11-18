@@ -233,7 +233,7 @@ def main(cfg: Config) -> None:
         mol_atoms = ase.io.read(cfg.sampler_cfg.inputted_adsorbate)
         initial_graph = build_graph_from_atoms(
             mol_atoms=mol_atoms,
-            num_prim_atoms=cfg.sampler_cfg.num_prim_atoms,
+            num_prim_atoms=n if n is not None else 1,  # placeholder; sample() rebuilds prim atoms from the sampled counts
         )
         n_samples = cfg.sampler_cfg.num_generated_samples
         gen_loader = DataLoader(
