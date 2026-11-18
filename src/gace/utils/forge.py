@@ -346,8 +346,10 @@ class CatalystForge:
 
         if atoms is None:
             # Could not be built: it fails the geometry checks by construction.
-            checks["is_valid"] = checks["is_valid_base"] = False
-            criteria = self.sanitize(atoms=None)
+            # passed_all_checks still records the failure via atoms is None.
+            if self.sanitize_otf:
+                checks["is_valid"] = checks["is_valid_base"] = False
+                criteria = self.sanitize(atoms=None)
         else:
             if self.sanitize_otf:
                 criteria = self.sanitize(atoms=atoms)
