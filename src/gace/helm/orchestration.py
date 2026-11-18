@@ -3,6 +3,7 @@ import csv
 import json
 import logging
 import os
+import time
 import numpy as np
 import pandas as pd
 import torch
@@ -378,7 +379,9 @@ class LightFlowMatch(LightningModule, Flow):
         #else: 
         #data.ads_binding_energy = torch.normal(mean=_AVG_BINDING_ENERGY, std=_STD_BINDING_ENERGY, size=(B,), device=data.pos.device, dtype=data.pos.dtype)
 
-        opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts,)
+        opt_graph, gen_time = self._timed_sample(data=data, t=t, counts=counts)
+        # Weighted by B so the epoch mean is per structure, not per batch.
+        self.log("gen_time_per_struc_s", gen_time / B, on_step=False, on_epoch=True, batch_size=B)
 
         B = int(opt_graph.batch.max().item()) + 1
         binding_energies = [data.ads_binding_energy[b].item() for b in range(B)]
@@ -439,7 +442,7 @@ class LightFlowMatch(LightningModule, Flow):
 
         t = torch.linspace(0., 1., self.hparams.num_integration_steps, device=data.pos.device, dtype=torch.float32)
         counts = sample_prim_atom_counts(B, data.pos.device, self.prim_atoms_hist, self.num_prim_atoms)
-        opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts)
+        opt_graph, gen_time = self._timed_sample(data=data, t=t, counts=counts)
 
         binding_energies = [data.ads_binding_energy[b].item() for b in range(B)]
         cf = CatalystForge(
@@ -470,6 +473,7 @@ class LightFlowMatch(LightningModule, Flow):
             sep = "-" * (col_w + 26)
             print(f"\n[predict batch={batch_idx} | {len(all_metrics)} samples]")
             print(sep)
+            print(f"{'gen_time_s':>{col_w}} | {gen_time:.4f}  ({gen_time / B:.4f} per struc)")
             for k, v in avgs.items():
                 # n is the number of structures the check actually ran on, which
                 # is below the batch size for checks gated behind an earlier one.
@@ -477,6 +481,17 @@ class LightFlowMatch(LightningModule, Flow):
             print(sep)
 
         return all_atoms
+
+    def _timed_sample(self, data: Data, t: torch.Tensor, counts: torch.Tensor):
+        """Run self.sample and return (opt_graph, wall-clock seconds)."""
+        # Sync so the timer covers queued GPU work, not just kernel launches.
+        if data.pos.is_cuda:
+            torch.cuda.synchronize(data.pos.device)
+        start = time.perf_counter()
+        opt_graph = self.sample(input_graph=data, t=t, num_prim_atoms=counts)
+        if data.pos.is_cuda:
+            torch.cuda.synchronize(data.pos.device)
+        return opt_graph, time.perf_counter() - start
 
     # ==================== Uniqueness bookkeeping ====================
 
