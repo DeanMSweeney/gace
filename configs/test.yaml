@@ -1,0 +1,23 @@
+# model configuration
+defaults:
+  - model_cfg: tft-large # direcotry in conf: file name
+  - _self_
+
+# Model mode
+mode: "eval"
+num_eval_samples: 100
+
+# datasets
+oc20_test: "/datasets/factorized/val_ood/dataset_processed.lmdb"
+
+# training hyperparameters/settings
+batch_size: 1000
+num_workers: 8
+
+sampler_cfg:
+  target_binding_energy: null
+  num_prim_atoms: 4
+  num_integration_steps: 100
+  relax_otf: false
+  sanitize_otf: true
+  dedupe_otf: false
