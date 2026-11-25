@@ -1,261 +1,78 @@
 # GACE
 
-**Generative Adsorbate Catalyst Engineer** — a conditional flow matching model for generating catalyst slab + adsorbate structures de novo.
+**Generative Adsorbate–Catalyst Engineer.** A flow-matching model that generates catalyst + adsorbate structures de novo.
 
-![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=flat&logo=pytorch&logoColor=white)
-![Lightning](https://img.shields.io/badge/Lightning-792EE5?style=flat&logo=lightning&logoColor=white)
-![Config](https://img.shields.io/badge/Config-gray?style=flat)
-![Hydra](https://img.shields.io/badge/Hydra-89CFF0?style=flat)
-
-![alt text](gace_logo.png)
+![GACE](gace_logo.png)
 
 ## Overview
 
-GACE uses conditional flow matching (CFM) to model the joint distribution over catalyst primitive-cell geometry (fractional coordinates, atom types, lattice parameters, supercell matrix) and adsorbate geometry (center-of-mass, relative positions). It learns a velocity field that transports from Gaussian noise to real DFT-relaxed structures, conditioned on binding energy and spacegroup. Hungarian-alignment-based optimal transport is applied at training time to handle permutation invariance.
-
-### Key Features
-
-- **Multi-modality flow matching**: simultaneous flows over positions, atom types (simplex corruption), lattice lengths/angles, supercell matrix M, and adsorbate geometry
-- **Transformer backbone**: `TransformerModule` processes primitive-cell and adsorbate tokens as separate sequences with a shared trunk and modality-specific output heads
-- **Endpoint & velocity matching**: configurable loss mode (`endpoint` or `flow`)
-- **ODE-based sampling**: torchdiffeq integration with dopri5, euler, rk4, or adaptive_heun solvers
-- **MLFF relaxation**: optional post-generation relaxation via FairChem OCPCalculator
-- **PyTorch Lightning**: multi-GPU/multi-node training with bf16 mixed precision
-- **WandB integration**: experiment tracking
+Given an adsorbate and a target binding energy, GACE generates a catalyst bulk cell, its supercell matrix, and the adsorbate placement in a single flow. It is adapted from ZATOM-1, a 170M-parameter non-equivariant transformer, and fine-tuned on ~460k OC20 IS2RE configurations. Continuous quantities (positions, lattice, adsorbate geometry) follow a flow-matching path; atom types follow a masked discrete flow. Generated structures can be filtered for validity and relaxed with an OC20 MLFF.
 
 ## Installation
 
-### Using Docker (Recommended)
+Clone the repo first; the configs and training script come from it.
 
 ```bash
-# AMD64 (CUDA 12.4)
-docker build -f Dockerfile.amd64 -t gace:amd64 .
-docker run --gpus all -it gace:amd64
-
-# ARM64 (Apple Silicon)
-docker build -f Dockerfile.arm64 -t gace:arm64 .
-docker run -it gace:arm64
-```
-
-### Local Installation
-
-1. **Clone the repository**:
-```bash
-git clone <repo-url>
+git clone https://github.com/DeanMSweeney/gace.git
 cd gace
 ```
 
-2. **Create a conda environment**:
+**Docker (recommended).** The Dockerfiles expect `requirements.txt` at the repo root:
+
 ```bash
-conda create -n gace python=3.10
-conda activate gace
+cp docker_pkg_info/requirements.txt .
+docker build -f docker_pkg_info/Dockerfile.amd64 -t gace .   # x86_64 + CUDA 12.4
+# docker build -f docker_pkg_info/Dockerfile.arm64 -t gace . # arm64 (e.g. GH200)
+docker run --gpus all -it -v $(pwd):/workspace gace
 ```
 
-3. **Install PyTorch with CUDA support**:
-```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
-```
+**pip.** Python 3.10 with CUDA 12.4:
 
-4. **Install PyTorch Geometric dependencies**:
 ```bash
-pip install torch-scatter torch-sparse torch-cluster torch-spline-conv \
+pip install torch==2.4.1 --index-url https://download.pytorch.org/whl/cu124
+pip install torch_geometric pyg_lib torch-scatter torch-sparse torch-cluster torch-spline-conv \
   -f https://data.pyg.org/whl/torch-2.4.0+cu124.html
-```
-
-5. **Install fairchem-core**:
-```bash
-pip install --no-deps fairchem-core==1.10.0
-```
-
-6. **Install remaining dependencies**:
-```bash
-pip install -r requirements.txt
-```
-
-7. **Install GACE in editable mode**:
-```bash
+pip install --no-deps fairchem-core==1.10.0 torch-linear-assignment
+pip install -r docker_pkg_info/requirements.txt
 pip install -e .
 ```
 
 ## Usage
 
-All configuration is passed via Hydra CLI overrides to `scripts/train.py`. There are no YAML config files — `model_cfg` is the only required argument and is a Hydra-instantiable model config.
+Everything runs through one Hydra entry point, `sandbox/train.py`. The config chooses what it does: `train.yaml`, `test.yaml` or `generate.yaml` in `configs/` (`train` and `test` load the architecture from `configs/model_cfg/tft-large.yaml`; `generate` uses the same values built into the code, so it needs only `generate.yaml`). Pick one with `--config-name` and override any field on the command line.
 
-### Train
-
-```bash
-python scripts/train.py \
-  model_cfg=<hydra-instantiable-model-config> \
-  mode=train \
-  oc20_train=/path/to/train.lmdb \
-  oc20_val=/path/to/val.lmdb \
-  variant=forge \
-  x_matching=endpoint
-```
-
-### Debug mode (small subset, fast iteration)
+**Generate** structures for an adsorbate (POSCAR) at a target binding energy:
 
 ```bash
-python scripts/train.py \
-  mode=debug \
-  oc20_train=/path/to/train.lmdb \
-  oc20_val=/path/to/val.lmdb \
-  num_debug_samples=1000
-```
-
-### Evaluate
-
-```bash
-python scripts/train.py \
-  mode=eval \
-  oc20_test=/path/to/test.lmdb \
-  ckpt_path=/path/to/ckpt.ckpt
-```
-
-### Generate
-
-```bash
-python scripts/train.py \
-  mode=generate \
-  ckpt_path=/path/to/ckpt.ckpt \
-  sampler_cfg.target_binding_E=-1.5 \
+python sandbox/train.py --config-path ../configs --config-name generate \
+  sampler_cfg.inputted_adsorbate=ads.vasp \
+  sampler_cfg.target_binding_energy=-1.0 \
   sampler_cfg.num_generated_samples=10
 ```
 
-### Preprocess LMDB dataset
+If `ckpt_path` is not set, the checkpoint is downloaded from the Hugging Face repo `DeanMSweeney/gace`. Structures are written to `generated_strucs/`. Useful options: `sampler_cfg.target_element` (pin an element, e.g. `29` for Cu), `sampler_cfg.num_prim_atoms` (default 4), and `sampler_cfg.relax_otf=true` (MLFF relaxation).
+
+**Evaluate** on a held-out split:
 
 ```bash
-python -m gace.utils.factorized_builders.data_processor \
-  --src /path/to/raw.lmdb \
-  --dst /path/to/processed.lmdb
+python sandbox/train.py --config-path ../configs --config-name test \
+  oc20_test=/path/to/val_ood/dataset_processed.lmdb
 ```
 
-## Configuration
+**Train** (warm-started from the ZATOM-1 checkpoint via `ckpt_path`):
 
-Configuration is handled by `helm/config.py` via three dataclasses:
-
-### `Config` (top-level)
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `model_cfg` | MISSING | Hydra-instantiable model architecture config |
-| `variant` | `"forge"` | Flow matching variant |
-| `mode` | `"generate"` | Execution mode: `train`, `eval`, `generate`, `debug` |
-| `x_matching` | `"endpoint"` | Loss mode: `endpoint` (predict x₁) or `flow` (predict dx/dt) |
-| `interpolant_schedule` | `"linear"` | Interpolation schedule: `linear` or `cosine` |
-| `optimal_transport` | `False` | Hungarian alignment of noise x₀ to target x₁ |
-| `informed_priors` | `False` | Use informed priors for noise |
-| `precision` | `"bf16-mixed"` | Training precision |
-| `devices` / `num_nodes` | `1` / `1` | Multi-GPU / multi-node config |
-
-### `OptimizerConfig`
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `lr` | `1e-3` | Base learning rate (AdamW) |
-| `lr_scheduler` | `"cosine_w_warmup"` | Scheduler: `cosine_w_warmup`, `cosine_annealing`, `polynomial_w_warmup`, `polynomial_decay` |
-| `warmup_proportion` | `0.01` | Fraction of steps for linear warmup |
-| `ema_decay` | `None` | EMA weight decay (e.g. `0.9999`); `None` disables EMA |
-| `lambda_x` | `1.0` | Loss weight for catalyst fractional coordinates |
-| `lambda_z` | `0.1` | Loss weight for catalyst atom types (cross-entropy) |
-| `lambda_ads` | `1.0` | Loss weight for adsorbate geometry |
-| `lambda_lat` | `1.0` | Loss weight for lattice lengths/angles |
-| `lambda_M` | `1.0` | Loss weight for supercell matrix M |
-
-### `SamplerConfig`
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `ode_method` | `"dopri5"` | ODE solver: `dopri5`, `euler`, `rk4`, `adaptive_heun` |
-| `num_integration_steps` | `100` | Integration steps for ODE |
-| `target_binding_E` | `None` | Target adsorption binding energy (eV) |
-| `num_generated_samples` | `1` | Number of structures to generate per batch |
-| `run_mlff` | `False` | Run MLFF relaxation after generation |
-| `refine_final` | `False` | Run a final endpoint-prediction pass at t=1 |
-| `config_vasp` | `False` | Generate VASP DFT input files for generated structures |
-
-## Architecture
-
-### Transformer backbone (`models/TFT/`)
-
-`TransformerModule` takes dense padded tensors for primitive-cell atoms and adsorbate atoms as **separate sequences**, concatenates them for a shared transformer trunk, then splits back for modality-specific output heads.
-
-**Inputs (via `PyGToTensorDict` wrapper):**
-- Primitive cell: atom types (soft one-hot, 90 classes), fractional coords, lengths, angles, transformation matrix M, supercell lattice
-- Adsorbate: atom types (conditioned), COM, relative positions, pairwise distances (RBF-encoded, `(N_ads, 15)`)
-- Conditions: flow time t (Fourier), dataset index, spacegroup, binding energy
-
-**Outputs (endpoint predictions):**
-- Primitive cell: atom type logits, fractional coords, lengths, angles, M
-- Adsorbate: COM, relative positions
-
-### Training loop (`helm/lightning.py`, `utils/path.py`)
-
-`LightFlowMatch` is the PyTorch Lightning module. `path()` builds the interpolated training sample at random time t. `criterion()` computes the multi-component loss. `sample()` runs ODE integration at inference time.
-
-## Project Structure
-
-```
-gace/
-├── src/gace/
-│   ├── helm/                       # Training orchestration
-│   │   ├── config.py               # Hydra config dataclasses
-│   │   ├── cli.py                  # Training entry point
-│   │   ├── lightning.py            # LightFlowMatch Lightning module
-│   │   └── callbacks.py            # EMA callback
-│   ├── models/
-│   │   └── TFT/                    # Transformer backbone
-│   │       ├── transformer_module.py
-│   │       └── architectures/      # Attention, losses, positional encoding
-│   └── utils/
-│       ├── path.py                 # Flow interpolation & multi-component loss
-│       ├── invariance.py           # PBC distances, optimal transport (Hungarian)
-│       ├── lmdb_loader.py          # Lazy LMDB dataset loader
-│       ├── builder.py              # Lattice/graph construction, forge sampling
-│       ├── atoms.py                # ASE Atoms ↔ PyG Data conversion
-│       ├── euler.py                # Euler & CTMC ODE step functions
-│       ├── evaluator.py            # Structural validity checks
-│       ├── relaxation.py           # MLFF (FairChem) and DFT (VASP) relaxation
-│       ├── graph/                  # PBC-aware neighbor list construction
-│       ├── factorized_builders/    # Data preprocessing (dict → PyG, pairwise distances)
-│       └── tft/                    # TFT data utilities and wrappers
-├── scripts/
-│   └── train.py                    # Main training script (@hydra.main)
-├── analysis/                       # Jupyter notebooks and example structures
-├── datasets/                       # LMDB dataset storage (mini, factorized splits)
-├── Dockerfile.amd64
-├── Dockerfile.arm64
-└── requirements.txt
+```bash
+python sandbox/train.py --config-path ../configs --config-name train \
+  oc20_train=/path/to/train/dataset_processed.lmdb \
+  oc20_val=/path/to/val_id/dataset_processed.lmdb \
+  ckpt_path=/path/to/zatom_1_xl_joint_pretraining_paper_weights.ckpt \
+  resume_training=false
 ```
 
-## Data Pipeline
+**Analyze** generated structures (validity, uniqueness, novelty, MLFF relaxation):
 
-```
-Raw CatFlow LMDB
-  → factorized_builders/data_processor.py   (precompute lattice params, fractional coords, pairwise distances)
-  → factorized_builders/pyg_converter.py    (dict → PyG Data)
-  → LazyLmdbDataset (lmdb_loader.py)
-  → PyG DataLoader
-  → PyGToTensorDict / to_dense_batch         (sparse PyG → dense padded tensors)
-  → TransformerModule
+```bash
+python scripts/process_strucs.py --traj_dirs generated_strucs/ --sanitize --eval_uniqueness --relax
 ```
 
-Atoms are identified by `tags`: `1 = slab (primitive cell)`, `2 = adsorbate`. These are split and handled separately throughout the model — they are never concatenated at the data level.
-
-## Dependencies
-
-| Category | Packages |
-|----------|---------|
-| Deep learning | PyTorch, PyTorch Lightning, PyTorch Geometric |
-| ODE solvers | torchdiffeq |
-| Atomistic | ASE, pymatgen, fairchem-core |
-| Configuration | hydra-core, omegaconf |
-| Experiment tracking | Weights & Biases |
-| Data | lmdb, numba, orjson |
-| Type safety | beartype, jaxtyping |
-
-See `requirements.txt` for the complete list.
-
-## License
-
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+All options and defaults are documented in `src/gace/helm/config.py`.
