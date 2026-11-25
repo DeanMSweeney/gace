@@ -424,7 +424,7 @@ def parse_args():
     p.add_argument("--traj_dirs", nargs="+", help="One or more directories of generated structure files")
     p.add_argument("--eval_uniqueness", default=False, action="store_true", help="Run structural uniqueness check")
     p.add_argument("--eval_novelty_against", nargs="+", default=None, help="One or more directories of reference structures (e.g. OC20); reports fraction of generated slabs absent from them")
-    p.add_argument("--composition_tol", type=float, default=0.03, help="Max per-element atomic-fraction difference for two slabs (same element set) to count as the same composition, used by composition uniqueness and novelty")
+    p.add_argument("--composition_tol", type=float, default=0.05, help="Max per-element atomic-fraction difference for two slabs (same element set) to count as the same composition, used by composition uniqueness and novelty")
     p.add_argument("--rebuild_from_prim", default=True, action="store_true", help="For uniqueness/novelty, rebuild generated slabs from atoms.info's primitive cell and M instead of using stored positions")
     p.add_argument("--surface_matcher", default=True, action="store_true", help="For uniqueness/novelty, canonicalize slabs (surface normal along +z) and match with SurfaceMatcher instead of StructureMatcher")
     p.add_argument("--sanitize", default=False, action="store_true", help="Run sanitisation checks")
