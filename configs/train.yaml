@@ -3,12 +3,13 @@ defaults:
   - model_cfg: tft-large # direcotry in conf: file name
   - _self_
 
-# Model cfg 
-model_cfg: 
-  hidden_dim: 1024
-
 # Model mode
 mode: train
+
+# path config 
+path_cfg: 
+  informed_priors: false
+  cfg_dropout_prob: 0.10
 
 # datasets
 oc20_train: "/datasets/factorized/train/dataset_processed.lmdb"
@@ -21,7 +22,7 @@ accumulate_grad_batches: 2
 
 optim_cfg:
   weight_decay: 0
-  lr: 0.00025
+  lr: 0.0005
   lr_scheduler: cosine_w_warmup
   num_cycles: 0.50
   warmup_proportion: 0.05
@@ -34,11 +35,11 @@ optim_cfg:
 # checkpointing/logging
 logger: true
 project: gace
-run_name: GACE-LARGE
+run_name: GACE-CFG
 
 # restart run 
-ckpt_path: "/datasets/checkpoints/zatom/zatom_1_xl_joint_pretraining_paper_weights.ckpt"  
-resume_training: false
-run_id: null  # log id from wandb
-strategy: ddp_find_unused_parameters_true
+ckpt_path: "checkpoints/GACE-CFG-epoch=126.ckpt"  
+resume_training: true
+run_id: 9zoj18kq  # log id from wandb
+strategy: ddp #_find_unused_parameters_true
 

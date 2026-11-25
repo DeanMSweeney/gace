@@ -287,6 +287,38 @@ class PathConfig:
 
 
 @dataclass
+class ModelConfig:
+    """
+    Default TFT transformer architecture (mirrors configs/model_cfg/tft-large.yaml).
+    Used when no model_cfg is given; override any field, e.g. model_cfg.hidden_dim=1024.
+    """
+
+    _target_: str = "gace.models.TFT.transformer_module.TransformerModule"
+
+    # Dimensions
+    spatial_dim: int = 3              # xyz
+    atom_dim: int = 100               # one-hot atom-type vocab (elements 1-90)
+    hidden_dim: int = 768             # transformer hidden size; matches zatom 80M
+
+    # Transformer depth / width
+    num_layers: int = 16
+    num_heads: int = 8                # must divide hidden_dim evenly
+    context_length: int = 512         # max total tokens (prim + ads) per sample
+
+    # Architecture options
+    activation: str = "SiLU"                      # SiLU | ReLU | SwiGLU
+    implementation: str = "modern_transformer"    # transformer | modern_transformer
+    rope_base: Optional[int] = None               # set an int (e.g. 10000) to enable RoPE
+    qk_layernorm: bool = True
+    use_sdpa: bool = True
+    jvp_attn: bool = False
+    cross_attention: bool = True                  # modality-specific cross-attn output heads
+    add_sinusoid_posenc: bool = True
+    concat_combine_input: bool = False            # sum (False) vs concat+project (True) input
+    custom_weight_init: Optional[Any] = None
+
+
+@dataclass
 class Config:
     """
     Main configuration for GACE training pipeline.
@@ -305,12 +337,10 @@ class Config:
 
     # ==================== Model Configuration ====================
 
-    model_cfg: Optional[DictConfig] = None
+    model_cfg: ModelConfig = field(default_factory=ModelConfig)
     """
-    Model architecture configuration (loaded from YAML).
-    Contains model-specific hyperparameters for:
-    - EquiformerV2: hidden_channels, num_layers, attention heads, etc.
-    - GemNet-OC: embedding dimensions, interaction blocks, etc.
+    Model architecture configuration. Defaults to ModelConfig (TFT, hidden_dim 768);
+    a YAML model_cfg or command-line overrides are merged on top.
     """
 
     optim_cfg: OptimizerConfig = field(default_factory=OptimizerConfig)
