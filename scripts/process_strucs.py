@@ -142,18 +142,45 @@ def compute_uniqueness(atoms: list, surface_matcher: bool = False,
     return {f"uniqueness ({len(structures)})": uniqueness}
 
 
-def compute_composition_uniqueness(atoms: list, num_workers: int = 8) -> dict:
-    """Fraction of distinct slab reduced formulas among generated slabs.
+def _frac(comp) -> dict:
+    """Element symbol -> atomic fraction for a pymatgen Composition."""
+    return {el.symbol: x for el, x in comp.fractional_composition.items()}
+
+
+def _comps_match(a: dict, b: dict, tol: float) -> bool:
+    """True if a and b have the same element set and every element fraction is within tol."""
+    if a.keys() != b.keys():
+        return False
+    return all(abs(a[k] - b[k]) <= tol for k in a)
+
+
+def _unique_fracs(structures: list) -> dict:
+    """Reduced formula -> fractional composition, one entry per distinct reduced formula."""
+    return {s.composition.reduced_formula: _frac(s.composition) for s in structures}
+
+
+def compute_composition_uniqueness(atoms: list, composition_tol: float,
+                                   num_workers: int = 8) -> dict:
+    """Fraction of distinct slab compositions among generated slabs.
 
     Composition-only counterpart to compute_uniqueness; adsorbate (tags == 2) stripped.
-    Returns e.g. {'composition_uniqueness (500)': 0.07}.
+    Two slabs share a composition if they contain the same elements and every element
+    fraction agrees within composition_tol (e.g. FeRh3 and Fe10Rh27 match at 0.03).
+    Distinct reduced formulas are grouped greedily: each joins the first group whose
+    representative is within tolerance, otherwise it starts a new group. The tolerance
+    is not transitive, so the group count can shift slightly with input order.
+    Returns e.g. {'composition_uniqueness (500, tol=0.03)': 0.07}.
     """
     structures = _atoms_to_slab_structures(atoms, surface_matcher=False,
                                            num_workers=num_workers)
     if not structures:
-        return {"composition_uniqueness (0)": 0.0}
-    formulas = {s.composition.reduced_formula for s in structures}
-    return {f"composition_uniqueness ({len(structures)})": len(formulas) / len(structures)}
+        return {f"composition_uniqueness (0, tol={composition_tol})": 0.0}
+    reps: list[dict] = []
+    for frac in _unique_fracs(structures).values():
+        if not any(_comps_match(frac, r, composition_tol) for r in reps):
+            reps.append(frac)
+    return {f"composition_uniqueness ({len(structures)}, tol={composition_tol})":
+            len(reps) / len(structures)}
 
 
 # Per-worker globals, populated once per process by _init_novelty_worker so the
@@ -174,6 +201,7 @@ def _is_novel(struc) -> bool:
 
 
 def compute_novelty(atoms: list, paths: list[str], reference_atoms: list,
+                    composition_tol: float,
                     num_workers: int = 8,
                     surface_matcher: bool = False) -> tuple[dict, list[dict]]:
     """Fraction of generated slabs absent from a reference set (e.g. OC20).
@@ -206,12 +234,13 @@ def compute_novelty(atoms: list, paths: list[str], reference_atoms: list,
         flags = list(tqdm(pool.imap(_is_novel, gen_structures, chunksize=8),
                           total=len(gen_structures), desc="Matching"))
 
-    ref_formulas = {s.composition.reduced_formula for s in ref_structures}
+    ref_fracs = list(_unique_fracs(ref_structures).values())
     rows = []
     for (path, s), novel in zip(pairs, flags):
-        formula = s.composition.reduced_formula
-        rows.append({"path": path, "formula": formula, "novel": novel,
-                     "composition_novel": formula not in ref_formulas})
+        frac = _frac(s.composition)
+        rows.append({"path": path, "formula": s.composition.reduced_formula, "novel": novel,
+                     "composition_novel": not any(_comps_match(frac, r, composition_tol)
+                                                  for r in ref_fracs)})
 
     n_novel = sum(flags)
     return {f"novelty ({len(gen_structures)})": n_novel / len(gen_structures)}, rows
@@ -225,16 +254,18 @@ def write_novelty_csv(rows: list[dict], output_path: str) -> None:
     log.info(f"Per-file novelty written to {output_path}")
 
 
-def compute_composition_novelty(atoms: list, reference_atoms: list, num_workers: int = 8) -> dict:
+def compute_composition_novelty(atoms: list, reference_atoms: list, composition_tol: float,
+                                num_workers: int = 8) -> dict:
     """Fraction of generated slabs whose chemical formula is absent from the reference.
 
     Purely composition-based: ignores geometry, lattice, and vacuum entirely, so it
     is unaffected by the slab/vacuum limitations of StructureMatcher. Adsorbate atoms
     (tags == 2) are stripped first, consistent with compute_novelty, so this compares
-    catalyst slab compositions only. Formulas are compared via reduced formula, which
-    is order- and stoichiometry-invariant (e.g. Pd2Cu == CuPd2, Cu2Pd4 == CuPd2).
+    catalyst slab compositions only. A generated slab is composition-novel if no
+    reference slab has the same element set with every element fraction within
+    composition_tol (so Pd2Cu == CuPd2 == Cu2Pd4, and FeRh3 ~ Fe10Rh27 at 0.03).
 
-    Returns e.g. {'composition_novelty (500)': 0.12, 'unique_gen_formulas': 37,
+    Returns e.g. {'composition_novelty (500, tol=0.03)': 0.12, 'unique_gen_formulas': 37,
                   'ref_formulas': 210}.
     """
     gen_structures = _atoms_to_slab_structures(atoms, surface_matcher=False,
@@ -242,17 +273,22 @@ def compute_composition_novelty(atoms: list, reference_atoms: list, num_workers:
     ref_structures = _atoms_to_slab_structures(reference_atoms, surface_matcher=False,
                                                num_workers=num_workers)
     if not gen_structures:
-        return {"composition_novelty (0)": 0.0}
+        return {f"composition_novelty (0, tol={composition_tol})": 0.0}
 
-    ref_formulas = {s.composition.reduced_formula for s in ref_structures}
+    ref_fracs = _unique_fracs(ref_structures)
     gen_formulas = [s.composition.reduced_formula for s in gen_structures]
-    n_novel = sum(f not in ref_formulas for f in gen_formulas)
-    log.info(f"Composition novelty: {len(set(gen_formulas))} unique generated formulas, "
-             f"{len(ref_formulas)} reference formulas, {n_novel} absent from reference")
+    gen_fracs = _unique_fracs(gen_structures)
+    # Novelty is decided per distinct formula, then counted over all generated slabs.
+    novel_formula = {f: not any(_comps_match(fr, r, composition_tol) for r in ref_fracs.values())
+                     for f, fr in gen_fracs.items()}
+    n_novel = sum(novel_formula[f] for f in gen_formulas)
+    log.info(f"Composition novelty (tol={composition_tol}): {len(set(gen_formulas))} unique "
+             f"generated formulas, {len(ref_fracs)} reference formulas, "
+             f"{n_novel} with no reference match")
     return {
-        f"composition_novelty ({len(gen_formulas)})": n_novel / len(gen_formulas),
+        f"composition_novelty ({len(gen_formulas)}, tol={composition_tol})": n_novel / len(gen_formulas),
         "unique_gen_formulas": len(set(gen_formulas)),
-        "ref_formulas": len(ref_formulas),
+        "ref_formulas": len(ref_fracs),
     }
 
 
@@ -388,8 +424,9 @@ def parse_args():
     p.add_argument("--traj_dirs", nargs="+", help="One or more directories of generated structure files")
     p.add_argument("--eval_uniqueness", default=False, action="store_true", help="Run structural uniqueness check")
     p.add_argument("--eval_novelty_against", nargs="+", default=None, help="One or more directories of reference structures (e.g. OC20); reports fraction of generated slabs absent from them")
-    p.add_argument("--rebuild_from_prim", default=False, action="store_true", help="For uniqueness/novelty, rebuild generated slabs from atoms.info's primitive cell and M instead of using stored positions")
-    p.add_argument("--surface_matcher", default=False, action="store_true", help="For uniqueness/novelty, canonicalize slabs (surface normal along +z) and match with SurfaceMatcher instead of StructureMatcher")
+    p.add_argument("--composition_tol", type=float, default=0.05, help="Max per-element atomic-fraction difference for two slabs (same element set) to count as the same composition, used by composition uniqueness and novelty")
+    p.add_argument("--rebuild_from_prim", default=True, action="store_true", help="For uniqueness/novelty, rebuild generated slabs from atoms.info's primitive cell and M instead of using stored positions")
+    p.add_argument("--surface_matcher", default=True, action="store_true", help="For uniqueness/novelty, canonicalize slabs (surface normal along +z) and match with SurfaceMatcher instead of StructureMatcher")
     p.add_argument("--sanitize", default=False, action="store_true", help="Run sanitisation checks")
     p.add_argument("--dedupe", default=False, action="store_true", help="Mark duplicate slabs (records is_unique); requires --sanitize")
     p.add_argument("--relax", default=False, action="store_true", help="Relax structures with the MLFF and report binding energies")
@@ -428,7 +465,8 @@ def main(**kwargs):
     uniqueness = compute_uniqueness(gen_atoms, surface_matcher=args.surface_matcher,
                                     num_workers=args.num_workers) \
         if args.eval_uniqueness else None
-    composition_uniqueness = compute_composition_uniqueness(gen_atoms, num_workers=args.num_workers) \
+    composition_uniqueness = compute_composition_uniqueness(gen_atoms, composition_tol=args.composition_tol,
+                                                            num_workers=args.num_workers) \
         if args.eval_uniqueness else None
 
     novelty = None
@@ -437,10 +475,12 @@ def main(**kwargs):
         ref_files = collect_structure_files(args.eval_novelty_against)
         ref_atoms = list(load_atoms_parallel(ref_files, args.num_workers).values())
         novelty, novelty_rows = compute_novelty(gen_atoms, paths=gen_paths, reference_atoms=ref_atoms,
+                                                composition_tol=args.composition_tol,
                                                 num_workers=args.num_workers,
                                                 surface_matcher=args.surface_matcher)
         write_novelty_csv(rows=novelty_rows, output_path=args.novelty_csv)
         composition_novelty = compute_composition_novelty(gen_atoms, reference_atoms=ref_atoms,
+                                                          composition_tol=args.composition_tol,
                                                           num_workers=args.num_workers)
 
     sanitisation = None

@@ -22,16 +22,17 @@ _BINDING_E_THRESHOLD = 0.10  # eV
 _THRESHOLD_MULTIPLIERS = [1, 2, 3, 5, 10]
 
 # Per-stage check flags, each owned by exactly one stage:
+#   is_built                  <- build_from_factorized_repr()
 #   is_valid / is_valid_base  <- sanitize()
 #   is_unique                 <- purge_duplicates_otf()
 #   mlff_converged            <- relax()
 # A check that did not run records None (blank in the CSV, skipped by logging),
 # which keeps reported rates conditional on the check having run.
-_CHECK_KEYS = ("is_valid", "is_valid_base", "is_unique", "mlff_converged")
+_CHECK_KEYS = ("is_built", "is_valid", "is_valid_base", "is_unique", "mlff_converged")
 
 # is_valid_base is a looser diagnostic variant of is_valid and is deliberately
 # excluded from the aggregate.
-_AGGREGATE_KEYS = ("is_valid", "is_unique", "mlff_converged")
+_AGGREGATE_KEYS = ("is_built", "is_valid", "is_unique", "mlff_converged")
 
 # The individual sanitisation criteria behind is_valid / is_valid_base. These are
 # recorded per structure in the CSV row only — sanitize() returns them and never
@@ -343,11 +344,13 @@ class CatalystForge:
         checks: dict = dict.fromkeys(_CHECK_KEYS, None)
         criteria: dict = dict.fromkeys(_CRITERIA_KEYS, None)
         atoms_rlxd = None
+        checks["is_built"] = atoms is not None
 
         if atoms is None:
             # Could not be built: it fails the geometry checks by construction.
-            checks["is_valid"] = checks["is_valid_base"] = False
-            criteria = self.sanitize(atoms=None)
+            if self.sanitize_otf:
+                checks["is_valid"] = checks["is_valid_base"] = False
+                criteria = self.sanitize(atoms=None)
         else:
             if self.sanitize_otf:
                 criteria = self.sanitize(atoms=atoms)
@@ -370,7 +373,7 @@ class CatalystForge:
             elif self.sanitize_otf and _passed_all_checks(checks):
                 ase.io.write(os.path.join(self.sanitized_strucs, fname), atoms)
 
-        passed = atoms is not None and _passed_all_checks(checks)
+        passed = _passed_all_checks(checks)
 
         if atoms_rlxd is not None:
             diff = atoms_rlxd.info.get("binding_E_diff")
