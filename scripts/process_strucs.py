@@ -300,7 +300,7 @@ def compute_composition_novelty(atoms: list, reference_atoms: list, composition_
 # A value of None means the check did not run for that structure (its stage was
 # disabled, or an earlier check already failed), so it is excluded from both the
 # numerator and the denominator — rates are conditional on the check running.
-_CHECK_KEYS = ["is_valid", "is_valid_base", "is_unique", "mlff_converged", "passed_all_checks"]
+_CHECK_KEYS = ["is_valid", "is_valid_base", "is_unique", "is_relaxed", "passed_all_checks"]
 
 
 def summarize_results(rows: list[dict]) -> dict:
@@ -428,7 +428,7 @@ def parse_args():
     p.add_argument("--rebuild_from_prim", default=True, action="store_true", help="For uniqueness/novelty, rebuild generated slabs from atoms.info's primitive cell and M instead of using stored positions")
     p.add_argument("--surface_matcher", default=True, action="store_true", help="For uniqueness/novelty, canonicalize slabs (surface normal along +z) and match with SurfaceMatcher instead of StructureMatcher")
     p.add_argument("--sanitize", default=False, action="store_true", help="Run sanitisation checks")
-    p.add_argument("--dedupe", default=False, action="store_true", help="Mark duplicate slabs (records is_unique); requires --sanitize")
+    p.add_argument("--dedupe", default=False, action="store_true", help="Mark duplicate structures (records is_unique). With --sanitize, only valid structures are deduped; without it, every built structure is.")
     p.add_argument("--relax", default=False, action="store_true", help="Relax structures with the MLFF and report binding energies")
     p.add_argument("--n_strucs", type=int, default=None, help="Number of structures to process (default: all)")
     p.add_argument("--mlff_checkpoint", default="EquiformerV2-31M-S2EF-OC20-All+MD")

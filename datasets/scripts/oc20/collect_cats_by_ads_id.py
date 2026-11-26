@@ -2,7 +2,7 @@
 Collect OC20 samples grouped by adsorbate id, writing each as a .traj file.
 
 Every LMDB entry's ``sid`` is resolved to an adsorbate id through
-oc20_mapping.pkl (same lookup as scripts/evaluation/list_trajs_by_ads_id.py),
+oc20_mapping.pkl (same lookup as scripts/copy_trajs_by_ads_id.py),
 and the structure is written to ``<out_dir>/ads_<id>/``. Pass --ads_ids to keep
 only certain adsorbates; omit it to collect every species in the LMDB.
 
@@ -89,7 +89,7 @@ def _key_to_sid(key) -> int | None:
 def load_mapping_tables(mapping_path: Path, keep_ads_ids: set[int] | None):
     """Build sid -> ads_id and ads_id -> formula tables from oc20_mapping.pkl.
 
-    Inverts the per-sid lookup of list_trajs_by_ads_id.py into a plain int -> int
+    Inverts the per-sid lookup of copy_trajs_by_ads_id.py into a plain int -> int
     dict so the workers carry a compact table instead of the full mapping. When
     --ads_ids is given the table is pruned to those adsorbates only, which is a
     large memory saving over the ~1M-entry full mapping.

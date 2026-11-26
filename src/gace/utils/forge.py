@@ -25,14 +25,14 @@ _THRESHOLD_MULTIPLIERS = [1, 2, 3, 5, 10]
 #   is_built                  <- build_from_factorized_repr()
 #   is_valid / is_valid_base  <- sanitize()
 #   is_unique                 <- purge_duplicates_otf()
-#   mlff_converged            <- relax()
+#   is_relaxed                <- relax()
 # A check that did not run records None (blank in the CSV, skipped by logging),
 # which keeps reported rates conditional on the check having run.
-_CHECK_KEYS = ("is_built", "is_valid", "is_valid_base", "is_unique", "mlff_converged")
+_CHECK_KEYS = ("is_built", "is_valid", "is_valid_base", "is_unique", "is_relaxed")
 
 # is_valid_base is a looser diagnostic variant of is_valid and is deliberately
 # excluded from the aggregate.
-_AGGREGATE_KEYS = ("is_built", "is_valid", "is_unique", "mlff_converged")
+_AGGREGATE_KEYS = ("is_built", "is_valid", "is_unique", "is_relaxed")
 
 # The individual sanitisation criteria behind is_valid / is_valid_base. These are
 # recorded per structure in the CSV row only — sanitize() returns them and never
@@ -251,9 +251,9 @@ class CatalystForge:
         }
 
     def relax(self, atoms: Atoms | None) -> Atoms | None:
-        """Relax with the MLFF and record mlff_converged on atoms.info.
+        """Relax with the MLFF and record is_relaxed on atoms.info.
 
-        mlff_converged covers the whole MLFF stage: the optimizer converged, the
+        is_relaxed covers the whole MLFF stage: the optimizer converged, the
         energy could be extracted, and it is within energy_cutoff. Sole writer of
         that flag; it never touches is_valid.
         """
@@ -266,22 +266,22 @@ class CatalystForge:
         )
 
         if not converged or atoms_rlxd is None:
-            atoms.info["mlff_converged"] = False
+            atoms.info["is_relaxed"] = False
             return None
 
         try:
             computed_E = atoms_rlxd.get_potential_energy()
         except Exception as e:
             logging.warning(f"Energy extraction failed for {atoms.info.get('fname')}: {e}")
-            atoms.info["mlff_converged"] = False
+            atoms.info["is_relaxed"] = False
             return None
 
         if computed_E > self.energy_cutoff:
-            atoms.info["mlff_converged"] = False # binding energy above cutoff, discard sample
+            atoms.info["is_relaxed"] = False # binding energy above cutoff, discard sample
             return None
 
-        atoms.info["mlff_converged"] = True
-        atoms_rlxd.info["mlff_converged"] = True
+        atoms.info["is_relaxed"] = True
+        atoms_rlxd.info["is_relaxed"] = True
         atoms_rlxd.info["computed_binding_E"] = computed_E
         target_E = atoms.info.get("target_binding_E")
         if target_E is not None:
@@ -369,7 +369,7 @@ class CatalystForge:
             # Relax only what has passed every check so far.
             if self.relax_otf and _passed_all_checks(checks):
                 atoms_rlxd = self.relax(atoms=atoms)
-                checks["mlff_converged"] = atoms.info.get("mlff_converged")
+                checks["is_relaxed"] = atoms.info.get("is_relaxed")
             elif self.sanitize_otf and _passed_all_checks(checks):
                 ase.io.write(os.path.join(self.sanitized_strucs, fname), atoms)
 
